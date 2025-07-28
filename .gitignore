@@ -1,0 +1,29 @@
+# Dart
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+.DS_Store
+
+# Dart package files
+.pub/
+.pub-cache/
+
+# Test coverage
+coverage/
+.test_coverage.dart
+*.lcov
+
+# Documentation
+doc/api/
+
+# Temporary files
+*.swp
+*~ 
+
