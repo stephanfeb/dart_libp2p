@@ -134,18 +134,18 @@ Dart Libp2p uses the Noise protocol for securing connections:
 
 For detailed documentation, visit the [docs](./doc/) directory:
 
-- **[Getting Started](./docs/getting-started.md)**: Step-by-step setup guide
-- **[Architecture](./docs/architecture.md)**: Detailed architecture overview
-- **[Configuration](./docs/configuration.md)**: Configuration options
-- **[Host](./docs/host.md)**: Host component documentation
-- **[Transports](./docs/transports.md)**: Transport layer details
-- **[Security](./docs/security.md)**: Security protocol information
-- **[Multiplexing](./docs/multiplexing.md)**: Stream multiplexing
-- **[Protocols](./docs/protocols.md)**: Built-in protocol documentation
-- **[Peerstore](./docs/peerstore.md)**: Peer information management
-- **[Event Bus](./docs/event-bus.md)**: Event system documentation
-- **[Resource Manager](./docs/resource-manager.md)**: Resource protection
-- **[Cookbook](./docs/cookbook.md)**: Practical examples and recipes
+- **[Getting Started](./doc/getting-started.md)**: Step-by-step setup guide
+- **[Architecture](./doc/architecture.md)**: Detailed architecture overview
+- **[Configuration](./doc/configuration.md)**: Configuration options
+- **[Host](./doc/host.md)**: Host component documentation
+- **[Transports](./doc/transports.md)**: Transport layer details
+- **[Security](./doc/security.md)**: Security protocol information
+- **[Multiplexing](./doc/multiplexing.md)**: Stream multiplexing
+- **[Protocols](./doc/protocols.md)**: Built-in protocol documentation
+- **[Peerstore](./doc/peerstore.md)**: Peer information management
+- **[Event Bus](./doc/event-bus.md)**: Event system documentation
+- **[Resource Manager](./doc/resource-manager.md)**: Resource protection
+- **[Cookbook](./doc/cookbook.md)**: Practical examples and recipes
 
 ## 🧪 Examples
 
