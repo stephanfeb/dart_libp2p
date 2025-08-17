@@ -39,6 +39,17 @@ class MdnsDiscovery implements Discovery {
   final String _peerName;
   MdnsNotifee? _notifee;
 
+  // Optional test hooks
+  final MDnsClient? _injectedClient;
+  final MdnsServiceRegistry Function({
+    required MDnsClient client,
+    required String serviceName,
+    required String domain,
+    required String name,
+    required int port,
+    required List<String> txtRecords,
+  })? _registryFactory;
+
   /// Sets the notifee
   set notifee(MdnsNotifee? value) {
     _notifee = value;
@@ -53,16 +64,27 @@ class MdnsDiscovery implements Discovery {
   MdnsDiscovery(this._host, {
     String? serviceName,
     MdnsNotifee? notifee,
+    MDnsClient? client,
+    MdnsServiceRegistry Function({
+      required MDnsClient client,
+      required String serviceName,
+      required String domain,
+      required String name,
+      required int port,
+      required List<String> txtRecords,
+    })? registryFactory,
   }) : 
     _serviceName = serviceName ?? MdnsConstants.serviceName,
     _peerName = _generateRandomString(32 + Random().nextInt(32)),
-    _notifee = notifee;
+    _notifee = notifee,
+    _injectedClient = client,
+    _registryFactory = registryFactory;
 
   /// Starts the mDNS discovery service
   Future<void> start() async {
     if (_isRunning) return;
 
-    _client = MDnsClient();
+    _client = _injectedClient ?? MDnsClient();
     await _client!.start();
 
     // Start advertising
@@ -136,26 +158,40 @@ class MdnsDiscovery implements Discovery {
   }
 
   void _startAdvertising() {
-    if (_client == null) return;
+    final client = _client;
+    if (client == null) return;
 
     final addresses = _host.addrs;
     final txtRecords = <String>[];
 
     for (final addr in addresses) {
-      txtRecords.add('${MdnsConstants.dnsaddrPrefix}${addr.toString()}');
+      final txtRecord = '${MdnsConstants.dnsaddrPrefix}${addr.toString()}';
+      txtRecords.add(txtRecord);
     }
 
     // Create and register the service
-    _registry = MdnsServiceRegistry(
-      client: _client!,
-      serviceName: _serviceName,
-      domain: MdnsConstants.mdnsDomain,
-      name: _peerName,
-      port: MdnsConstants.defaultPort,
-      txtRecords: txtRecords,
-    );
+    _registry = _registryFactory != null
+        ? _registryFactory(
+            client: client,
+            serviceName: _serviceName,
+            domain: MdnsConstants.mdnsDomain,
+            name: _peerName,
+            port: MdnsConstants.defaultPort,
+            txtRecords: txtRecords,
+          )
+        : MdnsServiceRegistry(
+            client: client,
+            serviceName: _serviceName,
+            domain: MdnsConstants.mdnsDomain,
+            name: _peerName,
+            port: MdnsConstants.defaultPort,
+            txtRecords: txtRecords,
+          );
 
-    _registry!.register();
+    final registry = _registry;
+    if (registry != null) {
+      registry.register();
+    }
   }
 
   // Start discovery of other peers
@@ -166,10 +202,10 @@ class MdnsDiscovery implements Discovery {
     _subscription = _client!.lookup<PtrResourceRecord>(
       ResourceRecordQuery.serverPointer('$_serviceName.${MdnsConstants.mdnsDomain}'),
     ).listen((event) {
-      // When a PTR record is found, query for the corresponding SRV and TXT records
+      // When a PTR record is found, query for the corresponding TXT records
       final String domainName = event.domainName;
 
-      // Query for TXT records
+      // Query for TXT records which contain the peer addresses
       _client!.lookup<TxtResourceRecord>(
         ResourceRecordQuery.text(domainName),
       ).listen(_processTxtRecord);
@@ -181,6 +217,12 @@ class MdnsDiscovery implements Discovery {
     });
   }
 
+  /// Test helper: inject a discovered peer into the notifee/stream pipeline.
+  /// Intended for tests only.
+  void debugInjectPeer(AddrInfo peer) {
+    _notifee?.handlePeerFound(peer);
+  }
+
   // Process a TXT record to extract peer information
   void _processTxtRecord(TxtResourceRecord record) {
     // Extract peer information from TXT records
@@ -189,9 +231,11 @@ class MdnsDiscovery implements Discovery {
 
     // Get the text as a string
     final String txtString = record.text.toString();
+    print('[mDNS Debug] _processTxtRecord - TXT string: "$txtString"');
 
     // Check if the text contains our prefix
     if (txtString.contains(MdnsConstants.dnsaddrPrefix)) {
+      print('[mDNS Debug] _processTxtRecord - Found dnsaddr prefix in TXT record');
       // Find the start of the prefix
       final int startIndex = txtString.indexOf(MdnsConstants.dnsaddrPrefix);
       // Extract everything after the prefix
@@ -207,18 +251,25 @@ class MdnsDiscovery implements Discovery {
 
         // Try to extract peer ID from multiaddr
         final peerIdStr = addr.valueForProtocol('p2p');
+        print('[mDNS Debug] _processTxtRecord - Extracted peer ID: $peerIdStr from addr: $addr');
         if (peerIdStr != null) {
           peerId = PeerId.fromString(peerIdStr);
+          print('[mDNS Debug] _processTxtRecord - Successfully parsed peer ID: $peerId');
         }
       } catch (e) {
-        // Ignore invalid multiaddrs
+        print('[mDNS Debug] _processTxtRecord - Error parsing multiaddr "$addrStr": $e');
       }
+    } else {
+      print('[mDNS Debug] _processTxtRecord - No dnsaddr prefix found in TXT record');
     }
 
     // If we found addresses and a peer ID, notify the notifee
     if (addresses.isNotEmpty && peerId != null) {
       final addrInfo = AddrInfo(peerId, addresses);
+      print('[mDNS Debug] _processTxtRecord - Notifying about discovered peer: $peerId with addresses: $addresses');
       _notifee?.handlePeerFound(addrInfo);
+    } else {
+      print('[mDNS Debug] _processTxtRecord - Not notifying - addresses.isEmpty: ${addresses.isEmpty}, peerId == null: ${peerId == null}');
     }
   }
 
