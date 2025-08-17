@@ -22,12 +22,7 @@ class ProtocolScopeImpl extends ResourceScopeImpl implements ProtocolScope {
   // The `protocol` getter is fulfilled by the final field.
 
   ResourceScopeImpl getPeerSubScope(PeerId peerId, Limiter limiter, ResourceScopeImpl systemScope) {
-    // Logging added
-    final parentStat = this.stat;
-    print('DEBUG: ProtocolScopeImpl ($name) getPeerSubScope for $peerId. Parent streams: In=${parentStat.numStreamsInbound}, Out=${parentStat.numStreamsOutbound}.');
-    
     return _peerSubScopes.putIfAbsent(peerId, () {
-      print('DEBUG: ProtocolScopeImpl ($name) creating new peer sub-scope for $peerId.');
       final peerProtocolLimit = limiter.getProtocolPeerLimits(this.protocol, peerId);
       final scopeName = 'protocol:${protocol.toString()}-peer:${peerId.toString()}';
       

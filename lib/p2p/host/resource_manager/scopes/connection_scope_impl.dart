@@ -12,10 +12,7 @@ import 'package:dart_libp2p/p2p/host/resource_manager/scopes/transient_scope_imp
 import 'package:dart_libp2p/p2p/host/resource_manager/scopes/system_scope_impl.dart';   // Added import
 import 'package:dart_libp2p/core/network/errors.dart' as network_errors; // Added import
 
-// A simple logger placeholder
-void _logDebug(String message) {
-  print('DEBUG: ConnectionScopeImpl: $message');
-}
+// Debug logging removed to reduce console noise
 
 class ConnectionScopeImpl extends ResourceScopeImpl implements ConnManagementScope {
   final Direction direction;
@@ -46,7 +43,7 @@ class ConnectionScopeImpl extends ResourceScopeImpl implements ConnManagementSco
       throw Exception('$name: connection scope already attached to a peer: ${_peerScopeImpl!.name}');
     }
 
-    _logDebug('$name: Setting peer to $peerId');
+
 
     // 1. Get PeerScope from the ResourceManager.
     // Note: _rcmgr._getPeerScope is not public, but ConnectionScopeImpl is in the same library.
@@ -57,7 +54,7 @@ class ConnectionScopeImpl extends ResourceScopeImpl implements ConnManagementSco
     // 2. Identify original transient scope and get the global system scope.
     // ConnectionScopeImpl is initially parented only by the transient scope.
     if (edges.isEmpty || edges[0] is! TransientScopeImpl) {
-        _logDebug('$name: Initial Edges: ${edges.map((e) => e.name).join(', ')}');
+
         throw StateError('$name: Expected initial parent to be TransientScopeImpl.');
     }
     final transientScope = edges[0] as TransientScopeImpl;
@@ -103,7 +100,7 @@ class ConnectionScopeImpl extends ResourceScopeImpl implements ConnManagementSco
         // and its parent (system).
         // The ref counts on transient/system scopes are managed by their lifecycle, not per-resource juggling.
 
-        _logDebug('$name: Successfully set peer to $peerId. Resources transferred from transient to peer scope.');
+
       }
     } on network_errors.ResourceLimitExceededException catch (e) {
       reservationError = e;
@@ -115,7 +112,7 @@ class ConnectionScopeImpl extends ResourceScopeImpl implements ConnManagementSco
       // The Go version might close the connection here or mark it as unmanaged.
       // For now, we'll throw, indicating failure to associate with peer.
       // The caller (likely network layer) would then decide to close the connection.
-      _logDebug('$name: Failed to reserve resources in peer scope for $peerId: $reservationError. Connection may need to be closed.');
+
       throw reservationError;
     }
   }
