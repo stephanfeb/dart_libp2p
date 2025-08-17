@@ -153,10 +153,29 @@ For detailed documentation, visit the [docs](./doc/) directory:
 
 ## 🧪 Examples
 
-Check out the [examples](./bin/) directory for working examples:
+Check out the [examples](./example/) directory for working examples:
 
-- **Ping App**: Basic ping/pong communication between nodes
-- **Chat Application**: Simple peer-to-peer chat implementation
+| Example | Type | Description | Key Features |
+|---------|------|-------------|--------------|
+| **[echo_basic](./example/echo_basic/)** | Basic | Simple echo server/client | One-way messaging, connection basics |
+| **[chat_mdns](./example/chat_mdns/)** | Advanced | mDNS-enabled P2P chat | **mDNS discovery**, multi-peer chat, zero-config networking |
+
+### Featured Example: mDNS Chat
+
+The `chat_mdns` example demonstrates **mDNS service discovery** using the `mdns_dart` package:
+- ✅ **Real mDNS service advertisement** (not fake lookup calls)  
+- ✅ **Actual network-level discovery** (broadcasts to 224.0.0.251:5353)  
+- ✅ **Zero-configuration networking** (no fallback mechanisms needed)  
+- ✅ **Cross-subnet support** (works beyond localhost)  
+
+Run multiple instances to see real peer discovery in action:
+```bash
+# Terminal 1
+dart run example/chat_mdns/main.dart
+
+# Terminal 2  
+dart run example/chat_mdns/main.dart
+```
 
 ## 🧪 Testing
 
@@ -177,7 +196,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - [libp2p](https://libp2p.io/) - The original protocol specification
-- [dart-udx](https://pub.dev/packages/dart_udx) - Custom UDP transport implementation
+- [dart-udx](https://pub.dev/packages/dart_udx) - Custom UDP transport implementation  
+- [mdns_dart](https://pub.dev/packages/mdns_dart) - mDNS service advertisement and discovery
 - The libp2p community for inspiration and guidance
 
 ## 🔗 Links

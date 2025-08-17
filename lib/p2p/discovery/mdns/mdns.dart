@@ -1,15 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
-import 'package:multicast_dns/multicast_dns.dart';
+import 'package:mdns_dart/mdns_dart.dart';
 
 import '../../../core/discovery.dart';
 import '../../../core/peer/addr_info.dart';
 import '../../../core/host/host.dart';
 import '../../../core/multiaddr.dart';
-
 import '../../../core/peer/peer_id.dart';
-import 'service_registry.dart';
 
 /// Constants for mDNS service
 class MdnsConstants {
@@ -22,7 +21,7 @@ class MdnsConstants {
   /// Prefix for DNS address records
   static const String dnsaddrPrefix = 'dnsaddr=';
 
-  /// Default port for mDNS (not actually used, but required by some implementations)
+  /// Default port for mDNS
   static const int defaultPort = 4001;
 }
 
@@ -32,66 +31,48 @@ abstract class MdnsNotifee {
   void handlePeerFound(AddrInfo peer);
 }
 
-/// Implementation of mDNS discovery for libp2p
+/// Implementation of mDNS discovery for libp2p using mdns_dart
 class MdnsDiscovery implements Discovery {
   final Host _host;
   final String _serviceName;
   final String _peerName;
   MdnsNotifee? _notifee;
 
-  // Optional test hooks
-  final MDnsClient? _injectedClient;
-  final MdnsServiceRegistry Function({
-    required MDnsClient client,
-    required String serviceName,
-    required String domain,
-    required String name,
-    required int port,
-    required List<String> txtRecords,
-  })? _registryFactory;
+  // mDNS server for advertising our service
+  MDNSServer? _server;
+  MDNSService? _service;
+
+  // Discovery state
+  StreamSubscription<ServiceEntry>? _discoverySubscription;
+  Timer? _discoveryTimer;
+  bool _isRunning = false;
+  
+  // Track discovered services to avoid duplicates
+  final Set<String> _discoveredServices = <String>{};
 
   /// Sets the notifee
   set notifee(MdnsNotifee? value) {
     _notifee = value;
   }
 
-  MDnsClient? _client;
-  MdnsServiceRegistry? _registry;
-  StreamSubscription? _subscription;
-  bool _isRunning = false;
-
   /// Creates a new MdnsDiscovery service
   MdnsDiscovery(this._host, {
     String? serviceName,
     MdnsNotifee? notifee,
-    MDnsClient? client,
-    MdnsServiceRegistry Function({
-      required MDnsClient client,
-      required String serviceName,
-      required String domain,
-      required String name,
-      required int port,
-      required List<String> txtRecords,
-    })? registryFactory,
   }) : 
     _serviceName = serviceName ?? MdnsConstants.serviceName,
     _peerName = _generateRandomString(32 + Random().nextInt(32)),
-    _notifee = notifee,
-    _injectedClient = client,
-    _registryFactory = registryFactory;
+    _notifee = notifee;
 
   /// Starts the mDNS discovery service
   Future<void> start() async {
     if (_isRunning) return;
 
-    _client = _injectedClient ?? MDnsClient();
-    await _client!.start();
+    // Start advertising our service
+    await _startAdvertising();
 
-    // Start advertising
-    _startAdvertising();
-
-    // Start discovery
-    _startDiscovery();
+    // Start discovering other peers
+    await _startDiscovery();
 
     _isRunning = true;
   }
@@ -100,17 +81,25 @@ class MdnsDiscovery implements Discovery {
   Future<void> stop() async {
     if (!_isRunning) return;
 
-    _subscription?.cancel();
-    _subscription = null;
 
-    _registry?.dispose();
-    _registry = null;
+    // Stop discovery
+    _discoverySubscription?.cancel();
+    _discoverySubscription = null;
+    
+    // Stop periodic discovery timer
+    _discoveryTimer?.cancel();
+    _discoveryTimer = null;
 
-    if (_client != null) {
-      _client!.stop();
-      _client = null;
+    // Clear discovered services cache
+    _discoveredServices.clear();
+
+    // Stop advertising
+    if (_server != null) {
+      await _server!.stop();
+      _server = null;
     }
 
+    _service = null;
     _isRunning = false;
   }
 
@@ -146,8 +135,6 @@ class MdnsDiscovery implements Discovery {
 
     // Set up a subscription to handle cleanup when the stream is closed
     controller.onCancel = () {
-      // If the stream is closed, we don't need to forward discovered peers to it anymore
-      // But we still want to notify the original notifee
       notifee = originalNotifee;
     };
 
@@ -157,122 +144,192 @@ class MdnsDiscovery implements Discovery {
     return controller.stream;
   }
 
-  void _startAdvertising() {
-    final client = _client;
-    if (client == null) return;
-
+  /// Start advertising our service using REAL mDNS service announcement
+  Future<void> _startAdvertising() async {
     final addresses = _host.addrs;
-    final txtRecords = <String>[];
-
-    for (final addr in addresses) {
-      final txtRecord = '${MdnsConstants.dnsaddrPrefix}${addr.toString()}';
-      txtRecords.add(txtRecord);
+    if (addresses.isEmpty) {
+      return;
     }
 
-    // Create and register the service
-    _registry = _registryFactory != null
-        ? _registryFactory(
-            client: client,
-            serviceName: _serviceName,
-            domain: MdnsConstants.mdnsDomain,
-            name: _peerName,
-            port: MdnsConstants.defaultPort,
-            txtRecords: txtRecords,
-          )
-        : MdnsServiceRegistry(
-            client: client,
-            serviceName: _serviceName,
-            domain: MdnsConstants.mdnsDomain,
-            name: _peerName,
-            port: MdnsConstants.defaultPort,
-            txtRecords: txtRecords,
-          );
+    try {
+      // Create TXT records with our peer addresses (including peer ID)
+      final txtRecords = <String>[];
+      for (final addr in addresses) {
+        // Append peer ID to create complete multiaddr
+        final fullAddr = '${addr.toString()}/p2p/${_host.id.toString()}';
+        final txtRecord = '${MdnsConstants.dnsaddrPrefix}$fullAddr';
+        txtRecords.add(txtRecord);
+      }
 
-    final registry = _registry;
-    if (registry != null) {
-      registry.register();
+      // Get our IP addresses for the service
+      final localIPs = await _getLocalIPAddresses();
+
+      // Create the mDNS service
+      _service = await MDNSService.create(
+        instance: _peerName,
+        service: _serviceName,
+        domain: MdnsConstants.mdnsDomain,
+        port: MdnsConstants.defaultPort,
+        ips: localIPs,
+        txt: txtRecords,
+      );
+
+      // Create and start the mDNS server
+      final config = MDNSServerConfig(
+        zone: _service!,
+      );
+
+      _server = MDNSServer(config);
+      await _server!.start();
+
+    } catch (e) {
+      print('Failed to start mDNS service advertisement: $e');
     }
   }
 
-  // Start discovery of other peers
-  void _startDiscovery() {
-    if (_client == null) return;
+  /// Start discovering other peers using REAL mDNS discovery
+  Future<void> _startDiscovery() async {
 
-    // Listen for PTR records for our service
-    _subscription = _client!.lookup<PtrResourceRecord>(
-      ResourceRecordQuery.serverPointer('$_serviceName.${MdnsConstants.mdnsDomain}'),
-    ).listen((event) {
-      // When a PTR record is found, query for the corresponding TXT records
-      final String domainName = event.domainName;
+    try {
+      final serviceName = '$_serviceName.${MdnsConstants.mdnsDomain}';
 
-      // Query for TXT records which contain the peer addresses
-      _client!.lookup<TxtResourceRecord>(
-        ResourceRecordQuery.text(domainName),
-      ).listen(_processTxtRecord);
+      // Wait a moment for the network to settle and other services to be advertised
+      await Future.delayed(const Duration(milliseconds: 1500));
+      
+      // Start immediate discovery
+      await _performDiscoveryQuery(serviceName);
+      
+      // Set up frequent discovery queries (every 5 seconds)
+      // This compensates for MDNSClient.lookup() being a one-shot query
+      _discoveryTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+        await _performDiscoveryQuery(serviceName);
+      });
 
-      // Query for SRV records (for completeness, though we don't use them directly)
-      _client!.lookup<SrvResourceRecord>(
-        ResourceRecordQuery.service(domainName),
+    } catch (e) {
+      print('Failed to start mDNS discovery: $e');
+    }
+  }
+
+  /// Perform a single mDNS discovery query
+  Future<void> _performDiscoveryQuery(String serviceName) async {
+    try {
+      // Use MDNSClient.query() with longer timeout instead of lookup() which has 1s timeout
+      // Extract just the service part (remove .local if present)  
+      final serviceOnly = serviceName.replaceAll('.local', '');
+      final params = QueryParams(
+        service: serviceOnly,  // Pass "_p2p._udp" not "_p2p._udp.local"
+        domain: 'local',
+        timeout: const Duration(seconds: 10), // Extended timeout for better discovery
+        wantUnicastResponse: false,
+        reusePort: true,
+        reuseAddress: true,
+        multicastHops: 1,
       );
-    });
+      
+      final stream = await MDNSClient.query(params);
+      
+      var serviceCount = 0;
+      
+      await for (final serviceEntry in stream) {
+        serviceCount++;
+        _processDiscoveredService(serviceEntry);
+      }
+      
+    } catch (e) {
+      print('mDNS discovery query error: $e');
+    }
+  }
+
+  /// Process a discovered mDNS service entry
+  void _processDiscoveredService(ServiceEntry serviceEntry) {
+    try {
+      // Create a unique key for this service
+      final serviceKey = '${serviceEntry.name}@${serviceEntry.host}:${serviceEntry.port}';
+      
+      // Check if we've already processed this service
+      if (_discoveredServices.contains(serviceKey)) {
+        return;
+      }
+      
+      // Mark as discovered
+      _discoveredServices.add(serviceKey);
+      
+      // Extract peer information from TXT records
+      final addresses = <MultiAddr>[];
+      PeerId? peerId;
+
+      for (final txtRecord in serviceEntry.infoFields) {
+        if (txtRecord.startsWith(MdnsConstants.dnsaddrPrefix)) {
+          final addrStr = txtRecord.substring(MdnsConstants.dnsaddrPrefix.length);
+          
+          try {
+            final addr = MultiAddr(addrStr);
+            addresses.add(addr);
+
+            // Extract peer ID from multiaddr if we haven't found one yet
+            if (peerId == null) {
+              final peerIdStr = addr.valueForProtocol('p2p');
+              if (peerIdStr != null) {
+                peerId = PeerId.fromString(peerIdStr);
+              }
+            }
+          } catch (e) {
+            print('Failed to parse multiaddr "$addrStr": $e');
+          }
+        }
+      }
+
+      // Don't discover ourselves
+      if (peerId != null && peerId == _host.id) {
+        print('Ignoring self-discovery');
+        return;
+      }
+
+      // If we found addresses and a peer ID, notify the notifee
+      if (addresses.isNotEmpty && peerId != null) {
+        final addrInfo = AddrInfo(peerId, addresses);
+        _notifee?.handlePeerFound(addrInfo);
+      }
+    } catch (e) {
+      print('Error processing discovered service: $e');
+    }
+  }
+
+  /// Get local IP addresses for service announcement
+  Future<List<InternetAddress>> _getLocalIPAddresses() async {
+    final interfaces = await NetworkInterface.list();
+    final addresses = <InternetAddress>[];
+
+    for (final interface in interfaces) {
+      for (final addr in interface.addresses) {
+        // Skip loopback and link-local addresses
+        if (!addr.isLoopback && !addr.isLinkLocal) {
+          addresses.add(addr);
+        }
+      }
+    }
+
+    if (addresses.isEmpty) {
+      // Fallback to any available address
+      for (final interface in interfaces) {
+        addresses.addAll(interface.addresses);
+        break;
+      }
+    }
+
+    return addresses;
   }
 
   /// Test helper: inject a discovered peer into the notifee/stream pipeline.
-  /// Intended for tests only.
   void debugInjectPeer(AddrInfo peer) {
     _notifee?.handlePeerFound(peer);
   }
 
-  // Process a TXT record to extract peer information
-  void _processTxtRecord(TxtResourceRecord record) {
-    // Extract peer information from TXT records
-    final addresses = <MultiAddr>[];
-    PeerId? peerId;
-
-    // Get the text as a string
-    final String txtString = record.text.toString();
-    print('[mDNS Debug] _processTxtRecord - TXT string: "$txtString"');
-
-    // Check if the text contains our prefix
-    if (txtString.contains(MdnsConstants.dnsaddrPrefix)) {
-      print('[mDNS Debug] _processTxtRecord - Found dnsaddr prefix in TXT record');
-      // Find the start of the prefix
-      final int startIndex = txtString.indexOf(MdnsConstants.dnsaddrPrefix);
-      // Extract everything after the prefix
-      final String remaining = txtString.substring(startIndex + MdnsConstants.dnsaddrPrefix.length);
-      // Find the end of the address (if there are multiple entries)
-      final int endIndex = remaining.contains(' ') ? remaining.indexOf(' ') : remaining.length;
-      // Extract the address
-      final String addrStr = remaining.substring(0, endIndex);
-
-      try {
-        final addr = MultiAddr(addrStr);
-        addresses.add(addr);
-
-        // Try to extract peer ID from multiaddr
-        final peerIdStr = addr.valueForProtocol('p2p');
-        print('[mDNS Debug] _processTxtRecord - Extracted peer ID: $peerIdStr from addr: $addr');
-        if (peerIdStr != null) {
-          peerId = PeerId.fromString(peerIdStr);
-          print('[mDNS Debug] _processTxtRecord - Successfully parsed peer ID: $peerId');
-        }
-      } catch (e) {
-        print('[mDNS Debug] _processTxtRecord - Error parsing multiaddr "$addrStr": $e');
-      }
-    } else {
-      print('[mDNS Debug] _processTxtRecord - No dnsaddr prefix found in TXT record');
-    }
-
-    // If we found addresses and a peer ID, notify the notifee
-    if (addresses.isNotEmpty && peerId != null) {
-      final addrInfo = AddrInfo(peerId, addresses);
-      print('[mDNS Debug] _processTxtRecord - Notifying about discovered peer: $peerId with addresses: $addresses');
-      _notifee?.handlePeerFound(addrInfo);
-    } else {
-      print('[mDNS Debug] _processTxtRecord - Not notifying - addresses.isEmpty: ${addresses.isEmpty}, peerId == null: ${peerId == null}');
-    }
+  /// Truncate peer ID for display
+  String _truncatePeerId(PeerId peerId) {
+    final str = peerId.toString();
+    return str.length > 8 ? str.substring(str.length - 8) : str;
   }
-
 
   /// Generates a random string of the specified length
   static String _generateRandomString(int length) {

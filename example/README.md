@@ -23,14 +23,16 @@ A simple echo example that demonstrates one-way messaging between a client and s
 **Difficulty:** Intermediate  
 **Concepts:** mDNS discovery, multi-peer networking, interactive applications
 
-An advanced chat application that uses mDNS (Multicast DNS) to automatically discover peers on the local network. Supports chatting with multiple discovered peers.
+An advanced chat application that uses mDNS (Multicast DNS) to automatically discover peers on the local network. Supports chatting with multiple discovered peers. Includes a localhost fallback for development/testing.
 
 **Key Features:**
 - Automatic peer discovery via mDNS
+- **Localhost fallback discovery** (UDP broadcast when mDNS fails)
 - Multi-peer support
 - Interactive command-line interface  
 - Real-world networking scenarios
 - Robust connection management
+- Extensive debugging output
 
 **Best for:** Understanding peer discovery, building production-ready P2P apps
 

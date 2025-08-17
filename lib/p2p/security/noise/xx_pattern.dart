@@ -339,11 +339,6 @@ class NoiseXXPattern {
     
     // Derive final keys
     final (sendKey, recvKey) = await _deriveKeys(state.chainKey);
-
-    // ADDED LOGGING
-    print('NoiseXXPattern._processFinalMessage: Derived final keys. IsInitiator: $_isInitiator');
-    print('  - sendKey.hashCode: ${sendKey.hashCode}, sendKey.bytes: ${await sendKey.extractBytes()}');
-    print('  - recvKey.hashCode: ${recvKey.hashCode}, recvKey.bytes: ${await recvKey.extractBytes()}');
     
     return state.copyWith(
       sendKey: sendKey,
@@ -484,11 +479,6 @@ class NoiseXXPattern {
     
     // Derive final keys
     final (sendKey, recvKey) = await _deriveKeys(state.chainKey);
-
-    // ADDED LOGGING
-    print('NoiseXXPattern._writeFinalMessage: Derived final keys. IsInitiator: $_isInitiator');
-    print('  - sendKey.hashCode: ${sendKey.hashCode}, sendKey.bytes: ${await sendKey.extractBytes()}');
-    print('  - recvKey.hashCode: ${recvKey.hashCode}, recvKey.bytes: ${await recvKey.extractBytes()}');
     
     return (
       Uint8List.fromList(messageBytes),

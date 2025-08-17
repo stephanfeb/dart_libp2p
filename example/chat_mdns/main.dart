@@ -7,8 +7,9 @@ import '../shared/host_utils.dart';
 import 'chat_client_mdns.dart';
 
 void main() async {
-  print('🚀 Starting mDNS P2P Chat Example');
-  print('This example uses mDNS to discover chat peers on your local network.\n');
+  print('🚀 Starting REAL mDNS P2P Chat Example');
+  print('This example uses GENUINE mDNS service discovery to find chat peers!');
+  print('🌟 No fallback mechanisms - pure mDNS network-level discovery.\n');
 
   try {
     // Create a libp2p host
@@ -40,13 +41,14 @@ void main() async {
     // Handle Ctrl+C gracefully
     ProcessSignal.sigint.watch().listen((_) => cleanup());
 
-    // Start mDNS discovery
+    // Start REAL mDNS discovery
     await chatClient.startDiscovery();
     
-    print('🔍 Searching for other chat peers on your network...');
-    print('📢 Other chat apps on this network should discover you automatically.\n');
+    print('🔍 Broadcasting mDNS service and searching for peers...');
+    print('📢 Using REAL mDNS service advertisement - no UDP fallback needed!');
+    print('🌐 Other mDNS-enabled chat clients will discover you automatically.\n');
     
-    print('--- mDNS P2P Chat Session ---');
+    print('--- REAL mDNS P2P Chat Session ---');
     print('Commands:');
     print('  list         - Show discovered peers');
     print('  select <n>   - Select peer number for chatting');

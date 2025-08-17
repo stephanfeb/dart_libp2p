@@ -21,7 +21,9 @@ dependencies:
   bs58: ^1.0.2
   dart_multihash: ^1.0.1
   base32: ^2.1.3
-  multicast_dns: ^0.3.2
+  mdns_dart:
+    path: /Users/stephanfeb/IdeaProjects/agentic/mdns_dart
+
   base_x: ^2.0.0
 
   dart_udx: ^0.3.0
