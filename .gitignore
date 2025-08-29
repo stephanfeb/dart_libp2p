@@ -27,3 +27,4 @@ doc/api/
 *.swp
 *~ 
 
+*.code-workspace
