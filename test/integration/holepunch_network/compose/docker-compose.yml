@@ -1,0 +1,159 @@
+version: '3.8'
+
+# Network topology for holepunch testing:
+# - public_net: Simulates the "internet" - relay and STUN servers
+# - nat_a_net: Private network behind NAT-A gateway
+# - nat_b_net: Private network behind NAT-B gateway
+
+networks:
+  public_net:
+    driver: bridge
+    name: holepunch_public
+    ipam:
+      config:
+        - subnet: 10.10.0.0/16
+          gateway: 10.10.0.1
+
+  nat_a_net:
+    driver: bridge  
+    name: holepunch_nat_a
+    internal: true
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+
+  nat_b_net:
+    driver: bridge
+    name: holepunch_nat_b
+    internal: true
+    ipam:
+      config:
+        - subnet: 192.168.2.0/24
+          gateway: 192.168.2.1
+
+services:
+  # NAT Gateway A - Simulates different NAT behaviors
+  nat-gateway-a:
+    build:
+      context: ../containers/nat-gateway
+      args:
+        NAT_TYPE: ${NAT_A_TYPE:-cone}
+    container_name: nat-gateway-a
+    networks:
+      public_net:
+        ipv4_address: 10.10.1.10
+      nat_a_net:
+        ipv4_address: 192.168.1.1
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+    environment:
+      - NAT_TYPE=${NAT_A_TYPE:-cone}
+      - INTERNAL_SUBNET=192.168.1.0/24
+      - EXTERNAL_INTERFACE=eth0
+      - INTERNAL_INTERFACE=eth1
+
+  # NAT Gateway B - Independent NAT configuration
+  nat-gateway-b:
+    build:
+      context: ../containers/nat-gateway
+      args:
+        NAT_TYPE: ${NAT_B_TYPE:-cone}
+    container_name: nat-gateway-b
+    networks:
+      public_net:
+        ipv4_address: 10.10.1.20
+      nat_b_net:
+        ipv4_address: 192.168.2.1
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+    environment:
+      - NAT_TYPE=${NAT_B_TYPE:-cone}
+      - INTERNAL_SUBNET=192.168.2.0/24
+      - EXTERNAL_INTERFACE=eth0
+      - INTERNAL_INTERFACE=eth1
+
+  # STUN Server for external address discovery
+  stun-server:
+    image: coturn/coturn:latest
+    container_name: stun-server
+    networks:
+      public_net:
+        ipv4_address: 10.10.2.10
+    ports:
+      - "3478:3478/udp"
+    command: |
+      turnserver
+      --listening-port=3478
+      --fingerprint
+      --lt-cred-mech
+      --realm=holepunch.test
+      --stun-only
+
+  # Circuit Relay Server (Public)
+  relay-server:
+    build:
+      context: ../containers/dart-peer
+      dockerfile: Dockerfile
+    container_name: relay-server
+    networks:
+      public_net:
+        ipv4_address: 10.10.3.10
+    environment:
+      - PEER_ROLE=relay
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - ENABLE_RELAY=true
+      - ENABLE_HOLEPUNCH=true
+      - STUN_SERVERS=10.10.2.10:3478
+    volumes:
+      - ../containers/dart-peer/config:/app/config
+
+  # Peer A (Behind NAT-A)
+  peer-a:
+    build:
+      context: ../containers/dart-peer
+      dockerfile: Dockerfile
+    container_name: peer-a
+    networks:
+      nat_a_net:
+        ipv4_address: 192.168.1.100
+    environment:
+      - PEER_ROLE=peer
+      - PEER_NAME=peer-a
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - ENABLE_HOLEPUNCH=true
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit
+      - STUN_SERVERS=10.10.2.10:3478
+      - NAT_GATEWAY=192.168.1.1
+    depends_on:
+      - nat-gateway-a
+      - relay-server
+      - stun-server
+    volumes:
+      - ../containers/dart-peer/config:/app/config
+
+  # Peer B (Behind NAT-B)
+  peer-b:
+    build:
+      context: ../containers/dart-peer
+      dockerfile: Dockerfile
+    container_name: peer-b
+    networks:
+      nat_b_net:
+        ipv4_address: 192.168.2.100
+    environment:
+      - PEER_ROLE=peer
+      - PEER_NAME=peer-b
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - ENABLE_HOLEPUNCH=true
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit
+      - STUN_SERVERS=10.10.2.10:3478
+      - NAT_GATEWAY=192.168.2.1
+    depends_on:
+      - nat-gateway-b
+      - relay-server
+      - stun-server
+    volumes:
+      - ../containers/dart-peer/config:/app/config
