@@ -938,6 +938,117 @@ class MockPeerstore extends _i1.Mock implements _i3.Peerstore {
           as _i14.Future<_i21.PeerInfo?>);
 }
 
+/// A class which mocks [AddrBook].
+///
+/// See the documentation for Mockito's code generation for more information.
+class MockAddrBook extends _i1.Mock implements _i3.AddrBook {
+  MockAddrBook() {
+    _i1.throwOnMissingStub(this);
+  }
+
+  @override
+  _i14.Future<void> addAddr(
+    _i2.PeerId? p,
+    _i11.MultiAddr? addr,
+    Duration? ttl,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#addAddr, [p, addr, ttl]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<void> addAddrs(
+    _i2.PeerId? p,
+    List<_i11.MultiAddr>? addrs,
+    Duration? ttl,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#addAddrs, [p, addrs, ttl]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<void> setAddr(
+    _i2.PeerId? p,
+    _i11.MultiAddr? addr,
+    Duration? ttl,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#setAddr, [p, addr, ttl]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<void> setAddrs(
+    _i2.PeerId? p,
+    List<_i11.MultiAddr>? addrs,
+    Duration? ttl,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#setAddrs, [p, addrs, ttl]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<void> updateAddrs(
+    _i2.PeerId? p,
+    Duration? oldTTL,
+    Duration? newTTL,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#updateAddrs, [p, oldTTL, newTTL]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<List<_i11.MultiAddr>> addrs(_i2.PeerId? p) =>
+      (super.noSuchMethod(
+            Invocation.method(#addrs, [p]),
+            returnValue: _i14.Future<List<_i11.MultiAddr>>.value(
+              <_i11.MultiAddr>[],
+            ),
+          )
+          as _i14.Future<List<_i11.MultiAddr>>);
+
+  @override
+  _i14.Future<_i14.Stream<_i11.MultiAddr>> addrStream(_i2.PeerId? id) =>
+      (super.noSuchMethod(
+            Invocation.method(#addrStream, [id]),
+            returnValue: _i14.Future<_i14.Stream<_i11.MultiAddr>>.value(
+              _i14.Stream<_i11.MultiAddr>.empty(),
+            ),
+          )
+          as _i14.Future<_i14.Stream<_i11.MultiAddr>>);
+
+  @override
+  _i14.Future<void> clearAddrs(_i2.PeerId? p) =>
+      (super.noSuchMethod(
+            Invocation.method(#clearAddrs, [p]),
+            returnValue: _i14.Future<void>.value(),
+            returnValueForMissingStub: _i14.Future<void>.value(),
+          )
+          as _i14.Future<void>);
+
+  @override
+  _i14.Future<List<_i2.PeerId>> peersWithAddrs() =>
+      (super.noSuchMethod(
+            Invocation.method(#peersWithAddrs, []),
+            returnValue: _i14.Future<List<_i2.PeerId>>.value(<_i2.PeerId>[]),
+          )
+          as _i14.Future<List<_i2.PeerId>>);
+}
+
 /// A class which mocks [StreamManagementScope].
 ///
 /// See the documentation for Mockito's code generation for more information.
