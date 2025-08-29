@@ -33,12 +33,7 @@ List<MultiAddr> removeRelayAddrs(List<MultiAddr> addrs) {
 
 /// Checks if a multiaddr is a relay address
 bool isRelayAddress(MultiAddr addr) {
-  try {
-    addr.valueForProtocol('p2p-circuit');
-    return true;
-  } catch (_) {
-    return false;
-  }
+  return addr.hasProtocol('p2p-circuit');
 }
 
 /// Converts a list of multiaddrs to a list of byte arrays
