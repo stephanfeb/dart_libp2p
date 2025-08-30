@@ -12,9 +12,9 @@ class ContainerOrchestrator {
 
   ContainerOrchestrator({
     required this.composeFile,
-    this.environment = const {},
+    Map<String, String>? environment,
     this.startupTimeout = const Duration(minutes: 2),
-  });
+  }) : environment = environment ?? <String, String>{};
 
   /// Start the container topology
   Future<void> start() async {
@@ -24,11 +24,14 @@ class ContainerOrchestrator {
 
     print('🐳 Starting container topology...');
     
+    // Clean up any leftover containers and networks first
+    await _cleanup();
+    
     // Build images first
     await _runDockerCompose(['build']);
     
-    // Start services
-    await _runDockerCompose(['up', '-d']);
+    // Start services with orphan removal
+    await _runDockerCompose(['up', '-d', '--remove-orphans']);
     
     // Wait for services to be healthy
     await _waitForServices();
@@ -56,6 +59,46 @@ class ContainerOrchestrator {
     
     _isStarted = false;
     print('✅ Container cleanup complete');
+  }
+
+  /// Clean up any leftover containers and networks before starting
+  Future<void> _cleanup() async {
+    print('🧹 Cleaning up leftover containers and networks...');
+    
+    try {
+      // Force stop and remove any containers from this compose project
+      await _runDockerCompose(['down', '-v', '--remove-orphans', '--timeout', '10']);
+      
+      // Clean up specific holepunch networks that might be leftover
+      await _cleanupHolepunchNetworks();
+      
+      print('✅ Cleanup completed');
+    } catch (e) {
+      print('⚠️  Warning: Cleanup encountered issues (may be normal): $e');
+    }
+  }
+
+  /// Clean up specific holepunch-related networks
+  Future<void> _cleanupHolepunchNetworks() async {
+    final networkNames = [
+      'holepunch_nat_a',
+      'holepunch_nat_b', 
+      'holepunch_public',
+      'holepunch_nat_a_net',
+      'holepunch_nat_b_net',
+      'holepunch_public_net',
+    ];
+    
+    for (final networkName in networkNames) {
+      try {
+        final result = await Process.run('docker', ['network', 'rm', networkName]);
+        if (result.exitCode == 0) {
+          print('🗑️  Removed network: $networkName');
+        }
+      } catch (e) {
+        // Ignore errors - network may not exist
+      }
+    }
   }
 
   /// Get the status of all services

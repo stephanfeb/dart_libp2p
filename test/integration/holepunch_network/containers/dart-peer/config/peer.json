@@ -19,8 +19,7 @@
   },
   "discovery": {
     "stun_servers": [
-      "stun.l.google.com:19302",
-      "stun1.l.google.com:19302"
+      "10.10.2.10:3478"
     ],
     "bootstrap_peers": []
   },

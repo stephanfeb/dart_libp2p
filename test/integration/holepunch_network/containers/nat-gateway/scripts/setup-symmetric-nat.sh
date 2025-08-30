@@ -16,15 +16,13 @@ echo "   External Interface: ${EXTERNAL_IF}"
 echo "   Internal Interface: ${INTERNAL_IF}"
 echo "   Internal Subnet: ${INTERNAL_SUBNET}"
 
-# Clear existing rules
-iptables -t nat -F
-iptables -t filter -F
-iptables -t mangle -F
+# Clear only our custom chains to avoid conflicts with Docker
+iptables -t nat -N SYMM_NAT 2>/dev/null || iptables -t nat -F SYMM_NAT
+iptables -t filter -N SYMM_FORWARD 2>/dev/null || iptables -t filter -F SYMM_FORWARD
 
-# Default policies
-iptables -P FORWARD DROP
-iptables -P INPUT ACCEPT
-iptables -P OUTPUT ACCEPT
+# Set up more conservative forwarding policy
+# Don't change default policies to avoid breaking Docker networking
+iptables -P FORWARD ACCEPT  # Keep Docker networking working
 
 # Enable forwarding between interfaces for established connections
 iptables -A FORWARD -i ${INTERNAL_IF} -o ${EXTERNAL_IF} -j ACCEPT

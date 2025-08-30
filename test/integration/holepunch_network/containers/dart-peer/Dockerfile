@@ -1,4 +1,4 @@
-FROM dart:3.2
+FROM dart:3.6
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -11,10 +11,11 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy the entire dart-libp2p project
-COPY . .
+# Copy both dart-libp2p and mdns_dart projects
+COPY dart-libp2p/ ./
+COPY mdns_dart/ ../mdns_dart/
 
-# Install dependencies
+# Install dependencies (now works with relative path to mdns_dart)
 RUN dart pub get
 
 # Compile the integration test peer application
@@ -24,7 +25,7 @@ RUN dart compile exe test/integration/holepunch_network/containers/dart-peer/pee
 RUN mkdir -p /app/config
 
 # Copy peer configuration
-COPY test/integration/holepunch_network/containers/dart-peer/config/ /app/config/
+COPY dart-libp2p/test/integration/holepunch_network/containers/dart-peer/config/ /app/config/
 
 # Expose common libp2p ports
 EXPOSE 4001 4002
@@ -33,7 +34,7 @@ EXPOSE 4001 4002
 RUN chmod +x /app/peer
 
 # Copy entrypoint script
-COPY test/integration/holepunch_network/containers/dart-peer/entrypoint.sh /entrypoint.sh
+COPY dart-libp2p/test/integration/holepunch_network/containers/dart-peer/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

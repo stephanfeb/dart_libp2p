@@ -15,7 +15,7 @@ HOLEPUNCH_TIMEOUT=60
 SCENARIO_TIMEOUT=120
 
 # Network configuration
-STUN_SERVERS=stun.l.google.com:19302
+STUN_SERVERS=10.10.2.10:3478
 ENABLE_IPV6=false
 
 # Container resource limits
