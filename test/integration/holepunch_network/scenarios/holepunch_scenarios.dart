@@ -64,23 +64,57 @@ class ConeToConeSucessScenario extends HolePunchScenario {
     orchestrator.environment['NAT_A_TYPE'] = 'cone';
     orchestrator.environment['NAT_B_TYPE'] = 'cone';
     
-    await orchestrator.start();
+    // Check if we're starting fresh infrastructure
+    final isStartingFresh = !orchestrator.isStarted;
     
-    // Wait for initial discovery and relay connections
-    await Future.delayed(Duration(seconds: 10));
+    // Only start if not already started
+    if (isStartingFresh) {
+      await orchestrator.start();
+      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+      print('🔧 Fresh orchestrator start - allowing extra warmup time for Cone NAT infrastructure...');
+      await Future.delayed(Duration(seconds: 20));
+    } else {
+      // Infrastructure already running, shorter delay for scenario transition
+      print('♻️  Reusing established infrastructure - brief warmup for Cone NAT setup...');
+      await Future.delayed(Duration(seconds: 5));
+    }
+    
+    print('✅ ConeToConeSucessScenario setup complete');
   }
 
   @override
   Future<ScenarioResult> execute() async {
-    // Get peer IDs and initial connectivity status
+    // Get peer IDs and addresses
     final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
     final peerBStatus = await orchestrator.sendControlRequest('peer-b', '/status');
     
     final peerAId = peerAStatus['peer_id'] as String;
     final peerBId = peerBStatus['peer_id'] as String;
+    final peerAAddrs = List<String>.from(peerAStatus['addresses'] as List);
+    final peerBAddrs = List<String>.from(peerBStatus['addresses'] as List);
     
     print('👥 Peer A ID: $peerAId');
     print('👥 Peer B ID: $peerBId');
+    
+    // Introduce peers to each other via peerstore
+    print('🤝 Introducing peer B to peer A...');
+    await orchestrator.sendControlRequest(
+      'peer-a',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerBId, 'addrs': peerBAddrs},
+    );
+    
+    print('🤝 Introducing peer A to peer B...');
+    await orchestrator.sendControlRequest(
+      'peer-b',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerAId, 'addrs': peerAAddrs},
+    );
+    
+    // Wait for peer introductions to settle
+    await Future.delayed(Duration(seconds: 1));
     
     // Initiate holepunch from A to B
     print('🕳️  Initiating holepunch from A to B...');
@@ -143,17 +177,57 @@ class SymmetricToSymmetricFailureScenario extends HolePunchScenario {
     orchestrator.environment['NAT_A_TYPE'] = 'symmetric';
     orchestrator.environment['NAT_B_TYPE'] = 'symmetric';
     
-    await orchestrator.start();
-    await Future.delayed(Duration(seconds: 10));
+    // Check if we're starting fresh infrastructure
+    final isStartingFresh = !orchestrator.isStarted;
+    
+    // Only start if not already started
+    if (isStartingFresh) {
+      await orchestrator.start();
+      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+      print('🔧 Fresh orchestrator start - allowing extra warmup time for Symmetric NAT infrastructure...');
+      await Future.delayed(Duration(seconds: 20));
+    } else {
+      // Infrastructure already running, shorter delay for scenario transition
+      print('♻️  Reusing established infrastructure - brief warmup for Symmetric NAT setup...');
+      await Future.delayed(Duration(seconds: 5));
+    }
+    
+    print('✅ SymmetricToSymmetricFailureScenario setup complete');
   }
 
   @override
   Future<ScenarioResult> execute() async {
-    // final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
+    // Get peer IDs and addresses
+    final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
     final peerBStatus = await orchestrator.sendControlRequest('peer-b', '/status');
     
-    // final peerAId = peerAStatus['peer_id'] as String;
+    final peerAId = peerAStatus['peer_id'] as String;
     final peerBId = peerBStatus['peer_id'] as String;
+    final peerAAddrs = List<String>.from(peerAStatus['addresses'] as List);
+    final peerBAddrs = List<String>.from(peerBStatus['addresses'] as List);
+    
+    print('👥 Peer A ID: $peerAId');
+    print('👥 Peer B ID: $peerBId');
+    
+    // Introduce peers to each other via peerstore
+    print('🤝 Introducing peer B to peer A...');
+    await orchestrator.sendControlRequest(
+      'peer-a',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerBId, 'addrs': peerBAddrs},
+    );
+    
+    print('🤝 Introducing peer A to peer B...');
+    await orchestrator.sendControlRequest(
+      'peer-b',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerAId, 'addrs': peerAAddrs},
+    );
+    
+    // Wait for peer introductions to settle
+    await Future.delayed(Duration(seconds: 1));
     
     // Attempt holepunch (should fail)
     print('🕳️  Attempting holepunch (expecting failure)...');
@@ -209,18 +283,61 @@ class MixedNATScenario extends HolePunchScenario {
 
   @override
   Future<void> setup() async {
+    // Configure mixed NAT types - Cone NAT A, Symmetric NAT B
     orchestrator.environment['NAT_A_TYPE'] = 'cone';
     orchestrator.environment['NAT_B_TYPE'] = 'symmetric';
-    await orchestrator.start();
-    await Future.delayed(Duration(seconds: 10));
+    
+    // Check if we're starting fresh infrastructure
+    final isStartingFresh = !orchestrator.isStarted;
+    
+    // Only start if not already started
+    if (isStartingFresh) {
+      await orchestrator.start();
+      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+      print('🔧 Fresh orchestrator start - allowing extra warmup time for Mixed NAT infrastructure...');
+      await Future.delayed(Duration(seconds: 20));
+    } else {
+      // Infrastructure already running, shorter delay for scenario transition
+      print('♻️  Reusing established infrastructure - brief warmup for Mixed NAT setup...');
+      await Future.delayed(Duration(seconds: 5));
+    }
+    
+    print('✅ MixedNATScenario setup complete');
   }
 
   @override
   Future<ScenarioResult> execute() async {
-    // final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
+    // Get peer IDs and addresses
+    final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
     final peerBStatus = await orchestrator.sendControlRequest('peer-b', '/status');
     
+    final peerAId = peerAStatus['peer_id'] as String;
     final peerBId = peerBStatus['peer_id'] as String;
+    final peerAAddrs = List<String>.from(peerAStatus['addresses'] as List);
+    final peerBAddrs = List<String>.from(peerBStatus['addresses'] as List);
+    
+    print('👥 Peer A ID: $peerAId');
+    print('👥 Peer B ID: $peerBId');
+    
+    // Introduce peers to each other via peerstore
+    print('🤝 Introducing peer B to peer A...');
+    await orchestrator.sendControlRequest(
+      'peer-a',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerBId, 'addrs': peerBAddrs},
+    );
+    
+    print('🤝 Introducing peer A to peer B...');
+    await orchestrator.sendControlRequest(
+      'peer-b',
+      '/connect',
+      method: 'POST',
+      body: {'peer_id': peerAId, 'addrs': peerAAddrs},
+    );
+    
+    // Wait for peer introductions to settle
+    await Future.delayed(Duration(seconds: 1));
     
     // Try holepunch from Cone peer (A) to Symmetric peer (B)
     print('🕳️  Cone → Symmetric holepunch attempt...');

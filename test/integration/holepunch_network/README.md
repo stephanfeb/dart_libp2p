@@ -5,31 +5,38 @@ This directory contains comprehensive integration tests for the dart-libp2p hole
 ## 🏗️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    TEST ORCHESTRATOR                            │
-│                    (Dart Test Suite)                            │
-└─────────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  CONTAINER NETWORK TOPOLOGY                     │
-│                                                                 │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          │
-│  │   NAT-A     │    │ RELAY SERVER│    │   NAT-B     │          │
-│  │ (Gateway)   │    │ (Public IP) │    │ (Gateway)   │          │
-│  └─────────────┘    └─────────────┘    └─────────────┘          │
-│         │                  │                  │                 │
-│         ▼                  │                  ▼                 │
-│  ┌─────────────┐           │           ┌─────────────┐          │
-│  │   PEER-A    │           │           │   PEER-B    │          │
-│  │ (Behind NAT)│ ◄─────────┼─────────► │ (Behind NAT)│          │
-│  └─────────────┘           │           └─────────────┘          │
-│                            │                                    │
-│                      ┌─────────────┐                            │
-│                      │ STUN SERVER │                            │
-│                      │ (External)  │                            │
-│                      └─────────────┘                            │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                    TEST ORCHESTRATOR                                 │
+│                    (Dart Test Suite)                                 │
+│               Uses localhost:808x for control APIs                   │
+└──────────────────────────────────────────────────────────────────────┘
+                          │ HTTP Control API
+                          ▼ (host port mappings)
+┌──────────────────────────────────────────────────────────────────────┐
+│                  CONTAINER NETWORK TOPOLOGY                          │
+│                        (Internal Docker Networks)                    │
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐              │
+│  │   NAT-A     │    │ RELAY SERVER│    │   NAT-B     │              │
+│  │ 192.168.1.10│    │ 10.10.3.10  │    │ 192.168.2.10│              │
+│  │ (Gateway)   │    │ :8083→:8080 │    │ (Gateway)   │              │
+│  └─────────────┘    └─────────────┘    └─────────────┘              │
+│         │                  │                  │                     │
+│         ▼                  │                  ▼                     │
+│  ┌─────────────┐           │           ┌─────────────┐              │
+│  │   PEER-A    │           │           │   PEER-B    │              │
+│  │ 192.168.1.20│ ◄─────────┼─────────► │ 192.168.2.20│              │
+│  │ :8081→:8080 │           │           │ :8082→:8080 │              │
+│  └─────────────┘           │           └─────────────┘              │
+│                            │                                        │
+│                      ┌─────────────┐                                │
+│                      │ STUN SERVER │                                │
+│                      │ 10.10.2.10  │                                │
+│                      │ :3478 (int) │                                │
+│                      └─────────────┘                                │
+└──────────────────────────────────────────────────────────────────────┘
+
+Key:  :XXXX→:YYYY = Host port XXXX mapped to container port YYYY
 ```
 
 ## 🧩 Components
@@ -42,13 +49,22 @@ This directory contains comprehensive integration tests for the dart-libp2p hole
 ### Infrastructure Services  
 - **STUN Server**: **INTERNAL** address discovery (coturn-based at 10.10.2.10:3478)
 - **Relay Server**: Circuit relay for initial connectivity
-- **Control APIs**: HTTP endpoints for test coordination
+- **Control APIs**: HTTP endpoints for test coordination (exposed via host port mappings)
 
-### 🔒 **Perfect Network Isolation**
-- **Zero External Dependencies**: All services use internal container addresses only
+### 🔒 **Network Isolation & Local Compensations**
 - **No External STUN**: Uses internal STUN server (10.10.2.10:3478), NOT stun.google.com
-- **No Host Port Mappings**: Containers communicate only via internal Docker networks
-- **Deterministic Results**: Tests are immune to host network configuration or external services
+- **Internal Container Networks**: All libp2p traffic uses internal Docker networks only
+- **Host Port Mappings**: Control APIs exposed on host ports 8081-8083 for test orchestration
+- **Public Address Fallback**: Since no true public addresses exist in this local setup, `BasicHost.publicAddrs` includes a testing fallback mechanism that uses non-relay addresses
+- **Deterministic Results**: Tests are immune to external services (though not completely isolated due to host port mappings)
+
+### 🏠 **Local Network Adaptations**
+This test setup simulates real-world NAT scenarios within a local Docker environment. Key adaptations:
+
+1. **No Real Public IPs**: All "public" addresses are actually internal Docker network IPs
+2. **Fallback Address Discovery**: `BasicHost.publicAddrs` falls back to listening addresses when no truly public addresses are discovered
+3. **Host-Mapped Control APIs**: Test orchestration requires host port mappings to coordinate scenarios
+4. **Container Warmup Time**: Infrastructure needs 15-20 seconds to establish NAT rules and relay connections on cold starts
 
 ### Test Scenarios
 - **Cone-to-Cone**: Should succeed with direct holepunch
@@ -123,13 +139,20 @@ docker-compose logs -f nat-gateway-a
 
 #### Test Control APIs
 ```bash
-# Get peer status
-curl http://$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' peer-a):8080/status
+# Get peer status (using host port mappings)
+curl http://localhost:8081/status  # peer-a
+curl http://localhost:8082/status  # peer-b
+curl http://localhost:8083/status  # relay-server
 
-# Initiate holepunch
-curl -X POST http://$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' peer-a):8080/holepunch \
+# Initiate holepunch from peer-a to peer-b
+curl -X POST http://localhost:8081/holepunch \
   -H "Content-Type: application/json" \
   -d '{"peer_id": "PEER_B_ID_HERE"}'
+
+# Connect peers before holepunch (required)
+curl -X POST http://localhost:8081/connect \
+  -H "Content-Type: application/json" \
+  -d '{"peer_id": "PEER_B_ID", "addrs": ["PEER_B_ADDRS"]}'
 ```
 
 #### Clean Up
@@ -149,6 +172,16 @@ docker-compose down -v --remove-orphans
 | `VERBOSE_LOGGING` | `false` | Enable detailed logging |
 | `PEER_STARTUP_TIMEOUT` | `30` | Peer startup timeout (seconds) |
 | `HOLEPUNCH_TIMEOUT` | `60` | Holepunch attempt timeout (seconds) |
+
+### Port Mappings (Fixed)
+
+| Container | Host Port | Container Port | Purpose |
+|-----------|-----------|----------------|---------|
+| `peer-a` | 8081 | 8080 | Control API for test orchestration |
+| `peer-b` | 8082 | 8080 | Control API for test orchestration |
+| `relay-server` | 8083 | 8080 | Control API for test orchestration |
+
+**Note**: These host port mappings are required for test orchestration and break complete network isolation. However, they do not affect the actual libp2p holepunch traffic, which uses internal Docker networks only.
 
 ### NAT Types Explained
 
@@ -224,6 +257,35 @@ nc -zv relay-server 4001
 nc -zv stun-server 3478
 ```
 
+## ⏰ **Infrastructure Timing & Test Behavior**
+
+### Test Execution Patterns
+
+#### **Standalone Test Failures vs. Suite Successes**
+A common pattern: individual cone-to-cone tests fail, but the same scenario passes in the complete suite. **Root Cause**: Infrastructure warmup timing.
+
+- **Standalone Test (Often Fails)**:
+  1. Fresh orchestrator start from cold state
+  2. 10-second warmup insufficient for NAT rules + relay connections
+  3. Holepunch attempts before infrastructure is ready
+
+- **Suite Test (Usually Passes)**:
+  1. Infrastructure already warmed by previous scenarios  
+  2. NAT gateways, STUN discovery, and relay connections established
+  3. Holepunch succeeds on stable infrastructure
+
+#### **Warmup Timing Requirements**
+- **Fresh Infrastructure**: Requires 15-20 seconds for complete initialization
+- **Established Infrastructure**: Only needs 5-10 seconds between scenarios
+- **NAT Gateway Setup**: ~5-8 seconds for iptables rules to take effect
+- **Relay Connection Discovery**: ~10-15 seconds for circuit establishment
+
+### **Timing Best Practices**
+1. **Run Complete Suite**: More reliable than individual tests
+2. **Allow Extra Warmup**: If running standalone tests, increase delays in scenario setup
+3. **Check Container Logs**: Monitor startup progression if tests timeout
+4. **Sequential Execution**: Use `--concurrency=1` to avoid resource contention
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -275,23 +337,64 @@ docker run --rm --privileged alpine iptables -t nat -L
 - Monitor container logs during execution
 
 #### Holepunch Failure (Unexpected)
-- Verify NAT gateway configuration
-- Check peer control API responses  
-- Analyze packet captures if enabled
+- **Check Infrastructure Timing**: Most failures are due to insufficient warmup time
+- **Verify Relay Connections**: Ensure peers can connect via relay first (`/connect` endpoint)
+- **NAT Gateway Status**: Verify iptables rules are applied (`docker exec nat-gateway-a iptables -t nat -L`)
+- **Peer Discovery**: Check that peers have discovered each other's addresses
+- **Container Resource Limits**: Ensure adequate CPU/memory for all containers
+
+#### Standalone Test Fails, Suite Passes
+This indicates infrastructure timing issues:
+1. **Solution**: Run the complete test suite instead of individual scenarios
+2. **Debug**: Check container startup logs for slow initialization
+3. **Workaround**: Increase warmup delays in `ConeToConeSucessScenario.setup()` from 10 to 20+ seconds
+
+#### "Container orchestrator is already started" Errors
+- **Cause**: Test harness attempting to start orchestrator multiple times
+- **Solution**: Ensure proper `setUp`/`tearDown` methods in test groups
+- **Fixed**: Integration tests now include proper orchestrator lifecycle management
 
 ## 📊 Performance Considerations
 
 ### Resource Usage
 - Each test scenario uses 6+ containers
-- RAM usage: ~1-2GB total
-- Startup time: 30-60 seconds per scenario
+- RAM usage: ~1-2GB total  
+- Startup time: 30-60 seconds per scenario (15-20s for infrastructure warmup)
 - Test duration: 2-5 minutes per scenario
 
 ### Optimization Tips
 - Use `docker system prune` between test runs
 - Increase Docker daemon memory limits if needed
-- Run tests sequentially to avoid resource contention
+- Run tests sequentially (`--concurrency=1`) to avoid resource contention
 - Consider using faster storage (SSD) for better performance
+- **Run complete suite rather than individual tests** for better reliability
+
+## 🔧 **Local Network Testing Implementation**
+
+### Public Address Simulation
+Since this setup runs entirely within Docker networks without real public IPs, the `dart-libp2p` library includes testing compensations:
+
+```dart
+// In BasicHost.publicAddrs getter
+// TESTING FALLBACK: If no public addresses found, use non-relay addresses for testing
+// This allows holepunching to work in controlled NAT environments like Docker
+if (result.isEmpty) {
+  final fallbackAddrs = allAddrs.where((addr) => !isRelayAddress(addr)).toList();
+  return fallbackAddrs;
+}
+```
+
+### Why This Works
+- **NAT Simulation**: Docker NAT gateways simulate real NAT behavior using iptables
+- **Address Discovery**: STUN server helps peers discover their "external" (NAT gateway) addresses
+- **Relay Bootstrap**: Circuit relay provides initial connectivity for holepunch coordination
+- **Direct Connection**: Once holepunch succeeds, peers connect directly through NAT mappings
+
+### Limitations of Local Testing
+- **No Real Internet Connectivity**: Cannot test true public internet scenarios
+- **Docker Network Constraints**: Limited to Docker's networking capabilities  
+- **Timing Dependencies**: More sensitive to infrastructure warmup than real networks
+- **Resource Contention**: All containers share host resources
 
 ## 🤝 Contributing
 

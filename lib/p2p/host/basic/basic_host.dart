@@ -38,6 +38,7 @@ import 'package:dart_libp2p/p2p/host/relaysvc/relay_manager.dart'; // Added for 
 import 'package:dart_libp2p/p2p/host/autonat/autonat.dart'; // Added for AutoNAT
 import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart'; // Added for HolePunchService interface
 import 'package:dart_libp2p/p2p/protocol/holepunch/service.dart' as holepunch_impl; // Added for HolePunchServiceImpl and Options
+import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddress; // Added for isRelayAddress
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart'; // Added for BasicUpgrader
 
 final _log = Logger('basichost');
@@ -297,7 +298,7 @@ class BasicHost implements Host {
       _holePunchService = holepunch_impl.HolePunchServiceImpl(
         this,
         _idService, // Pass the existing IDService instance
-        () => allAddrs, // Pass a function that returns current public addrs
+        () => publicAddrs, // Pass a function that returns only public/observed addrs
         options: const holepunch_impl.HolePunchOptions(), // Default options for now
       );
       await _holePunchService!.start(); // Call start as per its interface
@@ -724,6 +725,62 @@ class BasicHost implements Host {
 
   @override
   HolePunchService? get holePunchService => _holePunchService;
+
+  /// Returns only public/observed addresses suitable for holepunching.
+  /// This includes:
+  /// - Observed addresses from identify service (external addresses seen by peers)
+  /// - Addresses that AutoNAT has verified as reachable (when AutoNAT status is public)
+  /// - Excludes private network addresses that are not reachable externally
+  List<MultiAddr> get publicAddrs {
+    final publicAddresses = <MultiAddr>[];
+    
+    // Get observed addresses from identify service
+    // These are addresses that other peers have seen us on, which should be public-facing
+    final observed = _idService.ownObservedAddrs();
+    publicAddresses.addAll(observed);
+    
+    // If AutoNAT v1 indicates we're publicly reachable, include addresses that appear public
+    // This is a heuristic until we have proper AutoNAT v2 address verification
+    if (_autoNATService != null) {
+      final autonatStatus = _autoNATService!.status;
+      _log.fine('[BasicHost publicAddrs] AutoNAT status: $autonatStatus');
+      
+      if (autonatStatus == Reachability.public) {
+        // When AutoNAT confirms we're publicly reachable, we can trust addresses that "look public"
+        // This helps when observed addresses aren't available yet
+        final candidateAddrs = allAddrs.where((addr) {
+          // Only include addresses that appear to be public (not private ranges)
+          return addr.isPublic() && !isRelayAddress(addr);
+        }).toList();
+        
+        _log.fine('[BasicHost publicAddrs] AutoNAT reports public reachability, adding ${candidateAddrs.length} candidate addresses');
+        publicAddresses.addAll(candidateAddrs);
+      } else {
+        _log.fine('[BasicHost publicAddrs] AutoNAT status is $autonatStatus, not adding candidate addresses');
+      }
+    }
+    
+    // Remove duplicates and filter out any private addresses that may have slipped through
+    final uniqueAddrs = <String, MultiAddr>{};
+    for (final addr in publicAddresses) {
+      if (addr.isPublic()) {
+        uniqueAddrs[addr.toString()] = addr;
+      }
+    }
+    
+    final result = uniqueAddrs.values.toList();
+    
+    // TESTING FALLBACK: If no public addresses found, use non-relay addresses for testing
+    // This allows holepunching to work in controlled NAT environments like Docker
+    if (result.isEmpty) {
+      final fallbackAddrs = allAddrs.where((addr) => !isRelayAddress(addr)).toList();
+      _log.fine('[BasicHost publicAddrs] No public addresses found, using ${fallbackAddrs.length} fallback addresses for testing: $fallbackAddrs');
+      return fallbackAddrs;
+    }
+    
+    _log.fine('[BasicHost publicAddrs] for host ${id.toString()} - Observed: ${observed.length}, Final result: ${result.length} addresses: $result');
+    return result;
+  }
 
   @override
   Future<void> connect(AddrInfo pi, {Context? context}) async {

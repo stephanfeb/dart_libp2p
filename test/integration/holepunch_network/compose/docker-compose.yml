@@ -53,7 +53,9 @@ services:
       - EXTERNAL_INTERFACE=eth0
       - INTERNAL_INTERFACE=eth1
     cap_add:
+      - NET_ADMIN
       - SYS_ADMIN
+    privileged: true
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.route_localnet=1
@@ -79,7 +81,9 @@ services:
       - EXTERNAL_INTERFACE=eth0
       - INTERNAL_INTERFACE=eth1
     cap_add:
+      - NET_ADMIN
       - SYS_ADMIN
+    privileged: true
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.route_localnet=1
@@ -110,6 +114,8 @@ services:
       context: ../../../../../
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: relay-server
+    ports:
+      - "8083:8080"  # Control API port mapping
     networks:
       public_net:
         ipv4_address: 10.10.3.10
@@ -128,15 +134,18 @@ services:
       context: ../../../../../
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: peer-a
+    ports:
+      - "8081:8080"  # Control API port mapping
     networks:
       nat_a_net:
         ipv4_address: 192.168.1.100
+      public_net:  # Add public network for control API access
     environment:
       - PEER_ROLE=peer
       - PEER_NAME=peer-a
       - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
       - ENABLE_HOLEPUNCH=true
-      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWRcr1tPJ5D46uESVgA1sJrNmcGrW2XHGcHztHadBvcv3G/p2p-circuit
       - STUN_SERVERS=10.10.2.10:3478
       - NAT_GATEWAY=192.168.1.10
     depends_on:
@@ -152,15 +161,18 @@ services:
       context: ../../../../../
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: peer-b
+    ports:
+      - "8082:8080"  # Control API port mapping  
     networks:
       nat_b_net:
         ipv4_address: 192.168.2.100
+      public_net:  # Add public network for control API access
     environment:
       - PEER_ROLE=peer
       - PEER_NAME=peer-b
       - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
       - ENABLE_HOLEPUNCH=true
-      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWRcr1tPJ5D46uESVgA1sJrNmcGrW2XHGcHztHadBvcv3G/p2p-circuit
       - STUN_SERVERS=10.10.2.10:3478
       - NAT_GATEWAY=192.168.2.10
     depends_on:

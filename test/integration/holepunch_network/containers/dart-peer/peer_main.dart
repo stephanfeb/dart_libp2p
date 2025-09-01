@@ -4,6 +4,10 @@ import 'dart:convert';
 
 import 'package:dart_libp2p/dart_libp2p.dart';
 import 'package:dart_libp2p/config/config.dart';
+import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
+import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
+import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
+import 'package:dart_libp2p/config/stream_muxer.dart';
 
 
 
@@ -18,6 +22,23 @@ import 'package:dart_libp2p/p2p/host/peerstore/pstoremem.dart';
 
 
 import 'package:logging/logging.dart';
+
+// Helper class for providing YamuxMuxer to the config  
+class _YamuxMuxerProvider extends StreamMuxer {
+  final MultiplexerConfig yamuxConfig;
+
+  _YamuxMuxerProvider({required this.yamuxConfig})
+      : super(
+          id: '/yamux/1.0.0',
+          muxerFactory: (Conn secureConn, bool isClient) {
+            if (secureConn is! TransportConn) {
+              throw ArgumentError(
+                  'YamuxMuxer factory expects a TransportConn, got ${secureConn.runtimeType}');
+            }
+            return YamuxSession(secureConn, yamuxConfig, isClient);
+          },
+        );
+}
 
 /// Integration test peer for holepunch testing
 /// Can run as a relay server or regular peer
@@ -50,13 +71,26 @@ class IntegrationTestPeer {
     
     print('📱 Peer ID: ${peerId.toBase58()}');
 
+    // Create Yamux multiplexer config
+    final yamuxMultiplexerConfig = MultiplexerConfig(
+      keepAliveInterval: Duration(seconds: 30),
+      maxStreamWindowSize: 1024 * 1024,
+      initialStreamWindowSize: 256 * 1024,
+      streamWriteTimeout: Duration(seconds: 10),
+      maxStreams: 256,
+    );
+
     // Configure based on environment variables
     config = Config()
       ..peerKey = keyPair
       ..enableHolePunching = _getBoolEnv('ENABLE_HOLEPUNCH', true)
       ..enableRelay = _getBoolEnv('ENABLE_RELAY', role == 'relay')
       ..enableAutoNAT = _getBoolEnv('ENABLE_AUTONAT', false)
-      ..enablePing = true;
+      ..enablePing = true
+      // 🔒 SECURITY: Add Noise security protocol (fixes "No security protocols configured")
+      ..securityProtocols = [await NoiseSecurity.create(keyPair)]
+      // 🔀 MUXING: Add Yamux multiplexer (fixes "No muxers configured")  
+      ..muxers = [_YamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
 
     // Parse listen addresses
     final listenAddrsStr = Platform.environment['LISTEN_ADDRS'] ?? '/ip4/0.0.0.0/tcp/4001';
@@ -67,6 +101,11 @@ class IntegrationTestPeer {
 
     // Create network infrastructure
     final peerstore = MemoryPeerstore();
+    
+    // 🔑 CRITICAL: Initialize peerstore with own keys (fixes peerstore lookup hangs)
+    peerstore.keyBook.addPrivKey(peerId, keyPair.privateKey);
+    peerstore.keyBook.addPubKey(peerId, keyPair.publicKey);
+    
     final resourceManager = NullResourceManager();
     final connManager = ConnectionManager(
       idleTimeout: Duration(seconds: 30),
@@ -210,19 +249,33 @@ class IntegrationTestPeer {
     print('🌐 Control API listening on port $port');
     
     server.listen((request) async {
+      print('📥 [HTTP] Incoming request received!');
+      print('📥 [HTTP] Method: ${request.method}');
+      print('📥 [HTTP] Path: ${request.uri.path}');
+      print('📥 [HTTP] Remote address: ${request.connectionInfo?.remoteAddress}');
+      print('📥 [HTTP] Content-Length: ${request.headers.contentLength}');
+      
       try {
+        print('📥 [HTTP] About to call _handleControlRequest...');
         await _handleControlRequest(request);
-      } catch (e) {
+        print('📥 [HTTP] _handleControlRequest completed successfully');
+      } catch (e, stackTrace) {
         print('❌ Control API error: $e');
-        request.response.statusCode = 500;
-        request.response.write('Error: $e');
-        await request.response.close();
+        print('❌ Stack trace: $stackTrace');
+        try {
+          request.response.statusCode = 500;
+          request.response.write('Error: $e');
+          await request.response.close();
+        } catch (closeError) {
+          print('❌ Error closing response after error: $closeError');
+        }
       }
     });
   }
 
   Future<void> _handleControlRequest(HttpRequest request) async {
     final path = request.uri.path;
+    print('🌍 Control request: ${request.method} $path');
     
     switch (path) {
       case '/status':
@@ -260,45 +313,189 @@ class IntegrationTestPeer {
   Future<void> _handleConnectRequest(HttpRequest request) async {
     final body = await utf8.decoder.bind(request).join();
     final data = jsonDecode(body) as Map<String, dynamic>;
-    final targetAddr = MultiAddr(data['address'] as String);
+    final targetPeerIdStr = data['peer_id'] as String;
+    final addrsJson = data['addrs'] as List<dynamic>;
     
     try {
-      // Create AddrInfo with a dummy peer ID for connection
-      final targetPeerId = _extractPeerIdFromAddr(targetAddr) ?? PeerId.fromString('12D3KooWDefaultTarget');
-      final addrInfo = AddrInfo(targetPeerId, [targetAddr]);
-      await host.connect(addrInfo);
-      request.response.write('Connected successfully');
+      final targetPeerId = PeerId.fromString(targetPeerIdStr);
+      final addrs = addrsJson.map((a) => MultiAddr(a)).toList();
+      
+      // Add peer addresses to peerstore
+      for (final addr in addrs) {
+        host.peerStore.addrBook.addAddr(targetPeerId, addr, Duration(hours: 1));
+      }
+      
+      print('✅ Added ${addrs.length} addresses for peer $targetPeerIdStr');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'success': true,
+        'message': 'Peer addresses added to peerstore',
+        'addresses_added': addrs.length,
+      }));
     } catch (e) {
       request.response.statusCode = 500;
-      request.response.write('Connection failed: $e');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'success': false,
+        'message': 'Failed to add peer addresses: $e',
+      }));
     }
     
     await request.response.close();
   }
 
   Future<void> _handleHolepunchRequest(HttpRequest request) async {
-    final body = await utf8.decoder.bind(request).join();
-    final data = jsonDecode(body) as Map<String, dynamic>;
-    final targetPeerIdStr = data['peer_id'] as String;
-    final targetPeerId = PeerId.fromString(targetPeerIdStr);
+    print('🔥 ENTERING HOLEPUNCH HANDLER!');
+    print('🚀 HOLEPUNCH HANDLER STARTED!');
+    print('📥 Starting to read request body...');
+    
+    String? targetPeerIdStr;
+    PeerId? targetPeerId;
     
     try {
-      // Trigger holepunch attempt
-      // Get IDService from host (assuming it's accessible)
-      final idService = (host as dynamic).idService; // Cast needed for accessing internal field
-      final holePunchService = await newHolePunchService(
-        host,
-        idService,
-        () => host.addrs, // Function that returns listen addresses
+      final body = await utf8.decoder.bind(request).join();
+      print('📥 Request body read successfully: ${body.length} characters');
+      print('🚀 Request body: $body');
+      
+      print('📊 About to parse JSON...');
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      print('📊 JSON parsed successfully: $data');
+      
+      print('🔍 Extracting peer_id from data...');
+      targetPeerIdStr = data['peer_id'] as String;
+      print('🚀 Target peer extracted: $targetPeerIdStr');
+      
+      print('🆔 Creating PeerId object...');
+      targetPeerId = PeerId.fromString(targetPeerIdStr);
+      print('🆔 PeerId created successfully: ${targetPeerId.toString()}');
+      
+      print('🎯 Starting main holepunch logic...');
+      // Check if we have addresses for this peer in our peerstore
+      print('🔎 Looking up addresses for peer $targetPeerIdStr in peerstore...');
+      final existingAddrs = await host.peerStore.addrBook.addrs(targetPeerId);
+      print('🔎 Found ${existingAddrs.length} addresses for peer $targetPeerIdStr');
+      if (existingAddrs.isEmpty) {
+        throw Exception('No addresses found for peer $targetPeerIdStr. Call /connect first to add peer addresses.');
+      }
+      
+      print('🔍 Found ${existingAddrs.length} addresses for peer $targetPeerIdStr');
+      for (final addr in existingAddrs) {
+        print('  📍 Target address: $addr');
+      }
+      
+      // Show our own addresses for debugging  
+      final ourAddrs = host.addrs;
+      print('🏠 Our addresses (${ourAddrs.length}):');
+      for (final addr in ourAddrs) {
+        print('  📍 Our address: $addr (isPublic: ${addr.isPublic()})');
+      }
+      
+      // Show public addresses that holepunch service will see
+      if (host is BasicHost) {
+        final publicAddrs = (host as dynamic).publicAddrs as List;
+        print('🔍 Public addresses for holepunch (${publicAddrs.length}):');
+        for (final addr in publicAddrs) {
+          print('  📍 Public address: $addr');
+        }
+      }
+      
+      // Use the existing holepunch service from BasicHost
+      final holePunchService = host.holePunchService;
+      if (holePunchService == null) {
+        throw Exception('Holepunch service is not enabled on this host');
+      }
+      
+      print('🔍 Ensuring holepunch service is fully initialized...');
+      // Wait for the service to be properly initialized to avoid race conditions
+      await holePunchService.start();
+      print('✅ Holepunch service initialization confirmed');
+      
+      print('🕳️ Starting holepunch operation to $targetPeerIdStr...');
+      print('🕳️ Checking if target peer has existing connection...');
+      
+      // Check if already connected
+      final existingConnection = host.network.connectedness(targetPeerId);
+      print('🕳️ Existing connection status: $existingConnection');
+      
+      // Check addresses in peerstore
+      final peerAddrs = await host.peerStore.addrBook.addrs(targetPeerId);
+      print('🕳️ Target peer addresses in peerstore: $peerAddrs');
+      
+      // Check our own addresses
+      final ownAddrs = host.allAddrs;
+      print('🕳️ Our own addresses: $ownAddrs');
+      
+      // Check relay connections 
+      final allConnections = host.network.connectedness;
+      print('🕳️ All network connections: $allConnections');
+      
+      print('🕳️ About to call holePunchService.directConnect()...');
+      final stopwatch = Stopwatch()..start();
+      
+      // Add timeout to prevent infinite hang
+      await holePunchService.directConnect(targetPeerId).timeout(
+        Duration(seconds: 30),
+        onTimeout: () {
+          print('❌ Holepunch timed out after ${stopwatch.elapsedMilliseconds}ms');
+          throw Exception('Holepunch timed out after 30 seconds - likely waiting for public addresses that never arrive');
+        },
       );
-      await holePunchService.directConnect(targetPeerId);
-      request.response.write('Holepunch initiated');
-    } catch (e) {
+      
+      stopwatch.stop();
+      print('✅ Holepunch completed in ${stopwatch.elapsedMilliseconds}ms');
+      
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'success': true,
+        'message': 'Holepunch initiated successfully',
+        'target_peer': targetPeerIdStr,
+      }));
+    } catch (e, stackTrace) {
+      print('❌ Error in holepunch handler: $e');
+      print('❌ Stack trace: $stackTrace');
       request.response.statusCode = 500;
-      request.response.write('Holepunch failed: $e');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'success': false,
+        'message': 'Holepunch failed: $e',
+        'target_peer': targetPeerIdStr ?? 'unknown',
+      }));
     }
     
     await request.response.close();
+  }
+
+  /// Attempts to discover a peer via relay connection
+  Future<void> _discoverPeerViaRelay(PeerId targetPeerId) async {
+    print('🔍 Attempting to discover peer $targetPeerId via relay...');
+    
+    // Check if we already have addresses for this peer
+    final existingAddrs = await host.peerStore.addrBook.addrs(targetPeerId);
+    if (existingAddrs.isNotEmpty) {
+      print('✅ Peer $targetPeerId already known with ${existingAddrs.length} addresses');
+      return;
+    }
+    
+    // Try to connect to the relay first to ensure we have a communication path
+    final relayServers = Platform.environment['RELAY_SERVERS'];
+    if (relayServers != null && relayServers.isNotEmpty) {
+      final relayAddrs = relayServers.split(',').map((s) => MultiAddr(s.trim())).toList();
+      
+      for (final relayAddr in relayAddrs) {
+        try {
+          await _connectToRelay(relayAddr);
+          print('✅ Connected to relay for peer discovery: $relayAddr');
+          break; // Exit after first successful connection
+        } catch (e) {
+          print('⚠️ Failed to connect to relay $relayAddr: $e');
+          continue;
+        }
+      }
+    }
+    
+    // For now, we'll rely on the relay and identify protocol to discover peers
+    // In a more sophisticated setup, we could implement active peer discovery
+    print('🔍 Waiting for peer discovery via identify protocol...');
   }
 
   Future<void> shutdown() async {

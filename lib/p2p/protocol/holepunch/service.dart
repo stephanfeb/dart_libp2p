@@ -11,7 +11,6 @@ import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
@@ -85,7 +84,8 @@ class HolePunchServiceImpl implements HolePunchService {
 
   /// Creates a new holepunch service
   ///
-  /// listenAddrs MUST only return public addresses.
+  /// listenAddrs should return public/observed addresses when available.
+  /// The service will start immediately and work with available addresses.
   HolePunchServiceImpl(this._host, this._ids, this._listenAddrs, {
     HolePunchOptions? options,
   }) : 
@@ -93,7 +93,9 @@ class HolePunchServiceImpl implements HolePunchService {
     _filter = options?.filter {
 
     _incrementRefCount();
-    _waitForPublicAddr();
+    // Note: _initializeService() is called asynchronously here and will complete
+    // _hasPublicAddrsChan when ready. directConnect() will wait for this.
+    _initializeService();
   }
 
   /// Increments the reference count
@@ -113,55 +115,16 @@ class HolePunchServiceImpl implements HolePunchService {
     });
   }
 
-  /// Waits for the host to have at least one public address
-  Future<void> _waitForPublicAddr() async {
-    _log.fine('Waiting until we have at least one public address', _host.id);
+  /// Initializes the holepunch service and waits for address discovery.
+  /// Unlike the previous implementation, this doesn't wait indefinitely for "public addresses"
+  /// that may never come for NAT peers. Instead, it starts immediately and becomes ready
+  /// as soon as we have any addresses to work with (including observed addresses from identify).
+  Future<void> _initializeService() async {
+    _log.fine('Initializing holepunch service for host ${_host.id}');
 
-    // TODO: We should have an event here that fires when identify discovers a new
-    // address.
-    // As we currently don't have an event like this, just check our observed addresses
-    // regularly (exponential backoff starting at 250 ms, capped at 5s).
-    var duration = const Duration(milliseconds: 250);
-    const maxDuration = Duration(seconds: 5);
-
-    while (true) {
-      // Check for cancellation BEFORE calling _listenAddrs() in a new iteration
-      if (_ctxCancel.isCompleted) {
-        _log.fine('HolePunchService._waitForPublicAddr: Context cancelled at loop start, exiting.');
-        await _decrementRefCount(); // Ensure ref count is decremented on this path
-        return;
-      }
-
-      if (_listenAddrs().isNotEmpty) {
-        _log.fine('Host now has a public address. Starting holepunch protocol.');
-        _host.setStreamHandler(protocolId, _handleNewStream);
-        break;
-      }
-
-      try {
-        await Future.any([
-          Future.delayed(duration),
-          _ctxCancel.future,
-        ]);
-      } catch (_) {
-        // Context cancelled (e.g., if _ctxCancel.future completed with an error)
-        _log.fine('HolePunchService._waitForPublicAddr: Context cancelled via Future.any catch, exiting.');
-        await _decrementRefCount();
-        return;
-      }
-
-      // Explicit check for cancellation after Future.any completes normally
-      if (_ctxCancel.isCompleted) {
-        _log.fine('HolePunchService._waitForPublicAddr: Context cancelled after delay/event, exiting loop.');
-        await _decrementRefCount(); // Ensure ref count is decremented on this path
-        return;
-      }
-
-      duration *= 2;
-      if (duration > maxDuration) {
-        duration = maxDuration;
-      }
-    }
+    // Start the service immediately - don't wait for public addresses
+    // Holepunching is specifically designed for peers that DON'T have public addresses!
+    _host.setStreamHandler(protocolId, _handleNewStream);
 
     await _holePuncherMutex.synchronized(() {
       if (_ctxCancel.isCompleted) {
@@ -171,13 +134,39 @@ class HolePunchServiceImpl implements HolePunchService {
       _holePuncher = HolePuncher(_host, _ids, _listenAddrs, tracer: _tracer, filter: _filter);
     });
 
+    // The service is now ready to accept holepunch requests
     _hasPublicAddrsChan.complete();
+    _log.fine('Holepunch service initialized and ready for host ${_host.id}');
+    
+    // Start monitoring for address changes to improve holepunching as addresses become available
+    _startAddressMonitoring();
+    
     await _decrementRefCount();
+  }
+  
+  /// Monitors for address changes and logs them for debugging
+  void _startAddressMonitoring() {
+    // This is a simple monitoring approach - in a production implementation,
+    // you might want to listen to specific events from the identify service
+    Timer.periodic(Duration(seconds: 10), (timer) {
+      if (_ctxCancel.isCompleted) {
+        timer.cancel();
+        return;
+      }
+      
+      final currentAddrs = _listenAddrs();
+      if (currentAddrs.isNotEmpty) {
+        _log.fine('Holepunch service for host ${_host.id} has ${currentAddrs.length} addresses available: $currentAddrs');
+      } else {
+        _log.fine('Holepunch service for host ${_host.id} waiting for addresses to be discovered');
+      }
+    });
   }
 
   @override
   Future<void> start() async {
-    // Nothing to do here, initialization is done in the constructor
+    // Wait for service initialization to complete
+    await _hasPublicAddrsChan.future;
   }
 
   @override
@@ -208,12 +197,17 @@ class HolePunchServiceImpl implements HolePunchService {
 
     var ownAddrs = _listenAddrs();
     if (_filter != null) {
-      ownAddrs = _filter!.filterLocal(str.conn.remotePeer, ownAddrs);
+      ownAddrs = _filter.filterLocal(str.conn.remotePeer, ownAddrs);
     }
 
-    // If we can't tell the peer where to dial us, there's no point in starting the hole punching.
+    // If we can't tell the peer where to dial us, try to use any available addresses
     if (ownAddrs.isEmpty) {
-      throw Exception('Rejecting hole punch request, as we don\'t have any public addresses');
+      _log.warning('No public addresses available for incoming hole punch, trying all available addresses. Peer: ${str.conn.remotePeer}');
+      // Try to use any addresses we have - the peer can decide if they're reachable
+      ownAddrs = _host.addrs.where((addr) => !isRelayAddress(addr)).toList();
+      if (ownAddrs.isEmpty) {
+        throw Exception('No addresses available for hole punch response');
+      }
     }
 
     await str.scope().reserveMemory(maxMsgSize, ReservationPriority.always);
@@ -229,7 +223,7 @@ class HolePunchServiceImpl implements HolePunchService {
 
       var obsDial = removeRelayAddrs(addrsFromBytes(msg.obsAddrs));
       if (_filter != null) {
-        obsDial = _filter!.filterRemote(str.conn.remotePeer, obsDial);
+        obsDial = _filter.filterRemote(str.conn.remotePeer, obsDial);
       }
 
       _log.fine('Received hole punch request from ${str.conn.remotePeer} with addresses: $obsDial');
@@ -321,19 +315,13 @@ class HolePunchServiceImpl implements HolePunchService {
     final holePunchCtx = Context()
         .withValue('simultaneousConnect', true)
         .withValue('simultaneousConnectIsClient', isClient)
-        .withValue('simultaneousConnectReason', 'hole-punching');
-
-    final forceDirectConnCtx = Context()
+        .withValue('simultaneousConnectReason', 'hole-punching')
         .withValue('forceDirectDial', true)
         .withValue('forceDirectDialReason', 'hole-punching');
 
     try {
       final addrInfo = AddrInfo(pi.peerId, pi.addrs.toList());
-      await _host.connect(
-        addrInfo,
-        context: holePunchCtx.withValue('forceDirectDial', true)
-            .withValue('forceDirectDialReason', 'hole-punching'),
-      );
+      await _host.connect(addrInfo, context: holePunchCtx);
       _log.fine('Hole punch successful for peer ${pi.peerId}');
     } catch (err) {
       _log.fine('Hole punch attempt with peer ${pi.peerId} failed: $err');
@@ -343,11 +331,23 @@ class HolePunchServiceImpl implements HolePunchService {
 
   @override
   Future<void> directConnect(PeerId peerId) async {
-    await _hasPublicAddrsChan.future;
+    // Wait for service initialization to complete with a reasonable timeout
+    try {
+      await _hasPublicAddrsChan.future.timeout(
+        Duration(seconds: 10),
+        onTimeout: () {
+          _log.severe('Holepunch service initialization timed out after 10 seconds for host ${_host.id}');
+          throw Exception('Holepunch service initialization timeout - service may not have started properly');
+        },
+      );
+    } catch (e) {
+      _log.severe('Failed to wait for holepunch service initialization: $e');
+      rethrow;
+    }
 
     final holePuncher = await _holePuncherMutex.synchronized(() => _holePuncher);
     if (holePuncher == null) {
-      throw Exception('Holepunch service not initialized');
+      throw Exception('Holepunch service not initialized - holePuncher is null');
     }
 
     return holePuncher.directConnect(peerId);

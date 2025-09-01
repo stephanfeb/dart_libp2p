@@ -131,6 +131,20 @@ void main() {
     }, timeout: Timeout(Duration(minutes: 15)));
 
     group('Network Behavior Validation', () {
+      // Ensure orchestrator is stopped before each test in this group
+      setUp(() async {
+        if (orchestrator.isStarted) {
+          await orchestrator.stop();
+        }
+      });
+      
+      // Ensure orchestrator is stopped after each test in this group  
+      tearDown(() async {
+        if (orchestrator.isStarted) {
+          await orchestrator.stop();
+        }
+      });
+      
       test('NAT Gateway Configuration Validation', () async {
         orchestrator.environment['NAT_A_TYPE'] = 'cone';
         orchestrator.environment['NAT_B_TYPE'] = 'symmetric';
@@ -144,7 +158,7 @@ void main() {
         expect(natALogs, contains('Cone NAT configuration complete'));
         expect(natBLogs, contains('Symmetric NAT configuration complete'));
         
-        await orchestrator.stop();
+        // Note: tearDown will handle stopping the orchestrator
       }, timeout: Timeout(Duration(minutes: 3)));
 
       test('STUN Server Functionality', () async {
@@ -156,7 +170,7 @@ void main() {
         expect(peerAStatus['peer_id'], isNotNull);
         expect(peerAStatus['addresses'], isA<List>());
         
-        await orchestrator.stop();
+        // Note: tearDown will handle stopping the orchestrator
       }, timeout: Timeout(Duration(minutes: 3)));
 
       test('Relay Server Connectivity', () async {
@@ -168,7 +182,7 @@ void main() {
         expect(relayStatus['role'], equals('relay'));
         expect(relayStatus['relay_enabled'], isTrue);
         
-        await orchestrator.stop();
+        // Note: tearDown will handle stopping the orchestrator
       }, timeout: Timeout(Duration(minutes: 3)));
     });
   });

@@ -230,6 +230,17 @@ class PeerAddrs {
     });
   }
 
+  // Unlocked version for internal use when already holding MemoryAddrBook._lock
+  ExpiringAddr? _findAddrUnlocked(PeerId p, MultiAddr addr) {
+    final peerKey = p.toString();
+    final addrKey = addr.toString();
+
+    if (_addrs.containsKey(peerKey)) {
+      return _addrs[peerKey]![addrKey];
+    }
+    return null;
+  }
+
   Future<ExpiringAddr?> popIfExpired(DateTime now) async {
 
     return await _lock.synchronized(() async {
@@ -266,6 +277,19 @@ class PeerAddrs {
 
   }
 
+  // Unlocked version for internal use when already holding MemoryAddrBook._lock
+  void _updateUnlocked(ExpiringAddr a) {
+    if (a.heapIndex == -1) {
+      return;
+    }
+    if (a.isConnected()) {
+      remove(a.heapIndex);
+    } else {
+      _siftDown(a.heapIndex);
+      _siftUp(a.heapIndex);
+    }
+  }
+
   Future<void> insert(ExpiringAddr a) async {
 
     await _lock.synchronized(() async {
@@ -286,6 +310,24 @@ class PeerAddrs {
     });
   }
 
+  // Unlocked version for internal use when already holding MemoryAddrBook._lock
+  void _insertUnlocked(ExpiringAddr a) {
+    a.heapIndex = -1;
+    final peerKey = a.peer.toString();
+    final addrKey = a.addr.toString();
+
+    if (!_addrs.containsKey(peerKey)) {
+      _addrs[peerKey] = <String, ExpiringAddr>{};
+    }
+    _addrs[peerKey]![addrKey] = a;
+
+    // Don't add connected addr to heap
+    if (a.isConnected()) {
+      return;
+    }
+    push(a);
+  }
+
   int numUnconnectedAddrs() {
     return _expiringHeap.length;
   }
@@ -297,8 +339,13 @@ class PeerAddrs {
   }
 
   Future<bool> containsKey(String peerKey) async {
+    print('🔍 [PeerAddrs] ENTERING containsKey($peerKey)');
+    print('🔍 [PeerAddrs] About to acquire _lock (PeerAddrs)...');
     return await _lock.synchronized(() async {
-      return _addrs.containsKey(peerKey);
+      print('🔍 [PeerAddrs] ACQUIRED _lock (PeerAddrs) successfully');
+      final result = _addrs.containsKey(peerKey);
+      print('🔍 [PeerAddrs] containsKey result: $result, RETURNING...');
+      return result;
     });
 
   }
@@ -311,9 +358,30 @@ class PeerAddrs {
   }
 
   Future<Map<String, ExpiringAddr>?> getPeerKeys(String peerKey) async {
+    print('🔍 [PeerAddrs] ENTERING getPeerKeys($peerKey)');
+    print('🔍 [PeerAddrs] About to acquire _lock (PeerAddrs)...');
     return await _lock.synchronized(() async {
-      return _addrs[peerKey];
+      print('🔍 [PeerAddrs] ACQUIRED _lock (PeerAddrs) successfully');
+      final result = _addrs[peerKey];
+      print('🔍 [PeerAddrs] getPeerKeys result: ${result?.length ?? 0} entries, RETURNING...');
+      return result;
     });
+  }
+
+  // Unlocked version for internal use when already holding MemoryAddrBook._lock
+  bool _containsKeyUnlocked(String peerKey) {
+    print('🔍 [PeerAddrs] _containsKeyUnlocked($peerKey) - NO LOCK NEEDED');
+    final result = _addrs.containsKey(peerKey);
+    print('🔍 [PeerAddrs] _containsKeyUnlocked result: $result');
+    return result;
+  }
+
+  // Unlocked version for internal use when already holding MemoryAddrBook._lock
+  Map<String, ExpiringAddr>? _getPeerKeysUnlocked(String peerKey) {
+    print('🔍 [PeerAddrs] _getPeerKeysUnlocked($peerKey) - NO LOCK NEEDED');
+    final result = _addrs[peerKey];
+    print('🔍 [PeerAddrs] _getPeerKeysUnlocked result: ${result?.length ?? 0} entries');
+    return result;
   }
 
   // for (final a in _addrs.addrs[peerKey]!.values) {
@@ -428,43 +496,67 @@ class MemoryAddrBook implements AddrBook, CertifiedAddrBook {
   @override
   Future<void> addAddr(PeerId p, MultiAddr addr, Duration ttl) async {
     await _lock.synchronized( () async {
-      await addAddrs(p, [addr], ttl);
+      await _addAddrs(p, [addr], ttl);  // FIXED: Call unlocked version to avoid nested deadlock!
     });
   }
 
   @override
   Future<void> addAddrs(PeerId p, List<MultiAddr> addrs, Duration ttl) async {
+    print('🔍 [AddrBook] ENTERING addAddrs() for peer: ${p.toString()} with ${addrs.length} addresses');
+    print('🔍 [AddrBook] addAddrs() about to acquire _lock...');
     await _lock.synchronized(() async {
+      print('🔍 [AddrBook] addAddrs() ACQUIRED _lock successfully');
       await _addAddrs(p, addrs, ttl);
+      print('🔍 [AddrBook] addAddrs() completed _addAddrs, about to release _lock');
     });
+    print('🔍 [AddrBook] addAddrs() RELEASED _lock and returning');
   }
 
   Future<void> _addAddrs(PeerId p, List<MultiAddr> addrs, Duration ttl) async {
-      _addAddrsUnlocked(p, addrs, ttl);
+    print('🔍 [AddrBook] _addAddrs() starting for peer: ${p.toString()}');
+    await _addAddrsUnlocked(p, addrs, ttl);  // FIXED: Added missing await!
+    print('🔍 [AddrBook] _addAddrs() completed for peer: ${p.toString()}');
   }
 
   Future<void> _addAddrsUnlocked(PeerId p, List<MultiAddr> addrs, Duration ttl) async {
+    print('🔍 [AddrBook] _addAddrsUnlocked() starting with ${addrs.length} addresses');
+    
     // If ttl is zero, exit. nothing to do.
     if (ttl <= Duration.zero) {
+      print('🔍 [AddrBook] _addAddrsUnlocked() TTL <= 0, returning early');
       return;
     }
 
     // We are over limit, drop these addrs.
     if (!ttlIsConnected(ttl) && _addrs.numUnconnectedAddrs() >= _maxUnconnectedAddrs) {
+      print('🔍 [AddrBook] _addAddrsUnlocked() Over limit, returning early');
       return;
     }
 
+    print('🔍 [AddrBook] _addAddrsUnlocked() Processing addresses...');
     final exp = DateTime.now().add(ttl);
-    for (final addr in addrs) {
-      // TODO: Handle peer ID in multiaddr
+    
+    for (int i = 0; i < addrs.length; i++) {
+      final addr = addrs[i];
+      print('🔍 [AddrBook] _addAddrsUnlocked() Processing addr ${i+1}/${addrs.length}: $addr');
 
-      final a = await _addrs.findAddr(p, addr);
+      print('🔍 [AddrBook] _addAddrsUnlocked() About to call UNLOCKED findAddr - DEADLOCK FIXED!');
+      final a = _addrs._findAddrUnlocked(p, addr);
+      print('🔍 [AddrBook] _addAddrsUnlocked() findAddrUnlocked returned: ${a != null ? 'existing' : 'new'}');
+      
       if (a == null) {
         // Not found, announce it.
+        print('🔍 [AddrBook] _addAddrsUnlocked() Creating new entry...');
         final entry = ExpiringAddr(addr: addr, expiry: exp, ttl: ttl, peer: p);
-        await _addrs.insert(entry);
+        
+        print('🔍 [AddrBook] _addAddrsUnlocked() About to call UNLOCKED insert - DEADLOCK FIXED!');
+        _addrs._insertUnlocked(entry);
+        print('🔍 [AddrBook] _addAddrsUnlocked() insertUnlocked completed, broadcasting...');
+        
         _subManager.broadcastAddr(p, addr);
+        print('🔍 [AddrBook] _addAddrsUnlocked() Broadcast completed');
       } else {
+        print('🔍 [AddrBook] _addAddrsUnlocked() Updating existing entry...');
         // Update ttl & exp to whichever is greater between new and existing entry
         var changed = false;
         if (ttl > a.ttl) {
@@ -476,10 +568,15 @@ class MemoryAddrBook implements AddrBook, CertifiedAddrBook {
           a.expiry = exp;
         }
         if (changed) {
-          await _addrs.update(a);
+          print('🔍 [AddrBook] _addAddrsUnlocked() About to call UNLOCKED update - DEADLOCK FIXED!');
+          _addrs._updateUnlocked(a);
+          print('🔍 [AddrBook] _addAddrsUnlocked() updateUnlocked completed');
+        } else {
+          print('🔍 [AddrBook] _addAddrsUnlocked() No update needed');
         }
       }
     }
+    print('🔍 [AddrBook] _addAddrsUnlocked() ALL addresses processed');
   }
 
   @override
@@ -553,12 +650,19 @@ class MemoryAddrBook implements AddrBook, CertifiedAddrBook {
 
   @override
   Future<List<MultiAddr>> addrs(PeerId p) async {
+    print('🔍 [AddrBook] ENTERING addrs() for peer: ${p.toString()}');
+    print('🔍 [AddrBook] About to acquire _lock...');
     return await _lock.synchronized(() async {
+      print('🔍 [AddrBook] ACQUIRED _lock successfully');
       final peerKey = p.toString();
-      if (!await _addrs.containsKey(peerKey)) {
+      print('🔍 [AddrBook] About to call UNLOCKED containsKey($peerKey) - DEADLOCK FIXED!');
+      if (!_addrs._containsKeyUnlocked(peerKey)) {
+        print('🔍 [AddrBook] containsKeyUnlocked returned false, returning empty list');
         return <MultiAddr>[];
       }
-      final peerKeys = await _addrs.getPeerKeys(peerKey);
+      print('🔍 [AddrBook] containsKeyUnlocked returned true, about to call UNLOCKED getPeerKeys($peerKey) - DEADLOCK FIXED!');
+      final peerKeys = _addrs._getPeerKeysUnlocked(peerKey);
+      print('🔍 [AddrBook] getPeerKeysUnlocked returned successfully, processing results...');
       return _validAddrs(DateTime.now(), peerKeys!);
     });
   }

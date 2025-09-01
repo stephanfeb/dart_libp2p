@@ -242,11 +242,16 @@ class HolePuncher {
       // Send a CONNECT and start RTT measurement
       var obsAddrs = removeRelayAddrs(_listenAddrs());
       if (_filter != null) {
-        obsAddrs = _filter!.filterLocal(str.conn.remotePeer, obsAddrs);
+        obsAddrs = _filter.filterLocal(str.conn.remotePeer, obsAddrs);
       }
 
       if (obsAddrs.isEmpty) {
-        throw Exception('Aborting hole punch initiation as we have no public address');
+        _log.warning('No public addresses available for hole punch initiation, but proceeding anyway. Peer: ${str.conn.remotePeer}');
+        // Don't abort - use all available addresses and let the peer decide
+        obsAddrs = _listenAddrs();
+        if (obsAddrs.isEmpty) {
+          throw Exception('No addresses available for hole punch initiation');
+        }
       }
 
       final start = DateTime.now();
@@ -269,7 +274,7 @@ class HolePuncher {
 
       var addrs = removeRelayAddrs(addrsFromBytes(response.obsAddrs));
       if (_filter != null) {
-        addrs = _filter!.filterRemote(str.conn.remotePeer, addrs);
+        addrs = _filter.filterRemote(str.conn.remotePeer, addrs);
       }
 
       if (addrs.isEmpty) {

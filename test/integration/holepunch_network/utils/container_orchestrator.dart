@@ -9,6 +9,9 @@ class ContainerOrchestrator {
   final Duration startupTimeout;
   
   bool _isStarted = false;
+  
+  /// Check if the orchestrator is already started
+  bool get isStarted => _isStarted;
 
   ContainerOrchestrator({
     required this.composeFile,
@@ -51,7 +54,7 @@ class ContainerOrchestrator {
       await _runDockerCompose(['down', '-v', '--remove-orphans']);
       
       // Clean up networks
-      await _runDockerCompose(['down', '--volumes', '--networks']);
+      await _runDockerCompose(['down', '--volumes', '--remove-orphans']);
       
     } catch (e) {
       print('⚠️ Warning during cleanup: $e');
@@ -158,39 +161,42 @@ class ContainerOrchestrator {
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
+    Duration? timeout,
   }) async {
-    // Get container IP
-    final inspectResult = await Process.run(
-      'docker',
-      ['inspect', containerName],
-    );
+    // Default timeout for holepunch operations, shorter for others
+    timeout ??= (path == '/holepunch' ? Duration(seconds: 45) : Duration(seconds: 10));
     
-    if (inspectResult.exitCode != 0) {
-      throw ContainerException('Failed to inspect container $containerName');
+    try {
+      return await _performHttpRequest(containerName, path, method, body).timeout(timeout);
+    } on TimeoutException catch (e) {
+      throw ContainerException(
+        'HTTP $method $path to $containerName timed out after ${timeout.inSeconds}s',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _performHttpRequest(
+    String containerName,
+    String path, 
+    String method,
+    Map<String, dynamic>? body,
+  ) async {
+    // Map container names to their host-mapped ports
+    final portMappings = {
+      'peer-a': 8081,
+      'peer-b': 8082, 
+      'relay-server': 8083,
+    };
+    
+    final port = portMappings[containerName];
+    if (port == null) {
+      throw ContainerException('No port mapping configured for container $containerName');
     }
     
-    final inspectData = jsonDecode(inspectResult.stdout as String) as List;
-    final containerData = inspectData.first as Map<String, dynamic>;
-    final networkData = containerData['NetworkSettings']['Networks'] as Map<String, dynamic>;
-    
-    // Find the container's IP address
-    String? containerIP;
-    for (final network in networkData.values) {
-      final ip = network['IPAddress'] as String?;
-      if (ip != null && ip.isNotEmpty) {
-        containerIP = ip;
-        break;
-      }
-    }
-    
-    if (containerIP == null) {
-      throw ContainerException('Could not find IP address for container $containerName');
-    }
-    
-    // Make HTTP request
+    // Make HTTP request to localhost with mapped port
     final client = HttpClient();
     try {
-      final uri = Uri.parse('http://$containerIP:8080$path');
+      final uri = Uri.parse('http://localhost:$port$path');
       final request = await client.openUrl(method, uri);
       
       if (body != null) {
