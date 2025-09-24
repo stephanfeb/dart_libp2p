@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:dart_libp2p/dart_libp2p.dart';
 import 'package:dart_libp2p/config/config.dart';
+import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
@@ -287,6 +288,9 @@ class IntegrationTestPeer {
       case '/holepunch':
         await _handleHolepunchRequest(request);
         break;
+      case '/ping':
+        await _handlePingRequest(request);
+        break;
       default:
         request.response.statusCode = 404;
         request.response.write('Not found');
@@ -338,6 +342,88 @@ class IntegrationTestPeer {
       request.response.write(jsonEncode({
         'success': false,
         'message': 'Failed to add peer addresses: $e',
+      }));
+    }
+    
+    await request.response.close();
+  }
+
+  Future<void> _handlePingRequest(HttpRequest request) async {
+    final body = await utf8.decoder.bind(request).join();
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    final targetPeerIdStr = data['peer_id'] as String;
+    
+    try {
+      final targetPeerId = PeerId.fromString(targetPeerIdStr);
+      
+      print('🏓 Attempting ping to $targetPeerIdStr using libp2p ping protocol (supports relay)');
+      
+      // Use libp2p's built-in ping protocol which handles relay routing transparently
+      try {
+        // Create a connection to the peer (will use relay if needed)
+        print('🔍 Looking up addresses for target peer in peerstore...');
+        final targetAddrs = await host.peerStore.addrBook.addrs(targetPeerId);
+        
+        if (targetAddrs.isEmpty) {
+          throw Exception('No addresses found for peer $targetPeerIdStr in peerstore');
+        }
+        
+        print('📍 Target peer addresses: $targetAddrs');
+        
+        // Use the host's ping service to ping the peer
+        // This will work through relay connections if direct connection is not possible
+        final pingService = PingService(host);
+        if (pingService == null) {
+          throw Exception('Ping service not available on this host');
+        }
+        
+        print('🏓 Initiating libp2p ping to $targetPeerIdStr...');
+        final pingStartTime = DateTime.now();
+        
+        // Ping the peer - this should work through relay if needed
+        await pingService.ping(targetPeerId).timeout(
+          Duration(seconds: 10),
+          onTimeout: (EventSink<PingResult> res) {
+            throw Exception('Ping timed out after 10 seconds');
+          },
+        );
+        
+        final pingDuration = DateTime.now().difference(pingStartTime);
+        print('✅ Ping successful to $targetPeerIdStr in ${pingDuration.inMilliseconds}ms');
+        
+        // Get connection info for debugging
+        final connectedness = host.network.connectedness(targetPeerId);
+        final connections = host.network.conns;
+        
+        print('📊 Connection state: $connectedness');
+        print('📊 Active connections: ${connections.length}');
+        
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({
+          'success': true,
+          'message': 'Ping successful via libp2p protocol (may use relay)',
+          'target_peer': targetPeerIdStr,
+          'ping_duration_ms': pingDuration.inMilliseconds,
+          'connectedness': connectedness.toString(),
+          'connections_count': connections.length,
+          'connection_details': connections.map((c) => {
+            'remote_addr': c.remoteMultiaddr.toString(),
+            'connection_type': c.runtimeType.toString(),
+          }).toList(),
+        }));
+        
+      } catch (e) {
+        throw Exception('Libp2p ping failed: $e');
+      }
+      
+    } catch (e) {
+      print('❌ Ping failed: $e');
+      request.response.statusCode = 500;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'success': false,
+        'message': 'Ping failed: $e',
+        'target_peer': targetPeerIdStr,
       }));
     }
     

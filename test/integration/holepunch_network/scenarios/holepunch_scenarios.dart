@@ -318,51 +318,224 @@ class MixedNATScenario extends HolePunchScenario {
     
     print('👥 Peer A ID: $peerAId');
     print('👥 Peer B ID: $peerBId');
+    print('📍 Peer A addresses: $peerAAddrs');
+    print('📍 Peer B addresses: $peerBAddrs');
     
-    // Introduce peers to each other via peerstore
+    // Verify initial connectivity (should be 0 before any connections)
+    final initialConnectedA = peerAStatus['connected_peers'] as int;
+    final initialConnectedB = peerBStatus['connected_peers'] as int;
+    print('🔌 Initial connectivity - A: $initialConnectedA peers, B: $initialConnectedB peers');
+    
+    // Introduce peers to each other via peerstore to establish relay connection
     print('🤝 Introducing peer B to peer A...');
-    await orchestrator.sendControlRequest(
+    final connectResultA = await orchestrator.sendControlRequest(
       'peer-a',
       '/connect',
       method: 'POST',
       body: {'peer_id': peerBId, 'addrs': peerBAddrs},
     );
+    print('📋 Connect A result: $connectResultA');
     
     print('🤝 Introducing peer A to peer B...');
-    await orchestrator.sendControlRequest(
+    final connectResultB = await orchestrator.sendControlRequest(
       'peer-b',
       '/connect',
       method: 'POST',
       body: {'peer_id': peerAId, 'addrs': peerAAddrs},
     );
+    print('📋 Connect B result: $connectResultB');
     
-    // Wait for peer introductions to settle
-    await Future.delayed(Duration(seconds: 1));
+    // Wait for relay connections to establish
+    print('⏳ Waiting for relay connections to establish...');
+    await Future.delayed(Duration(seconds: 10));
     
-    // Try holepunch from Cone peer (A) to Symmetric peer (B)
-    print('🕳️  Cone → Symmetric holepunch attempt...');
+    // Verify relay connectivity established
+    final relayStatusA = await orchestrator.sendControlRequest('peer-a', '/status');
+    final relayStatusB = await orchestrator.sendControlRequest('peer-b', '/status');
+    
+    final relayConnectedA = relayStatusA['connected_peers'] as int;
+    final relayConnectedB = relayStatusB['connected_peers'] as int;
+    
+    print('🔗 After relay setup - A: $relayConnectedA peers, B: $relayConnectedB peers');
+    
+    // Assertion 1: Verify both peers are connected (should be to relay server, not each other)
+    if (relayConnectedA == 0 || relayConnectedB == 0) {
+      return ScenarioResult.failure(
+        'Failed to establish relay connectivity. A: $relayConnectedA peers, B: $relayConnectedB peers. '
+        'Mixed NAT test requires both peers to connect to relay server.',
+      );
+    }
+    print('✅ Relay connectivity established - both peers connected to relay server');
+    print('📡 Note: Peers connect to relay server, not directly to each other in Mixed NAT scenario');
+    
+    // Test communication via relay before holepunch attempt  
+    // Note: libp2p ping will route through relay server transparently
+    print('🏓 Testing relay communication using libp2p ping protocol...');
+    try {
+      final pingResult = await orchestrator.sendControlRequest(
+        'peer-a',
+        '/ping',
+        method: 'POST',
+        body: {'peer_id': peerBId},
+      );
+      print('📋 Relay ping result: $pingResult');
+      
+      if (!(pingResult['success'] as bool)) {
+        return ScenarioResult.failure(
+          'Relay communication failed before holepunch attempt: ${pingResult['message']}',
+        );
+      }
+      print('✅ Relay communication working correctly');
+    } catch (e) {
+      return ScenarioResult.failure(
+        'Exception during relay communication test: $e',
+      );
+    }
+    
+    // Now attempt holepunch (expecting failure with Mixed NATs)
+    print('🕳️  Attempting Cone → Symmetric holepunch (expecting failure)...');
+    
+    bool holepunchFailed = false;
+    String holepunchError = '';
     
     try {
-      await orchestrator.sendControlRequest(
+      final holepunchResult = await orchestrator.sendControlRequest(
         'peer-a',
         '/holepunch',
         method: 'POST',
         body: {'peer_id': peerBId},
       );
+      print('📋 Holepunch result: $holepunchResult');
+      
+      // If holepunch claims success with Mixed NATs, this is unexpected
+      if (holepunchResult['success'] == true) {
+        print('⚠️ Unexpected: Holepunch reported success with Mixed NATs');
+      }
     } catch (e) {
-      print('⚠️ Holepunch attempt error: $e');
+      holepunchFailed = true;
+      holepunchError = e.toString();
+      print('🎯 Holepunch failed as expected with Mixed NATs: $e');
     }
     
-    await Future.delayed(Duration(seconds: 15));
+    // Wait for any holepunch cleanup/stabilization
+    await Future.delayed(Duration(seconds: 10));
     
-    // Verify graceful fallback to relay
+    // Assertion 2: Verify holepunch did not break relay connectivity
+    final postHolepunchStatusA = await orchestrator.sendControlRequest('peer-a', '/status');
+    final postHolepunchStatusB = await orchestrator.sendControlRequest('peer-b', '/status');
+    
+    final postHolepunchConnectedA = postHolepunchStatusA['connected_peers'] as int;
+    final postHolepunchConnectedB = postHolepunchStatusB['connected_peers'] as int;
+    
+    print('🔗 After holepunch attempt - A: $postHolepunchConnectedA peers, B: $postHolepunchConnectedB peers');
+    
+    if (postHolepunchConnectedA == 0 || postHolepunchConnectedB == 0) {
+      return ScenarioResult.failure(
+        'Holepunch attempt broke relay connectivity. A: $postHolepunchConnectedA peers, B: $postHolepunchConnectedB peers. '
+        'Expected: relay connection maintained after failed holepunch.',
+      );
+    }
+    print('✅ Relay connectivity maintained after holepunch attempt');
+    
+    // Assertion 3: Verify communication still works via relay after holepunch
+    print('🏓 Testing communication via relay after holepunch...');
+    try {
+      final postHolepunchPing = await orchestrator.sendControlRequest(
+        'peer-a',
+        '/ping',
+        method: 'POST',
+        body: {'peer_id': peerBId},
+      );
+      print('📋 Post-holepunch ping result: $postHolepunchPing');
+      
+      if (!(postHolepunchPing['success'] as bool)) {
+        return ScenarioResult.failure(
+          'Relay communication failed after holepunch: ${postHolepunchPing['message']}',
+        );
+      }
+      print('✅ Relay communication maintained after holepunch');
+    } catch (e) {
+      return ScenarioResult.failure(
+        'Exception during post-holepunch communication test: $e',
+      );
+    }
+    
+    // Assertion 4: Verify bidirectional communication
+    print('🏓 Testing bidirectional communication (B → A)...');
+    try {
+      final reversePing = await orchestrator.sendControlRequest(
+        'peer-b',
+        '/ping',
+        method: 'POST',
+        body: {'peer_id': peerAId},
+      );
+      print('📋 Reverse ping result: $reversePing');
+      
+      if (!(reversePing['success'] as bool)) {
+        return ScenarioResult.failure(
+          'Bidirectional relay communication failed: ${reversePing['message']}',
+        );
+      }
+      print('✅ Bidirectional relay communication confirmed');
+    } catch (e) {
+      return ScenarioResult.failure(
+        'Exception during bidirectional communication test: $e',
+      );
+    }
+    
+    // Compile results
+    final metrics = {
+      'initial_connected_a': initialConnectedA,
+      'initial_connected_b': initialConnectedB,
+      'relay_connected_a': relayConnectedA,
+      'relay_connected_b': relayConnectedB,
+      'post_holepunch_connected_a': postHolepunchConnectedA,
+      'post_holepunch_connected_b': postHolepunchConnectedB,
+      'holepunch_failed': holepunchFailed,
+      'holepunch_error': holepunchError,
+    };
+    
     return ScenarioResult.success(
-      'Mixed NAT scenario handled gracefully',
+      'Mixed NAT scenario executed successfully: '
+      'relay connectivity established ($relayConnectedA/$relayConnectedB peers), '
+      'holepunch ${holepunchFailed ? "failed as expected" : "unexpected result"}, '
+      'relay maintained ($postHolepunchConnectedA/$postHolepunchConnectedB peers), '
+      'bidirectional communication verified',
+      metrics,
     );
   }
 
   @override
-  Future<void> teardown() async {}
+  Future<void> teardown() async {
+    // Collect detailed logs for Mixed NAT scenario analysis
+    try {
+      print('📋 Collecting Mixed NAT scenario logs...');
+      
+      final peerALogs = await orchestrator.getLogs('peer-a', lines: 30);
+      final peerBLogs = await orchestrator.getLogs('peer-b', lines: 30);
+      final relayLogs = await orchestrator.getLogs('relay-server', lines: 20);
+      final natALogs = await orchestrator.getLogs('nat-gateway-a', lines: 15);
+      final natBLogs = await orchestrator.getLogs('nat-gateway-b', lines: 15);
+      
+      print('📋 Peer A logs (Mixed NAT - Cone):\n$peerALogs');
+      print('📋 Peer B logs (Mixed NAT - Symmetric):\n$peerBLogs');
+      print('📋 Relay server logs:\n$relayLogs');
+      print('📋 NAT Gateway A logs (Cone):\n$natALogs');
+      print('📋 NAT Gateway B logs (Symmetric):\n$natBLogs');
+      
+      // Get final status for summary
+      try {
+        final finalStatusA = await orchestrator.sendControlRequest('peer-a', '/status');
+        final finalStatusB = await orchestrator.sendControlRequest('peer-b', '/status');
+        print('📊 Final status - A: ${finalStatusA['connected_peers']} peers, B: ${finalStatusB['connected_peers']} peers');
+      } catch (e) {
+        print('⚠️ Could not get final status: $e');
+      }
+      
+    } catch (e) {
+      print('⚠️ Failed to collect teardown logs: $e');
+    }
+  }
 }
 
 /// Container for scenario execution results
