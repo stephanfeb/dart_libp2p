@@ -368,9 +368,8 @@ class MixedNATScenario extends HolePunchScenario {
     print('✅ Relay connectivity established - both peers connected to relay server');
     print('📡 Note: Peers connect to relay server, not directly to each other in Mixed NAT scenario');
     
-    // Test communication via relay before holepunch attempt  
-    // Note: libp2p ping will route through relay server transparently
-    print('🏓 Testing relay communication using libp2p ping protocol...');
+    // Test communication via relay before holepunch attempt
+    print('🏓 Testing communication via relay...');
     try {
       final pingResult = await orchestrator.sendControlRequest(
         'peer-a',
