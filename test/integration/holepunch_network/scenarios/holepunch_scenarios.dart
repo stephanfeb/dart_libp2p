@@ -92,7 +92,10 @@ class ConeToConeSucessScenario extends HolePunchScenario {
     final peerBId = peerBStatus['peer_id'] as String;
     final peerAAddrs = List<String>.from(peerAStatus['addresses'] as List);
     final peerBAddrs = List<String>.from(peerBStatus['addresses'] as List);
-    
+
+    print("Address list for Peer A : ${peerAAddrs}");
+    print("Address list for Peer B : ${peerBAddrs}");
+
     print('👥 Peer A ID: $peerAId');
     print('👥 Peer B ID: $peerBId');
     

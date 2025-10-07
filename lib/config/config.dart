@@ -33,6 +33,11 @@ import 'package:logging/logging.dart';
 import '../core/peer/pb/peer_record.pb.dart' as pb;
 import '../core/peer/record.dart'; // Added for RecordRegistry
 
+// AutoNATv2 imports
+import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
+import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
+import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
+
 final Logger _logger = Logger('Config');
 
 /// Config describes a set of settings for a libp2p node
@@ -86,6 +91,9 @@ class Config {
   bool enableRelay = false; // Default to false for Relay service
   bool enableAutoNAT = false; // Default to false for AutoNAT service
   bool enableHolePunching = true; // Default to true for Hole Punching service
+
+  // AutoNATv2 specific configurations
+  List<AutoNATv2Option> autoNATv2Options = [];
 
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
@@ -322,6 +330,38 @@ extension ConfigOptions on Config {
   Future<void> withHolePunching(bool enabled) async {
     enableHolePunching = enabled;
   }
+
+  // AutoNATv2 specific configuration methods
+
+  /// Configures AutoNATv2 with specific options
+  Future<void> withAutoNATv2Options(List<AutoNATv2Option> options) async {
+    autoNATv2Options.addAll(options);
+  }
+
+  /// Configures AutoNATv2 to allow private addresses (for testing)
+  Future<void> withAutoNATv2AllowPrivateAddrs() async {
+    autoNATv2Options.add(allowPrivateAddrs());
+  }
+
+  /// Configures AutoNATv2 server rate limits
+  Future<void> withAutoNATv2ServerRateLimit(int rpm, int perPeerRPM, int dialDataRPM) async {
+    autoNATv2Options.add(withServerRateLimit(rpm, perPeerRPM, dialDataRPM));
+  }
+
+  /// Configures AutoNATv2 amplification attack prevention dial wait time
+  Future<void> withAutoNATv2AmplificationAttackPreventionDialWait(Duration duration) async {
+    autoNATv2Options.add(withAmplificationAttackPreventionDialWait(duration));
+  }
+
+  /// Configures AutoNATv2 with a custom data request policy
+  Future<void> withAutoNATv2DataRequestPolicy(DataRequestPolicyFunc policy) async {
+    autoNATv2Options.add(withDataRequestPolicy(policy));
+  }
+
+  /// Configures AutoNATv2 with a metrics tracer
+  Future<void> withAutoNATv2MetricsTracer(MetricsTracer metricsTracer) async {
+    autoNATv2Options.add(withMetricsTracer(metricsTracer));
+  }
 }
 
 /// Factory functions for creating options
@@ -417,6 +457,38 @@ class Libp2p {
 
   static Option autoNAT(bool enabled) {
     return (config) => config.withAutoNAT(enabled);
+  }
+
+  // AutoNATv2 specific options
+  
+  /// Configures AutoNATv2 with specific options
+  static Option autoNATv2Options(List<AutoNATv2Option> options) {
+    return (config) => config.withAutoNATv2Options(options);
+  }
+
+  /// Configures AutoNATv2 to allow private addresses (for testing)
+  static Option autoNATv2AllowPrivateAddrs() {
+    return (config) => config.withAutoNATv2AllowPrivateAddrs();
+  }
+
+  /// Configures AutoNATv2 server rate limits
+  static Option autoNATv2ServerRateLimit(int rpm, int perPeerRPM, int dialDataRPM) {
+    return (config) => config.withAutoNATv2ServerRateLimit(rpm, perPeerRPM, dialDataRPM);
+  }
+
+  /// Configures AutoNATv2 amplification attack prevention dial wait time
+  static Option autoNATv2AmplificationAttackPreventionDialWait(Duration duration) {
+    return (config) => config.withAutoNATv2AmplificationAttackPreventionDialWait(duration);
+  }
+
+  /// Configures AutoNATv2 with a custom data request policy
+  static Option autoNATv2DataRequestPolicy(DataRequestPolicyFunc policy) {
+    return (config) => config.withAutoNATv2DataRequestPolicy(policy);
+  }
+
+  /// Configures AutoNATv2 with a metrics tracer
+  static Option autoNATv2MetricsTracer(MetricsTracer metricsTracer) {
+    return (config) => config.withAutoNATv2MetricsTracer(metricsTracer);
   }
 
   static Option holePunching(bool enabled) {

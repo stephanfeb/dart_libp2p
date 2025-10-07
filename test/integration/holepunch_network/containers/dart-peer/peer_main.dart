@@ -57,7 +57,7 @@ class IntegrationTestPeer {
 
   Future<void> initialize() async {
     // Setup logging
-    Logger.root.level = Level.ALL;
+    Logger.root.level = Level.INFO;
     Logger.root.onRecord.listen((record) {
       print('${DateTime.now().toIso8601String()} [${record.level}] ${record.loggerName}: ${record.message}');
       if (record.error != null) print('ERROR: ${record.error}');
@@ -381,12 +381,18 @@ class IntegrationTestPeer {
         final pingStartTime = DateTime.now();
         
         // Ping the peer - this should work through relay if needed
-        await pingService.ping(targetPeerId).timeout(
+        // NOTE: ping() returns a Stream<PingResult>, so we must consume it to actually perform the ping
+        final pingResult = await pingService.ping(targetPeerId).first.timeout(
           Duration(seconds: 10),
-          onTimeout: (EventSink<PingResult> res) {
+          onTimeout: () {
             throw Exception('Ping timed out after 10 seconds');
           },
         );
+        
+        // Check if the ping failed
+        if (pingResult.hasError) {
+          throw Exception('Ping failed: ${pingResult.error}');
+        }
         
         final pingDuration = DateTime.now().difference(pingStartTime);
         print('✅ Ping successful to $targetPeerIdStr in ${pingDuration.inMilliseconds}ms');
@@ -404,6 +410,7 @@ class IntegrationTestPeer {
           'message': 'Ping successful via libp2p protocol (may use relay)',
           'target_peer': targetPeerIdStr,
           'ping_duration_ms': pingDuration.inMilliseconds,
+          'ping_rtt_ms': pingResult.rtt?.inMilliseconds,
           'connectedness': connectedness.toString(),
           'connections_count': connections.length,
           'connection_details': connections.map((c) => {

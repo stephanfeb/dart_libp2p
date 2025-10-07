@@ -11,12 +11,14 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
+import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/core/protocol/switch.dart';
 import 'package:dart_libp2p/core/record/envelope.dart'; // Added for Envelope
 import 'package:dart_libp2p/core/peer/record.dart' as peer_record; // Added for PeerRecord
 import 'package:dart_libp2p/core/certified_addr_book.dart'; // Added for CertifiedAddrBook
 import 'package:dart_libp2p/p2p/host/basic/natmgr.dart';
+import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
@@ -35,7 +37,7 @@ import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart'; // Added for PingService
 import 'package:dart_libp2p/p2p/host/relaysvc/relay_manager.dart'; // Added for RelayManager
-import 'package:dart_libp2p/p2p/host/autonat/autonat.dart'; // Added for AutoNAT
+// Removed old AutoNAT import - using AutoNATv2 instead
 import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart'; // Added for HolePunchService interface
 import 'package:dart_libp2p/p2p/protocol/holepunch/service.dart' as holepunch_impl; // Added for HolePunchServiceImpl and Options
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddress; // Added for isRelayAddress
@@ -87,9 +89,11 @@ class BasicHost implements Host {
   final EventBus _eventBus;
   PingService? _pingService; // Added PingService field
   RelayManager? _relayManager; // Added RelayManager field
-  AutoNAT? _autoNATService; // Added AutoNATService field
+  AutoNATv2? _autoNATService; // Changed to AutoNATv2 service field
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
+
+
 
   // Event emitters
   Emitter? _evtLocalProtocolsUpdated;
@@ -279,17 +283,23 @@ class BasicHost implements Host {
       _log.fine('RelayManager created and service monitoring started.');
     }
 
-    // Initialize AutoNATService if enabled
+    // Initialize AutoNATv2 service if enabled
     if (_config.enableAutoNAT) {
-      _log.fine('[BasicHost start] Before newAutoNAT. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
-      // For now, using default options for AutoNAT.
-      // More specific options can be plumbed through Config if needed.
-      _autoNATService = await newAutoNAT(this, [
-        // Example: autonat_options.withScheduleDelay(Duration(seconds: 15)),
-        // autonat_options.withBootDelay(Duration(seconds: 5)),
-      ]);
-      _log.fine('[BasicHost start] After newAutoNAT. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
-      _log.fine('AutoNAT service created and started.');
+      _log.fine('[BasicHost start] Before AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
+      
+      // Create AutoNATv2 with settings from config
+      // Both host and dialerHost are the same (this) - they should have same dialing capabilities
+      _autoNATService = AutoNATv2Impl(
+        this, // host
+        this, // dialerHost - same as host since they have same dialing capabilities
+        options: _config.autoNATv2Options, // Use options from config
+      );
+      
+      // Start the AutoNATv2 service
+      await _autoNATService!.start();
+      
+      _log.fine('[BasicHost start] After AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
+      _log.fine('AutoNATv2 service created and started.');
     }
 
     // Initialize HolePunchService if enabled
@@ -555,14 +565,7 @@ class BasicHost implements Host {
     }
   }
 
-  @override
-  PeerId get id => _network.localPeer as PeerId;
 
-  @override
-  Peerstore get peerStore => _network.peerstore;
-
-  @override
-  List<MultiAddr> get addrs => _addrsFactory(allAddrs);
 
   /// Returns all addresses the host is listening on.
   List<MultiAddr> get allAddrs {
@@ -726,6 +729,19 @@ class BasicHost implements Host {
   @override
   HolePunchService? get holePunchService => _holePunchService;
 
+  @override
+  PeerId get id => _network.localPeer;
+
+  @override
+  Peerstore get peerStore => _network.peerstore;
+
+  @override
+  List<MultiAddr> get addrs => _addrsFactory(allAddrs);
+
+  PingService? get pingService => _pingService;
+  RelayManager? get relayManager => _relayManager;
+  AutoNATv2? get autoNATService => _autoNATService;
+
   /// Returns only public/observed addresses suitable for holepunching.
   /// This includes:
   /// - Observed addresses from identify service (external addresses seen by peers)
@@ -739,25 +755,23 @@ class BasicHost implements Host {
     final observed = _idService.ownObservedAddrs();
     publicAddresses.addAll(observed);
     
-    // If AutoNAT v1 indicates we're publicly reachable, include addresses that appear public
-    // This is a heuristic until we have proper AutoNAT v2 address verification
+    // AutoNATv2 doesn't provide a simple status property like v1
+    // Instead, we include addresses that appear public based on other heuristics
+    // The actual reachability verification is done on-demand via getReachability()
     if (_autoNATService != null) {
-      final autonatStatus = _autoNATService!.status;
-      _log.fine('[BasicHost publicAddrs] AutoNAT status: $autonatStatus');
+      _log.fine('[BasicHost publicAddrs] AutoNATv2 service is available for reachability checks');
       
-      if (autonatStatus == Reachability.public) {
-        // When AutoNAT confirms we're publicly reachable, we can trust addresses that "look public"
-        // This helps when observed addresses aren't available yet
-        final candidateAddrs = allAddrs.where((addr) {
-          // Only include addresses that appear to be public (not private ranges)
-          return addr.isPublic() && !isRelayAddress(addr);
-        }).toList();
-        
-        _log.fine('[BasicHost publicAddrs] AutoNAT reports public reachability, adding ${candidateAddrs.length} candidate addresses');
-        publicAddresses.addAll(candidateAddrs);
-      } else {
-        _log.fine('[BasicHost publicAddrs] AutoNAT status is $autonatStatus, not adding candidate addresses');
-      }
+      // For now, we assume addresses might be public and include them
+      // This could be enhanced to cache previous getReachability() results
+      // When AutoNAT confirms we're publicly reachable, we can trust addresses that "look public"
+      // This helps when observed addresses aren't available yet
+      final candidateAddrs = allAddrs.where((addr) {
+        // Only include addresses that appear to be public (not private ranges)
+        return addr.isPublic() && !isRelayAddress(addr);
+      }).toList();
+      
+      _log.fine('[BasicHost publicAddrs] AutoNATv2 available, adding ${candidateAddrs.length} candidate addresses for reachability checks');
+      publicAddresses.addAll(candidateAddrs);
     }
     
     // Remove duplicates and filter out any private addresses that may have slipped through

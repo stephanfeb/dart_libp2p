@@ -572,17 +572,17 @@ class StaticAutoNAT implements AutoNAT {
 // Top-level factory function `New` from Go
 // It returns the AutoNAT interface type.
 // The options parameter is a list of functions that modify the config.
-Future<AutoNAT> newAutoNAT(Host h, List<AutoNATOption> options) async {
-  // Create a default config. The DialPolicy needs the host.
-  final dialPolicy = DialPolicyImpl(host: h);
-  final conf = AutoNATConfig(host: h, dialPolicy: dialPolicy);
-  
-  // Apply all options to the config
-  applyOptions(conf, options);
-
-  if (conf.forceReachability) {
-    return StaticAutoNAT.create(h, conf.reachability, options); // Pass options for service setup
-  } else {
-    return AmbientAutoNAT.create(h, options);
-  }
-}
+// Future<AutoNAT> newAutoNAT(Host h, List<AutoNATOption> options) async {
+//   // Create a default config. The DialPolicy needs the host.
+//   final dialPolicy = DialPolicyImpl(host: h);
+//   final conf = AutoNATConfig(host: h, dialPolicy: dialPolicy);
+//
+//   // Apply all options to the config
+//   applyOptions(conf, options);
+//
+//   if (conf.forceReachability) {
+//     return StaticAutoNAT.create(h, conf.reachability, options); // Pass options for service setup
+//   } else {
+//     return AmbientAutoNAT.create(h, options);
+//   }
+// }
