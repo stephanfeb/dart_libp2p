@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:dart_libp2p/core/host/host.dart';
-import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/network/network.dart' show Reachability; // Only import Reachability
 import 'package:dart_libp2p/core/event/reachability.dart' show EvtLocalReachabilityChanged; // Import the correct event
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/transport/upgrader.dart' show Upgrader;
+import 'package:logging/logging.dart';
 
 import './autorelay_config.dart';
 import './relay_finder.dart';
@@ -23,6 +23,8 @@ class EvtAutoRelayAddrsUpdated {
 }
 
 class AutoRelay {
+  static final Logger _log = Logger('AutoRelay');
+  
   final Host host;
   final AutoRelayConfig config;
   final RelayFinder relayFinder;
@@ -59,14 +61,16 @@ class AutoRelay {
     _stopController = StreamController<void>.broadcast(); // broadcast if multiple listeners, otherwise regular
     _backgroundCompleter = Completer<void>();
 
-    // log.debug('AutoRelay starting'); // TODO: Add logging
+    _log.fine('AutoRelay starting');
 
     // Start the background process
     _background(_stopController!.stream);
     
-    // Consider initial status check if needed, though background loop will catch first event.
-    // Also, trigger an initial address update.
-    _updateAndEmitAdvertisableAddrs();
+    _log.fine('AutoRelay started, waiting for reachability events');
+    // Don't emit addresses immediately on start. Wait for:
+    // 1. Reachability status to be determined
+    // 2. RelayFinder to discover and reserve relays
+    // Address updates will be triggered by reachability events and relay updates
   }
 
   Future<void> _updateAndEmitAdvertisableAddrs() async {
@@ -88,22 +92,23 @@ class AutoRelay {
   }
 
   void _background(Stream<void> stopSignal) async {
+    _log.fine('AutoRelay background task started, subscribing to reachability events');
     final reachabilityEventBusSub = host.eventBus.subscribe(EvtLocalReachabilityChanged);
     _reachabilitySubscription = reachabilityEventBusSub.stream.takeUntil(stopSignal).listen(
       (event) async { // Make listener async
         if (event is EvtLocalReachabilityChanged) {
           _status = event.reachability;
-          // log.debug('AutoRelay: Reachability changed to $_status'); // TODO: Add logging
+          _log.fine('AutoRelay: Reachability changed to $_status');
           if (_status == Reachability.private || _status == Reachability.unknown) {
-            // log.debug('AutoRelay: Reachability is Private/Unknown, starting RelayFinder.');
+            _log.fine('AutoRelay: Reachability is Private/Unknown, starting RelayFinder');
             await relayFinder.start().catchError((e) {
-              // log.error('AutoRelay: Failed to start RelayFinder: $e');
+              _log.severe('AutoRelay: Failed to start RelayFinder: $e');
             });
             metricsTracer.relayFinderStatus(true);
           } else { // Public
-            // log.debug('AutoRelay: Reachability is Public, stopping RelayFinder.');
+            _log.fine('AutoRelay: Reachability is Public, stopping RelayFinder');
             await relayFinder.stop().catchError((e) {
-              // log.error('AutoRelay: Failed to stop RelayFinder: $e');
+              _log.severe('AutoRelay: Failed to stop RelayFinder: $e');
             });
             metricsTracer.relayFinderStatus(false);
           }
@@ -111,10 +116,10 @@ class AutoRelay {
         }
       },
       onError: (e) {
-        // log.error('AutoRelay: Error on reachability event stream: $e');
+        _log.severe('AutoRelay: Error on reachability event stream: $e');
       },
       onDone: () {
-        // log.debug('AutoRelay: Reachability event stream closed.');
+        _log.fine('AutoRelay: Reachability event stream closed');
       }
     );
 

@@ -89,6 +89,7 @@ class Config {
   // Service-specific enable flags
   bool enablePing = true; // Default to true for Ping service
   bool enableRelay = false; // Default to false for Relay service
+  bool enableAutoRelay = false; // Default to false for AutoRelay service
   bool enableAutoNAT = false; // Default to false for AutoNAT service
   bool enableHolePunching = true; // Default to true for Hole Punching service
 

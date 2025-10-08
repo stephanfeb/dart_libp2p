@@ -42,6 +42,8 @@ import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart'; // A
 import 'package:dart_libp2p/p2p/protocol/holepunch/service.dart' as holepunch_impl; // Added for HolePunchServiceImpl and Options
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddress; // Added for isRelayAddress
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart'; // Added for BasicUpgrader
+import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // Added for AutoRelay
+import 'package:dart_libp2p/p2p/host/autorelay/autorelay_config.dart'; // Added for AutoRelayConfig
 
 final _log = Logger('basichost');
 
@@ -89,9 +91,15 @@ class BasicHost implements Host {
   final EventBus _eventBus;
   PingService? _pingService; // Added PingService field
   RelayManager? _relayManager; // Added RelayManager field
+  AutoRelay? _autoRelay; // Added AutoRelay field
   AutoNATv2? _autoNATService; // Changed to AutoNATv2 service field
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
+  
+  // AutoRelay state
+  List<MultiAddr> _autoRelayAddrs = []; // Cache for circuit addresses from AutoRelay
+  StreamSubscription? _autoRelayAddrsSubscription; // Subscription to AutoRelay address updates
+  StreamSubscription? _autoRelayConnSubscription; // Subscription to connection events for AutoRelay
 
 
 
@@ -314,6 +322,76 @@ class BasicHost implements Host {
       await _holePunchService!.start(); // Call start as per its interface
       _log.fine('[BasicHost start] After _holePunchService.start. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       _log.fine('HolePunch service started.');
+    }
+
+    // Initialize AutoRelay if enabled
+    if (_config.enableAutoRelay) {
+      _log.fine('[BasicHost start] Initializing AutoRelay...');
+      
+      // Create AutoRelay configuration
+      // Use a peer source callback that returns relay peers from the peerstore
+      final autoRelayConfig = AutoRelayConfig(
+        peerSourceCallback: (int numPeers) async* {
+          // Return connected peers as potential relay candidates
+          _log.fine('[BasicHost AutoRelay] Peer source callback called, requesting $numPeers candidates');
+          final connectedPeers = _network.peers;
+          _log.fine('[BasicHost AutoRelay] Found ${connectedPeers.length} connected peers');
+          
+          int yielded = 0;
+          for (final peerId in connectedPeers) {
+            if (yielded >= numPeers) break;
+            
+            // Get peer's addresses from peerstore
+            final addrs = await _network.peerstore.addrBook.addrs(peerId);
+            if (addrs.isNotEmpty) {
+              _log.fine('[BasicHost AutoRelay] Yielding candidate: $peerId with ${addrs.length} addresses');
+              yield AddrInfo(peerId, addrs);
+              yielded++;
+            }
+          }
+          _log.fine('[BasicHost AutoRelay] Peer source callback yielded $yielded candidates');
+        },
+        // Use shorter boot delay for faster relay establishment (default is 3 minutes)
+        bootDelay: Duration(seconds: 5),
+        // Check for candidates more frequently (default is 30 seconds)
+        minInterval: Duration(seconds: 10),
+      );
+      
+      // Create AutoRelay instance with the upgrader
+      _autoRelay = AutoRelay(this, _upgrader, userConfig: autoRelayConfig);
+      
+      // Subscribe to AutoRelay address updates BEFORE starting
+      _autoRelayAddrsSubscription = _eventBus
+          .subscribe(EvtAutoRelayAddrsUpdated)
+          .stream
+          .listen((event) {
+        if (event is EvtAutoRelayAddrsUpdated) {
+          _log.fine('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          _autoRelayAddrs = List.from(event.advertisableAddrs);
+          
+          // Trigger address change to notify other components
+          _addrChangeChan.add(null);
+        }
+      });
+      
+      // Subscribe to connection events to notify AutoRelay of new potential relays
+      _autoRelayConnSubscription = _eventBus
+          .subscribe(EvtPeerConnectednessChanged)
+          .stream
+          .listen((event) {
+        if (event is EvtPeerConnectednessChanged) {
+          _log.fine('[BasicHost] Peer connectedness changed: ${event.peer}, ${event.connectedness}');
+          // When a new peer connects, trigger AutoRelay to check for new relay candidates
+          if (event.connectedness == Connectedness.connected) {
+            _log.fine('[BasicHost] New peer connected, notifying AutoRelay to check for relay candidates');
+            // The AutoRelay will call the peerSourceCallback on its next cycle
+          }
+        }
+      });
+      
+      // Start AutoRelay
+      await _autoRelay!.start();
+      _log.fine('[BasicHost start] AutoRelay service created and started.');
     }
     
     _log.fine('[BasicHost start] Before calling _startBackground. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
@@ -700,6 +778,13 @@ class BasicHost implements Host {
     final observed = _idService.ownObservedAddrs();
     finalAddrs.addAll(observed);
     
+    // 4. Add circuit relay addresses from AutoRelay
+    // These are addresses where we can be reached via a relay server
+    if (_autoRelay != null && _autoRelayAddrs.isNotEmpty) {
+      _log.fine('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      finalAddrs.addAll(_autoRelayAddrs);
+    }
+    
     // If after all this, finalAddrs is empty, but we had original listen addresses,
     // it implies they were all unspecified, no local IPs found, no NAT mapping, and no observed.
     // This scenario should result in an empty list.
@@ -1074,6 +1159,17 @@ class BasicHost implements Host {
 
     // Close HolePunchService if initialized
     await _holePunchService?.close();
+
+    // Close AutoRelay if initialized
+    if (_autoRelay != null) {
+      await _autoRelayAddrsSubscription?.cancel();
+      _autoRelayAddrsSubscription = null;
+      await _autoRelayConnSubscription?.cancel();
+      _autoRelayConnSubscription = null;
+      await _autoRelay!.close();
+      _autoRelay = null;
+      _autoRelayAddrs = [];
+    }
 
     // Close NAT manager if available
     if (_natmgr != null) {

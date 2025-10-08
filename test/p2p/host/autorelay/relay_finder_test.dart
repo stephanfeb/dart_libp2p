@@ -50,25 +50,38 @@ void main() {
     });
 
     group('Circuit Address Construction', () {
-      test('should construct circuit addresses when connected to relay', () async {
+      test('should construct valid circuit addresses from reservations', () async {
         // Arrange
         final relayFinder = RelayFinder(mockHost, mockUpgrader, config);
         
         // Create a relay peer ID
         final relayPeerId = PeerId.fromString('12D3KooWRcr1tPJ5D46uESVgA1sJrNmcGrW2XHGcHztHadBvcv3G');
         
-        // Relay addresses (what the relay advertises)
+        // Relay addresses (what the relay advertises) - use public IPs
         final relayAddresses = [
-          MultiAddr('/ip4/10.10.3.10/tcp/4001'),
-          MultiAddr('/ip4/192.168.1.1/tcp/4001'),
+          MultiAddr('/ip4/1.2.3.4/tcp/4001'),    // Public IP
+          MultiAddr('/ip4/5.6.7.8/tcp/4001'),    // Public IP
         ];
         
-        // Note: We need to access the internal _relays map to add our test relay
-        // Since it's private, we'll test through the public API
-        
-        // Mock the peerstore to return relay addresses
+        // Mock the peerstore to return relay addresses BEFORE injecting reservation
+        when(mockHost.peerStore).thenReturn(mockPeerstore);
+        when(mockPeerstore.addrBook).thenReturn(mockAddrBook);
         when(mockAddrBook.addrs(relayPeerId))
             .thenAnswer((_) async => relayAddresses);
+        
+        // Create a test reservation
+        final reservation = Reservation(
+          DateTime.now().add(Duration(hours: 1)),  // expire
+          relayAddresses,  // addrs
+          null,  // voucher
+        );
+        
+        // Inject the reservation using test helper
+        await relayFinder.addTestReservation(relayPeerId, reservation);
+        
+        // Verify the relay was actually added
+        expect(await relayFinder.hasRelay(relayPeerId), isTrue, 
+          reason: 'Relay should be added to internal map');
         
         // Mock current host addresses (peer's own addresses)
         final currentHostAddrs = [
@@ -76,20 +89,37 @@ void main() {
         ];
         
         // Act - Get relay addresses
-        // Note: This will return empty initially since we haven't added the relay
-        // In real usage, RelayFinder would discover and add relays
         final circuitAddrs = await relayFinder.getRelayAddrs(currentHostAddrs);
         
-        // Assert - Since we can't directly add to _relays, this test verifies
-        // the address construction logic by checking the expected format
-        // In a real scenario with a connected relay, we'd expect:
-        // /ip4/10.10.3.10/tcp/4001/p2p/12D3KooWRelayPeerID123456789/p2p-circuit
+        // Verify the mock was called
+        verify(mockAddrBook.addrs(relayPeerId)).called(greaterThanOrEqualTo(1));
         
-        // For now, verify the method doesn't crash
-        expect(circuitAddrs, isA<List<MultiAddr>>());
+        // Assert - Should contain circuit addresses
+        expect(circuitAddrs, isNotEmpty, reason: 'Should return at least private addresses or circuit addresses');
         
-        // TODO: Once RelayFinder has a public method to add relay connections,
-        // enhance this test to verify actual circuit address construction
+        // Verify circuit addresses have correct format
+        // Expected: /ip4/10.10.3.10/tcp/4001/p2p/<relay-id>/p2p-circuit
+        final circuitAddrsWithRelayId = circuitAddrs.where((addr) {
+          final addrStr = addr.toString();
+          return addrStr.contains('/p2p/${relayPeerId.toBase58()}') && 
+                 addrStr.contains('/p2p-circuit');
+        }).toList();
+        
+        expect(circuitAddrsWithRelayId, isNotEmpty, 
+          reason: 'Should have at least one circuit address with relay peer ID');
+        
+        // Verify both relay addresses produced circuit addresses
+        expect(circuitAddrsWithRelayId.length, equals(2),
+          reason: 'Should have circuit addresses for both relay addresses');
+        
+        // Verify format of first circuit address
+        final firstCircuitAddr = circuitAddrsWithRelayId[0].toString().trimRight();
+        expect(firstCircuitAddr, contains('/ip4/'));
+        expect(firstCircuitAddr, contains('/tcp/4001'));
+        expect(firstCircuitAddr, contains('/p2p/${relayPeerId.toBase58()}'));
+        // Accept both with and without trailing slash
+        expect(firstCircuitAddr.endsWith('/p2p-circuit') || firstCircuitAddr.endsWith('/p2p-circuit/'), isTrue,
+          reason: 'Address should end with /p2p-circuit (with or without trailing slash)');
       });
 
       test('should construct valid circuit address format', () {
@@ -120,19 +150,37 @@ void main() {
         final relayPeerId2 = PeerId.fromString('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx');
         
         final relay1Addrs = [
-          MultiAddr('/ip4/10.10.1.1/tcp/4001'),
-          MultiAddr('/ip4/10.10.1.2/tcp/4001'),
+          MultiAddr('/ip4/11.22.33.44/tcp/4001'),  // Public IP
+          MultiAddr('/ip4/55.66.77.88/tcp/4001'),  // Public IP
         ];
         
         final relay2Addrs = [
-          MultiAddr('/ip4/10.10.2.1/tcp/4001'),
+          MultiAddr('/ip4/99.100.101.102/tcp/4001'),  // Public IP
         ];
         
-        // Mock peerstore responses
+        // Create reservations for both relays
+        final reservation1 = Reservation(
+          DateTime.now().add(Duration(hours: 1)),
+          relay1Addrs,
+          null,
+        );
+        final reservation2 = Reservation(
+          DateTime.now().add(Duration(hours: 1)),
+          relay2Addrs,
+          null,
+        );
+        
+        // Mock peerstore responses BEFORE injecting reservations
+        when(mockHost.peerStore).thenReturn(mockPeerstore);
+        when(mockPeerstore.addrBook).thenReturn(mockAddrBook);
         when(mockAddrBook.addrs(relayPeerId1))
             .thenAnswer((_) async => relay1Addrs);
         when(mockAddrBook.addrs(relayPeerId2))
             .thenAnswer((_) async => relay2Addrs);
+        
+        // Inject both reservations
+        await relayFinder.addTestReservation(relayPeerId1, reservation1);
+        await relayFinder.addTestReservation(relayPeerId2, reservation2);
         
         final currentHostAddrs = [
           MultiAddr('/ip4/192.168.1.100/tcp/4001'),
@@ -141,11 +189,24 @@ void main() {
         // Act
         final circuitAddrs = await relayFinder.getRelayAddrs(currentHostAddrs);
         
-        // Assert - Verify format
-        expect(circuitAddrs, isA<List<MultiAddr>>());
+        // Assert - With 2 relays having 3 total addresses, we expect 3 circuit addresses
+        final circuitAddrsOnly = circuitAddrs.where((addr) => 
+          addr.toString().contains('/p2p-circuit')
+        ).toList();
         
-        // With 2 relays having 3 total addresses, we'd expect 3 circuit addresses
-        // (once the relays are actually added to the internal _relays map)
+        expect(circuitAddrsOnly.length, equals(3),
+          reason: 'Should have 3 circuit addresses (2 from relay1 + 1 from relay2)');
+        
+        // Verify both relay peer IDs are present
+        final addrsWithRelay1 = circuitAddrs.where((addr) => 
+          addr.toString().contains('/p2p/${relayPeerId1.toBase58()}')
+        ).toList();
+        expect(addrsWithRelay1.length, equals(2));
+        
+        final addrsWithRelay2 = circuitAddrs.where((addr) => 
+          addr.toString().contains('/p2p/${relayPeerId2.toBase58()}')
+        ).toList();
+        expect(addrsWithRelay2.length, equals(1));
       });
 
       test('should include private/loopback addresses in result', () async {

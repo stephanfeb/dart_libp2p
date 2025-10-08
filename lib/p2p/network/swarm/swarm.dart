@@ -511,12 +511,57 @@ class Swarm implements Network {
 
   @override
   Future<List<MultiAddr>> get interfaceListenAddresses async {
-    // For now, just return the listen addresses
-    // In a real implementation, we would expand "any interface" addresses
-    return listenAddresses;
+    // Expand "any interface" addresses (/ip4/0.0.0.0, /ip6/::) to use actual network interfaces
+    final List<MultiAddr> result = [];
+    
+    // Get all network interfaces
+    List<NetworkInterface> interfaces;
+    try {
+      interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.any,
+      );
+    } catch (e) {
+      _logger.warning('Failed to list network interfaces: $e');
+      // Fallback to returning listen addresses as-is
+      return listenAddresses;
+    }
+    
+    for (final listenAddr in listenAddresses) {
+      final addrStr = listenAddr.toString();
+      
+      // Check if this is an unspecified address
+      if (addrStr.contains('/ip4/0.0.0.0') || addrStr.contains('/ip6/::')) {
+        // Expand to all interface addresses
+        for (final interface in interfaces) {
+          for (final addr in interface.addresses) {
+            try {
+              // Replace 0.0.0.0 or :: with the actual interface address
+              String expandedAddrStr;
+              if (addr.type == InternetAddressType.IPv4 && addrStr.contains('/ip4/0.0.0.0')) {
+                expandedAddrStr = addrStr.replaceFirst('/ip4/0.0.0.0', '/ip4/${addr.address}');
+              } else if (addr.type == InternetAddressType.IPv6 && addrStr.contains('/ip6/::')) {
+                expandedAddrStr = addrStr.replaceFirst('/ip6/::', '/ip6/${addr.address}');
+              } else {
+                continue; // Skip if address type doesn't match
+              }
+              
+              final expandedAddr = MultiAddr(expandedAddrStr);
+              result.add(expandedAddr);
+            } catch (e) {
+              _logger.fine('Failed to create expanded address for ${addr.address}: $e');
+            }
+          }
+        }
+      } else {
+        // Not an unspecified address, add as-is
+        result.add(listenAddr);
+      }
+    }
+    
+    return result;
   }
 
-  @override
   Future<List<MultiAddr>> getListenAddrs() async {
     _logger.fine('Swarm.getListenAddrs called. Current _listeners count: ${_listeners.length}, current _listenAddrs: $_listenAddrs');
     // For now, it simply returns the known _listenAddrs.

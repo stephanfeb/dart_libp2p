@@ -66,6 +66,9 @@ Future<Libp2pNode> createLibp2pNode({
   KeyPair? keyPair,
   List<MultiAddr>? listenAddrsOverride, // If null, will use default
   String? userAgentPrefix,
+  bool enableRelay = false,
+  bool enableAutoRelay = false,
+  bool enablePing = false,
 }) async {
   final kp = keyPair ?? await crypto_ed25519.generateEd25519KeyPair();
   final peerId = await core_peer_id_lib.PeerId.fromPublicKey(kp.publicKey);
@@ -99,7 +102,7 @@ Future<Libp2pNode> createLibp2pNode({
     ..peerKey = kp
     ..enableAutoNAT= false
     ..enableHolePunching = false
-    ..enableRelay =false
+    ..enableRelay = enableRelay
     ..connManager = connManager
     ..eventBus = p2p_eventbus.BasicBus() // Swarm's own event bus
     ..addrsFactory = passThroughAddrsFactory
@@ -127,7 +130,9 @@ Future<Libp2pNode> createLibp2pNode({
     ..connManager = connManager
     ..enableAutoNAT= false
     ..enableHolePunching = false
-    ..enableRelay =false
+    ..enableRelay = enableRelay
+    ..enableAutoRelay = enableAutoRelay
+    ..enablePing = enablePing
     ..disableSignedPeerRecord = false
     ..addrsFactory = passThroughAddrsFactory
     ..negotiationTimeout = Duration(seconds: 20)

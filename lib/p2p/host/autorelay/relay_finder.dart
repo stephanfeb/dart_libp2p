@@ -14,6 +14,8 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart' show Circ
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/reservation.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart' show CircuitV2Protocol;
 
+import 'package:meta/meta.dart'; // For @visibleForTesting
+import 'package:logging/logging.dart';
 
 import 'package:synchronized/synchronized.dart';
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // For Protocols class
@@ -40,6 +42,8 @@ class Candidate {
 }
 
 class RelayFinder {
+  static final Logger _log = Logger('RelayFinder');
+  
   final Host host;
   final Upgrader upgrader;
   final AutoRelayConfig config;
@@ -88,15 +92,20 @@ class RelayFinder {
   }
 
   Future<void> start() async {
-    if (_isRunning) return;
+    if (_isRunning) {
+      _log.fine('RelayFinder already running, skipping start');
+      return;
+    }
+    _log.fine('RelayFinder starting');
     _isRunning = true;
-    _stopController = StreamController<void>();
+    _stopController = StreamController<void>.broadcast(); // Broadcast to allow multiple listeners
     _backgroundCompleter = Completer<void>();
     _initMetrics();
     _background(_stopController!.stream);
     _backgroundCompleter!.future.whenComplete(() {
         _isRunning = false;
     });
+    _log.fine('RelayFinder started, background task running');
   }
 
   Future<void> stop() async {
@@ -138,6 +147,7 @@ class RelayFinder {
   }
 
   void _background(Stream<void> stopSignal) async {
+    _log.fine('RelayFinder background task started. Boot delay: ${config.bootDelay}');
     final peerSourceRateLimiter = StreamController<void>();
     peerSourceRateLimiter.add(null); 
 
@@ -146,6 +156,7 @@ class RelayFinder {
     _cleanupDisconnectedPeers(stopSignal);
 
     final bootDelayTimer = Timer(config.bootDelay, () {
+      _log.fine('RelayFinder boot delay expired, notifying to check for relays');
       if (!(_stopController?.isClosed ?? true)) _notifyMaybeConnectToRelay();
     });
 
@@ -253,20 +264,33 @@ class RelayFinder {
 
       int numCandidates = await _candidateMx.synchronized(() => _candidates.length);
       if (numCandidates < config.minCandidates) {
+        _log.fine('RelayFinder: Need more candidates ($numCandidates < ${config.minCandidates}), calling peer source for up to ${config.maxCandidates} peers');
         metricsTracer.candidateLoopState(CandidateLoopState.peerSourceRateLimited);
         currentPeerStream = _peerSource(config.maxCandidates);
         
         currentPeerSubscription = currentPeerStream?.listen(
           (addrInfo) async {
+            _log.fine('RelayFinder: Received candidate from peer source: ${addrInfo.id.toBase58()}');
             bool isOnBackoff = await _candidateMx.synchronized(() => _backoff.containsKey(addrInfo.id));
-            if (isOnBackoff) return;
+            if (isOnBackoff) {
+              _log.fine('RelayFinder: Candidate ${addrInfo.id.toBase58()} is on backoff, skipping');
+              return;
+            }
             int currentNumCandidates = await _candidateMx.synchronized(() => _candidates.length);
-            if (currentNumCandidates >= config.maxCandidates) return;
+            if (currentNumCandidates >= config.maxCandidates) {
+              _log.fine('RelayFinder: Already have enough candidates ($currentNumCandidates >= ${config.maxCandidates}), skipping');
+              return;
+            }
             
             final handlerCompleter = Completer<void>();
             pendingNodeHandlers.add(handlerCompleter.future);
             _handleNewNode(addrInfo).then((added) {
-              if (added) _notifyNewCandidate();
+              if (added) {
+                _log.fine('RelayFinder: Candidate ${addrInfo.id.toBase58()} added successfully');
+                _notifyNewCandidate();
+              } else {
+                _log.fine('RelayFinder: Candidate ${addrInfo.id.toBase58()} was not added');
+              }
             }).whenComplete(() => handlerCompleter.complete());
           },
           onDone: () async {
@@ -648,6 +672,33 @@ class RelayFinder {
       _cachedAddrsExpiry = config.clock.now().add(const Duration(seconds: 30));
       metricsTracer.relayAddressCount(relayAddrCountForMetrics);
       return raddrs;
+    });
+  }
+
+  /// Test helper method to inject reservations for testing purposes.
+  /// This allows unit tests to verify circuit address construction without
+  /// needing to perform actual relay connections.
+  @visibleForTesting
+  Future<void> addTestReservation(PeerId relayPeerId, Reservation reservation) async {
+    await _relayMx.synchronized(() {
+      _relays[relayPeerId] = reservation;
+    });
+    _clearCachedAddrsAndSignalAddressChange();
+  }
+
+  /// Test helper to check if a relay exists in the internal map.
+  @visibleForTesting
+  Future<bool> hasRelay(PeerId relayPeerId) async {
+    return await _relayMx.synchronized(() {
+      return _relays.containsKey(relayPeerId);
+    });
+  }
+
+  /// Test helper to get the number of relays.
+  @visibleForTesting
+  Future<int> get relayCount async {
+    return await _relayMx.synchronized(() {
+      return _relays.length;
     });
   }
 }

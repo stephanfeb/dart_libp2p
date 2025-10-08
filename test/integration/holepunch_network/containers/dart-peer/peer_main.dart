@@ -87,6 +87,7 @@ class IntegrationTestPeer {
       ..enableHolePunching = _getBoolEnv('ENABLE_HOLEPUNCH', true)
       ..enableRelay = _getBoolEnv('ENABLE_RELAY', role == 'relay')
       ..enableAutoNAT = _getBoolEnv('ENABLE_AUTONAT', false)
+      ..enableAutoRelay = _getBoolEnv('ENABLE_AUTORELAY', role != 'relay') // Enable AutoRelay for non-relay peers
       ..enablePing = true
       // 🔒 SECURITY: Add Noise security protocol (fixes "No security protocols configured")
       ..securityProtocols = [await NoiseSecurity.create(keyPair)]
