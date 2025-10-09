@@ -6,14 +6,12 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/p2p/host/host.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/relay/resources.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
-import 'package:logging/logging.dart';
 import 'package:fixnum/fixnum.dart';
 
 import '../../../../core/host/host.dart';
@@ -116,22 +114,31 @@ class Relay {
       ..addrs.addAll(_host.addrs.map((addr) => addr.toBytes()))
       ..voucher = voucher.marshalRecord();
 
-    // Create a limit message
-    final limit = Limit()
-      ..duration = _resources.connectionDuration
-      ..data = Int64(_resources.connectionData);
+  // Create a limit message
+  final limit = Limit()
+    ..duration = _resources.connectionDuration
+    ..data = Int64(_resources.connectionData);
 
-    // Write the response (length-delimited)
-    final response = HopMessage()
-      ..type = HopMessage_Type.STATUS
-      ..status = Status.OK
-      ..reservation = reservation
-      ..limit = limit;
-    print('[Relay] Sending reservation response to peer: ${peerId.toBase58()}');
-    final writer = StreamSinkFromP2PStream(stream);
-    writeDelimitedMessage(writer, response);
-    print('[Relay] Reservation response sent');
-  }
+  // Write the response (length-delimited)
+  final response = HopMessage()
+    ..type = HopMessage_Type.STATUS
+    ..status = Status.OK
+    ..reservation = reservation
+    ..limit = limit;
+  print('[Relay] Sending reservation response to peer: ${peerId.toBase58()}');
+  
+  // Write the message with a custom writer that tracks the write operation
+  final writeCompleter = Completer<void>();
+  final writer = StreamSinkFromP2PStream(stream, writeCompleter);
+  writeDelimitedMessage(writer, response);
+  
+  // Wait for the write to complete before returning
+  await writeCompleter.future;
+  print('[Relay] Reservation response sent and flushed');
+  
+  // Add a small delay to ensure the data is transmitted
+  await Future.delayed(Duration(milliseconds: 50));
+}
 
   /// Handles a connection request.
   Future<void> _handleConnect(P2PStream stream, HopMessage msg) async {
@@ -180,7 +187,7 @@ class Relay {
 
       // Read the response
       final stopResponse = await dstStream.read();
-      if (stopResponse == null) {
+      if (stopResponse.isEmpty) {
         throw Exception('unexpected EOF');
       }
       final pb = StopMessage.fromBuffer(stopResponse);
@@ -336,16 +343,35 @@ Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
 /// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage
 class StreamSinkFromP2PStream implements Sink<List<int>> {
   final P2PStream _stream;
-  StreamSinkFromP2PStream(this._stream);
+  final Completer<void>? _writeCompleter;
+  
+  StreamSinkFromP2PStream(this._stream, [this._writeCompleter]);
 
   @override
   void add(List<int> data) {
-    _stream.write(Uint8List.fromList(data));
+    // P2PStream.write() is async, so we need to await it
+    // But Sink.add() is synchronous, so we schedule it and track completion
+    _stream.write(Uint8List.fromList(data)).then((_) {
+      // Write completed successfully
+      if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+        _writeCompleter.complete();
+      }
+    }).catchError((error) {
+      // Write failed
+      if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+        _writeCompleter.completeError(error);
+      }
+    });
   }
 
   @override
   void close() {
     // Closing the sink doesn't necessarily close the underlying P2PStream
     // as the stream's lifecycle is managed by the caller
+    
+    // If no writes were made and completer exists, complete it
+    if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+      _writeCompleter.complete();
+    }
   }
 }

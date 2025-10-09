@@ -416,7 +416,7 @@ class RelayFinder {
         });
         _notifyMaybeNeedNewCandidates();
         host.connManager.protect(id, autorelayTag);
-        _notifyRelayUpdated();
+        _clearCachedAddrsAndSignalAddressChange(); // Clear cached addresses and trigger address update
         metricsTracer.reservationRequestFinished(false, null);
 
         if (numActiveRelays >= config.desiredRelays) break;
@@ -621,7 +621,9 @@ class RelayFinder {
 
   Future<List<MultiAddr>> getRelayAddrs(List<MultiAddr> currentHostAddrs) async {
     return _relayMx.synchronized<List<MultiAddr>>(() async { // Made outer lambda async
+      _log.fine('RelayFinder: getRelayAddrs() called with ${currentHostAddrs.length} host addresses, ${_relays.length} active relays');
       if (_cachedAddrs.isNotEmpty && config.clock.now().isBefore(_cachedAddrsExpiry)) {
+        _log.fine('RelayFinder: Returning cached addresses (${_cachedAddrs.length})');
         return List<MultiAddr>.from(_cachedAddrs);
       }
 
@@ -629,45 +631,37 @@ class RelayFinder {
       for (var addr in currentHostAddrs) {
         if (addr.isPrivate() || addr.isLoopback()) {
           raddrs.add(addr);
+          _log.fine('RelayFinder: Added private/loopback address: $addr');
         }
       }
 
+      _log.fine('RelayFinder: Processing ${_relays.length} relays for circuit address construction');
       int relayAddrCountForMetrics = 0;
-      // Use a temporary list to collect futures if forEach body is async
-      List<Future<void>> addrProcessingFutures = [];
 
       _relays.forEach((peerId, reservation) {
-        // This internal lambda for forEach cannot be async directly if the outer _relayMx.synchronized is not.
-        // To do async work per relay, we'd collect futures and await them outside the synchronized block,
-        // or make the synchronized block itself support async operations if the library allows.
-        // For now, assuming addrs() is relatively quick or we accept blocking here.
-        // A better pattern would be to get all relay PeerIds, release lock, get all addrs, re-acquire lock.
+        _log.fine('RelayFinder: Processing relay: ${peerId.toBase58()}');
+        // Use the addresses from the reservation - these are provided by the relay server
+        // and should be trusted as-is without filtering. The relay knows best which addresses
+        // it's reachable at (public IPs, private network IPs, etc.)
+        final relayPeerAddrs = reservation.addrs;
+        _log.fine('RelayFinder: Reservation has ${relayPeerAddrs.length} addresses for relay ${peerId.toBase58()}');
         
-        // Simplified: if host.peerStore.addrBook.addrs is async, this forEach is problematic inside sync block.
-        // Assuming it's synchronous for this sketch or this part needs more advanced refactoring.
-        // For the purpose of this fix, let's assume it can be made to work.
-        // The original Go code does this under a lock.
-        
-        // Corrected to be async and collect futures:
-        final future = host.peerStore.addrBook.addrs(peerId).then((relayPeerAddrs) {
-            final cleanedRelayPeerAddrs = address_utils.cleanupAddressSet(relayPeerAddrs);
-            relayAddrCountForMetrics += cleanedRelayPeerAddrs.length;
-            for (var relayAddr in cleanedRelayPeerAddrs) {
-                try {
-                    var circuitAddr = relayAddr
-                        .encapsulate(Protocols.p2p.name, peerId.toString())
-                        .encapsulate(Protocols.circuit.name, '');
-                    raddrs.add(circuitAddr);
-                } catch (e) {
-                    // log.warning('Failed to create circuit address for relay $peerId via $relayAddr: $e');
-                }
+        // Don't filter relay addresses - trust the relay server's advertised addresses
+        relayAddrCountForMetrics += relayPeerAddrs.length;
+        for (var relayAddr in relayPeerAddrs) {
+            try {
+                var circuitAddr = relayAddr
+                    .encapsulate(Protocols.p2p.name, peerId.toString())
+                    .encapsulate(Protocols.circuit.name, '');
+                raddrs.add(circuitAddr);
+                _log.fine('RelayFinder: Created circuit address: $circuitAddr');
+            } catch (e) {
+                _log.warning('RelayFinder: Failed to create circuit address for relay $peerId via $relayAddr: $e');
             }
-        });
-        addrProcessingFutures.add(future);
+        }
       });
-      
-      await Future.wait(addrProcessingFutures); // Wait for all async addr processing
 
+      _log.fine('RelayFinder: Built ${raddrs.length} total addresses (private + circuit)');
       _cachedAddrs = List<MultiAddr>.from(raddrs);
       _cachedAddrsExpiry = config.clock.now().add(const Duration(seconds: 30));
       metricsTracer.relayAddressCount(relayAddrCountForMetrics);

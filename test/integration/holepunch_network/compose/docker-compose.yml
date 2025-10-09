@@ -121,7 +121,8 @@ services:
         ipv4_address: 10.10.3.10
     environment:
       - PEER_ROLE=relay
-      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - PEER_NAME=relay-server
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001
       - ENABLE_RELAY=true
       - ENABLE_HOLEPUNCH=true
       - STUN_SERVERS=10.10.2.10:3478
@@ -143,9 +144,10 @@ services:
     environment:
       - PEER_ROLE=peer
       - PEER_NAME=peer-a
-      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001
       - ENABLE_HOLEPUNCH=true
-      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWRcr1tPJ5D46uESVgA1sJrNmcGrW2XHGcHztHadBvcv3G/p2p-circuit
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWGH8ASSPLyWZVkJSGiNb5e9tLWjZAK9wavy77SNwAJB1C
+      - ENABLE_AUTORELAY=true
       - STUN_SERVERS=10.10.2.10:3478
       - NAT_GATEWAY=192.168.1.10
     depends_on:
@@ -170,9 +172,10 @@ services:
     environment:
       - PEER_ROLE=peer
       - PEER_NAME=peer-b
-      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4002/udx
+      - LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001
       - ENABLE_HOLEPUNCH=true
-      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWRcr1tPJ5D46uESVgA1sJrNmcGrW2XHGcHztHadBvcv3G/p2p-circuit
+      - RELAY_SERVERS=/ip4/10.10.3.10/tcp/4001/p2p/12D3KooWGH8ASSPLyWZVkJSGiNb5e9tLWjZAK9wavy77SNwAJB1C
+      - ENABLE_AUTORELAY=true
       - STUN_SERVERS=10.10.2.10:3478
       - NAT_GATEWAY=192.168.2.10
     depends_on:

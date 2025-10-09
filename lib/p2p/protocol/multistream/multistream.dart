@@ -181,7 +181,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         return (tok, h.handle);
       }
     } catch (e) {
-      _log.severe('[multistreamMuxer - negotiate] Error during negotiation: $e');
+      _log.severe('[multistreamMuxer - negotiate for ${protocolID}] Error during negotiation: $e');
       await stream.reset();
       rethrow;
     }

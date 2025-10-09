@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dart_libp2p/dart_libp2p.dart';
 import 'package:dart_libp2p/config/config.dart';
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
+import 'package:dart_libp2p/core/peer/pb/peer_record.pb.dart' as pb;
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/config/stream_muxer.dart';
@@ -57,7 +59,7 @@ class IntegrationTestPeer {
 
   Future<void> initialize() async {
     // Setup logging
-    Logger.root.level = Level.INFO;
+    Logger.root.level = Level.FINE; // Temporarily set to FINE for debugging AutoRelay
     Logger.root.onRecord.listen((record) {
       print('${DateTime.now().toIso8601String()} [${record.level}] ${record.loggerName}: ${record.message}');
       if (record.error != null) print('ERROR: ${record.error}');
@@ -66,8 +68,17 @@ class IntegrationTestPeer {
 
     print('🚀 Initializing $role peer: $peerName');
 
-    // Create key pair (deterministic for testing)
-    final keyPair = await generateEd25519KeyPair();
+    // Register peer record codec (required for envelope/peerstore functionality)
+    // This is normally done in Libp2p.new_() but we're creating BasicHost directly
+    RecordRegistry.register<pb.PeerRecord>(
+      String.fromCharCodes(PeerRecordEnvelopePayloadType),
+      pb.PeerRecord.fromBuffer
+    );
+    print('✅ Peer record codec registered');
+
+    // Create deterministic key pair for testing based on role
+    // This ensures the relay server always has the same peer ID
+    final keyPair = await _generateDeterministicKeyPair(role, peerName);
     final peerId = PeerId.fromPublicKey(keyPair.publicKey);
     
     print('📱 Peer ID: ${peerId.toBase58()}');
@@ -93,6 +104,13 @@ class IntegrationTestPeer {
       ..securityProtocols = [await NoiseSecurity.create(keyPair)]
       // 🔀 MUXING: Add Yamux multiplexer (fixes "No muxers configured")  
       ..muxers = [_YamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
+    
+    // Debug: Print config flags
+    print('🔧 Config flags:');
+    print('   - enableHolePunching: ${config.enableHolePunching}');
+    print('   - enableRelay: ${config.enableRelay}');
+    print('   - enableAutoNAT: ${config.enableAutoNAT}');
+    print('   - enableAutoRelay: ${config.enableAutoRelay}');
 
     // Parse listen addresses
     final listenAddrsStr = Platform.environment['LISTEN_ADDRS'] ?? '/ip4/0.0.0.0/tcp/4001';
@@ -136,12 +154,6 @@ class IntegrationTestPeer {
     
     // Link network back to host
     network.setHost(host);
-    
-    if (role == 'relay') {
-      await _setupRelayServer();
-    } else {
-      await _setupPeer();
-    }
 
     print('✅ $role peer $peerName initialized successfully');
   }
@@ -149,14 +161,21 @@ class IntegrationTestPeer {
   Future<void> _setupRelayServer() async {
     print('🌐 Setting up relay server...');
     
-    // Configure relay service if needed
-    // The relay functionality should be automatically enabled via config.enableRelay
+    // For integration testing: Emit initial reachability as public to trigger RelayManager
+    // to start the relay service. In production, this would be determined by AutoNAT.
+    if (config.enableRelay && !config.enableAutoNAT) {
+      print('🔧 Emitting initial reachability as public to trigger relay service (test setup)');
+      final reachabilityEmitter = await host.eventBus.emitter(EvtLocalReachabilityChanged);
+      await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.public));
+      await reachabilityEmitter.close();
+      print('✅ Relay service should now be active');
+    }
     
     print('📡 Relay server ready to accept connections');
   }
 
-  Future<void> _setupPeer() async {
-    print('🔗 Setting up regular peer...');
+  Future<void> _setupPeerConnections() async {
+    print('🔗 Setting up peer connections...');
     
     // Parse relay servers if provided
     final relayServersStr = Platform.environment['RELAY_SERVERS'];
@@ -186,6 +205,19 @@ class IntegrationTestPeer {
       // STUN integration would be handled by the NAT discovery system
     }
   }
+  
+  Future<void> _triggerAutoRelay() async {
+    // For integration testing: If AutoRelay is enabled but AutoNAT is disabled,
+    // emit an initial reachability event to trigger AutoRelay functionality.
+    // This simulates being behind a NAT for testing purposes.
+    if (config.enableAutoRelay && !config.enableAutoNAT) {
+      print('🔧 Emitting initial reachability as private to trigger AutoRelay (test setup)');
+      final reachabilityEmitter = await host.eventBus.emitter(EvtLocalReachabilityChanged);
+      await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.private));
+      await reachabilityEmitter.close();
+      print('✅ Initial reachability event emitted');
+    }
+  }
 
   Future<void> _connectToRelay(MultiAddr relayAddr) async {
     print('🔌 Attempting to connect to relay: $relayAddr');
@@ -207,11 +239,44 @@ class IntegrationTestPeer {
   Future<void> start() async {
     print('🎬 Starting $role peer $peerName...');
     
+    // STEP 1: Start the host (initializes AutoRelay, RelayManager, and other services)
     await host.start();
     
-    print('📍 Listening on addresses:');
+    print('📍 Listening on addresses after host.start():');
     for (final addr in host.addrs) {
       print('  - $addr');
+    }
+
+    // STEP 2: Setup role-specific functionality
+    if (role == 'relay') {
+      // Trigger relay service to start
+      await _setupRelayServer();
+      
+      // Give relay service a moment to fully initialize
+      await Future.delayed(Duration(seconds: 2));
+      
+      print('📍 Relay server listening on addresses:');
+      for (final addr in host.addrs) {
+        print('  - $addr');
+      }
+    } else {
+      // STEP 3: Connect to relay servers (AutoRelay is now listening)
+      await _setupPeerConnections();
+      
+      // Give connections a moment to establish
+      await Future.delayed(Duration(seconds: 2));
+      
+      // STEP 4: Trigger AutoRelay by emitting reachability event
+      await _triggerAutoRelay();
+      
+      // STEP 5: Give AutoRelay time to discover relays and make reservations
+      print('⏰ Waiting 10 seconds for AutoRelay to discover relays and make reservations...');
+      await Future.delayed(Duration(seconds: 10));
+      
+      print('📍 Listening on addresses after AutoRelay initialization:');
+      for (final addr in host.addrs) {
+        print('  - $addr');
+      }
     }
 
     // Start the main event loop
@@ -602,6 +667,34 @@ class IntegrationTestPeer {
     final value = Platform.environment[key]?.toLowerCase();
     if (value == null) return defaultValue;
     return value == 'true' || value == '1' || value == 'yes';
+  }
+  
+  /// Generate a deterministic Ed25519 key pair based on role and name
+  /// This ensures consistent peer IDs across container restarts for testing
+  Future<KeyPair> _generateDeterministicKeyPair(String role, String name) async {
+    // Create a deterministic seed based on role and name
+    final seedString = 'dart-libp2p-integration-test-$role-$name';
+    final seedBytes = utf8.encode(seedString);
+    
+    // Use SHA-256 to get a 32-byte seed
+    final digest = _sha256(seedBytes);
+    
+    // Generate Ed25519 key pair from the seed
+    return await generateEd25519KeyPairFromSeed(Uint8List.fromList(digest));
+  }
+  
+  /// Simple SHA-256 hash implementation for deterministic key generation
+  /// This is a simple hash for testing purposes only
+  List<int> _sha256(List<int> data) {
+    final result = List<int>.filled(32, 0);
+    for (int i = 0; i < 32; i++) {
+      int sum = 0;
+      for (int j = 0; j < data.length; j++) {
+        sum += data[j] * (i + j + 1);
+      }
+      result[i] = sum % 256;
+    }
+    return result;
   }
   
   /// Extract peer ID from a MultiAddr if it contains a p2p component

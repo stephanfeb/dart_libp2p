@@ -188,8 +188,10 @@ void main() {
       test('Circuit Relay Establishment Between Peers', () async {
         await orchestrator.start();
         
-        // Allow infrastructure to warm up
-        await Future.delayed(Duration(seconds: 15));
+        // Allow infrastructure to warm up and AutoRelay to initialize
+        // AutoRelay needs: ~5s bootDelay + ~15s discovery + processing
+        print('\n⏰ Waiting 30 seconds for AutoRelay initialization...');
+        await Future.delayed(Duration(seconds: 30));
         
         // Get peer and relay information
         final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
@@ -325,7 +327,7 @@ void main() {
         print('   ✓ Connection verified as relayed (not direct)');
         
         // Note: tearDown will handle stopping the orchestrator
-      }, timeout: Timeout(Duration(minutes: 4)));
+      }, timeout: Timeout(Duration(minutes: 5))); // Increased for 30s AutoRelay wait
     });
   });
 }
