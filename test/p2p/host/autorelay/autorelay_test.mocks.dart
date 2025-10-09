@@ -24,6 +24,8 @@ import 'package:dart_libp2p/core/protocol/switch.dart' as _i5;
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay_config.dart' as _i13;
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay_metrics.dart' as _i14;
 import 'package:dart_libp2p/p2p/host/autorelay/relay_finder.dart' as _i23;
+import 'package:dart_libp2p/p2p/protocol/circuitv2/client/reservation.dart'
+    as _i24;
 import 'package:dart_libp2p/p2p/transport/upgrader.dart' as _i12;
 import 'package:mockito/mockito.dart' as _i1;
 import 'package:mockito/src/dummies.dart' as _i19;
@@ -656,6 +658,14 @@ class MockRelayFinder extends _i1.Mock implements _i23.RelayFinder {
           as _i16.Stream<void>);
 
   @override
+  _i16.Future<int> get relayCount =>
+      (super.noSuchMethod(
+            Invocation.getter(#relayCount),
+            returnValue: _i16.Future<int>.value(0),
+          )
+          as _i16.Future<int>);
+
+  @override
   _i16.Future<void> start() =>
       (super.noSuchMethod(
             Invocation.method(#start, []),
@@ -684,4 +694,24 @@ class MockRelayFinder extends _i1.Mock implements _i23.RelayFinder {
             ),
           )
           as _i16.Future<List<_i15.MultiAddr>>);
+
+  @override
+  _i16.Future<void> addTestReservation(
+    _i2.PeerId? relayPeerId,
+    _i24.Reservation? reservation,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#addTestReservation, [relayPeerId, reservation]),
+            returnValue: _i16.Future<void>.value(),
+            returnValueForMissingStub: _i16.Future<void>.value(),
+          )
+          as _i16.Future<void>);
+
+  @override
+  _i16.Future<bool> hasRelay(_i2.PeerId? relayPeerId) =>
+      (super.noSuchMethod(
+            Invocation.method(#hasRelay, [relayPeerId]),
+            returnValue: _i16.Future<bool>.value(false),
+          )
+          as _i16.Future<bool>);
 }

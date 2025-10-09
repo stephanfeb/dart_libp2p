@@ -13,6 +13,7 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
 import 'package:fixnum/fixnum.dart';
+import 'package:meta/meta.dart';
 
 import '../../../../core/host/host.dart';
 import '../../../../core/network/stream.dart';
@@ -215,6 +216,17 @@ class Relay {
   }
 
   /// Relays data between two peers.
+  @visibleForTesting
+  void relayDataForTesting(
+    P2PStream srcStream,
+    P2PStream dstStream,
+    PeerId srcPeer,
+    PeerId dstPeer,
+  ) {
+    _relayData(srcStream, dstStream, srcPeer, dstPeer);
+  }
+
+  /// Relays data between two peers (internal).
   void _relayData(
     P2PStream srcStream,
     P2PStream dstStream,
@@ -303,6 +315,30 @@ class Relay {
       _reservations.remove(key);
     }
   }
+
+  // Test helpers
+  @visibleForTesting
+  void addReservationForTesting(String peerId, DateTime expiration) {
+    _reservations[peerId] = expiration;
+  }
+
+  @visibleForTesting
+  bool hasReservation(String peerId) {
+    return _reservations.containsKey(peerId) &&
+        _reservations[peerId]!.isAfter(DateTime.now());
+  }
+
+  @visibleForTesting
+  int getConnectionCount(String srcPeer, String dstPeer) {
+    final connKey = '$srcPeer-$dstPeer';
+    return _connections[connKey] ?? 0;
+  }
+
+  @visibleForTesting
+  Map<String, DateTime> get reservationsForTesting => Map.unmodifiable(_reservations);
+
+  @visibleForTesting
+  Map<String, int> get connectionsForTesting => Map.unmodifiable(_connections);
 }
 
 /// Helper function to adapt P2PStream.read() to a Dart Stream for DelimitedReader

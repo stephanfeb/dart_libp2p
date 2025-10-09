@@ -6,6 +6,7 @@ import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
 import 'package:dart_libp2p/core/event/addrs.dart';
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/event/protocol.dart';
+import 'package:dart_libp2p/core/event/reachability.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/network.dart';
@@ -287,7 +288,18 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] Before RelayManager.create. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       _relayManager = await RelayManager.create(this);
       _log.fine('[BasicHost start] After RelayManager.create. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
-      // RelayManager starts its own background tasks on creation.
+      
+      // If AutoNAT is disabled, assume public reachability and start the relay service immediately.
+      // This provides a simple API for developers running dedicated relay servers:
+      // just set enableRelay=true and disable AutoNAT, without manual event emission.
+      if (!_config.enableAutoNAT) {
+        _log.fine('[BasicHost start] AutoNAT disabled with relay enabled - assuming public reachability, starting relay service');
+        final reachabilityEmitter = await _eventBus.emitter(EvtLocalReachabilityChanged);
+        await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.public));
+        await reachabilityEmitter.close();
+        _log.fine('[BasicHost start] Relay service should now be active');
+      }
+      
       _log.fine('RelayManager created and service monitoring started.');
     }
 

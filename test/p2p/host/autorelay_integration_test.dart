@@ -139,10 +139,10 @@ void main() {
       await autoRelaySubB?.cancel();
       
       print('Closing hosts...');
-      await peerAHost.close();
-      await peerBHost.close();
-      await relayHost.close();
-      print('Hosts closed');
+      // await peerAHost.close();
+      // await peerBHost.close();
+      // await relayHost.close();
+      // print('Hosts closed');
 
       // Give connections a moment to finish closing, but don't wait too long
       await Future.delayed(Duration(milliseconds: 500));
@@ -222,17 +222,18 @@ void main() {
       
       print('✅ Both peers advertise circuit relay addresses');
 
-      // Step 4: Add peer B's addresses to peer A's peerstore
-      print('\n📋 Step 4: Adding peer B info to peer A peerstore...');
+      // Step 4: Add ONLY circuit addresses to peer A's peerstore
+      // This forces peer A to dial peer B via circuit relay
+      print('\n📋 Step 4: Adding peer B circuit addresses to peer A peerstore...');
       await peerAHost.peerStore.addrBook.addAddrs(
         peerBPeerId,
-        peerBAddrs,
+        peerBCircuitAddrs,  // Only circuit addresses, not all addresses
         Duration(hours: 1),
       );
-      print('✅ Peer B addresses added to peer A peerstore');
+      print('✅ Peer B circuit addresses added to peer A peerstore (${peerBCircuitAddrs.length} addresses)');
 
-      // Step 5: Ping peer B from peer A through the relay
-      print('\n🏓 Step 5: Pinging peer B from peer A...');
+      // Step 5: Ping peer B from peer A via circuit relay
+      print('\n🏓 Step 5: Pinging peer B from peer A via circuit relay...');
       final pingService = PingService(peerAHost);
       
       try {
@@ -252,17 +253,18 @@ void main() {
         
         print('✅ Ping succeeded! RTT: ${pingResult.rtt?.inMilliseconds}ms');
         
-        // Optional: Verify the connection is relayed
+        // Verify the connection is using circuit relay
         final conns = peerAHost.network.connsToPeer(peerBPeerId);
-        if (conns.isNotEmpty) {
-          final connAddr = conns.first.remoteMultiaddr.toString();
-          print('Connection address: $connAddr');
-          if (connAddr.contains('/p2p-circuit')) {
-            print('✅ Connection is using circuit relay');
-          } else {
-            print('ℹ️  Connection may have upgraded to direct connection');
-          }
-        }
+        expect(conns, isNotEmpty, 
+          reason: 'Should have at least one connection to peer B');
+        
+        final connAddr = conns.first.remoteMultiaddr.toString();
+        print('Connection address: $connAddr');
+        
+        expect(connAddr.contains('/p2p-circuit'), isTrue,
+          reason: 'Connection MUST be using circuit relay (address should contain /p2p-circuit). '
+                  'Got: $connAddr');
+        print('✅ Verified: Connection is using circuit relay');
       } catch (e, stackTrace) {
         print('❌ Ping failed: $e');
         print('Stack trace: $stackTrace');
