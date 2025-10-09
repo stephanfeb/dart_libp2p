@@ -253,24 +253,53 @@ void main() {
         
         print('✅ Both peers advertising circuit addresses');
         
-        // Step 3: Introduce peers to each other (add to peerstore)
-        print('\n🤝 Step 3: Introducing peers to each other...');
+        // Step 3: Introduce peers to each other ONLY via circuit addresses
+        // This forces the connection to use circuit relay instead of direct connection
+        print('\n🤝 Step 3: Introducing peers to each other via circuit addresses...');
+        
+        // Filter to only circuit addresses
+        final peerABaseCircuitAddrs = peerAAddrs.where((addr) => addr.contains('/p2p-circuit')).toList();
+        final peerBBaseCircuitAddrs = peerBAddrs.where((addr) => addr.contains('/p2p-circuit')).toList();
+        
+        // CRITICAL: We need to append the destination peer ID to make these dialable
+        // AutoRelay advertises: /ip4/X.X.X.X/tcp/PORT/p2p/RELAY_ID/p2p-circuit/
+        // We need to dial:       /ip4/X.X.X.X/tcp/PORT/p2p/RELAY_ID/p2p-circuit/p2p/DEST_PEER_ID
+        
+        // Construct full circuit addresses for dialing peer B through the relay
+        final peerBDialableCircuitAddrs = peerBBaseCircuitAddrs.map((addr) {
+          // Remove trailing slash if present
+          final cleanAddr = addr.endsWith('/') ? addr.substring(0, addr.length - 1) : addr;
+          // Append destination peer ID
+          return '$cleanAddr/p2p/$peerBId';
+        }).toList();
+        
+        // Construct full circuit addresses for dialing peer A through the relay
+        final peerADialableCircuitAddrs = peerABaseCircuitAddrs.map((addr) {
+          final cleanAddr = addr.endsWith('/') ? addr.substring(0, addr.length - 1) : addr;
+          return '$cleanAddr/p2p/$peerAId';
+        }).toList();
+        
+        print('Peer A base circuit addresses: $peerABaseCircuitAddrs');
+        print('Peer A dialable circuit addresses (for B to dial A): $peerADialableCircuitAddrs');
+        print('Peer B base circuit addresses: $peerBBaseCircuitAddrs');
+        print('Peer B dialable circuit addresses (for A to dial B): $peerBDialableCircuitAddrs');
+        
         await orchestrator.sendControlRequest(
           'peer-a',
           '/connect',
           method: 'POST',
-          body: {'peer_id': peerBId, 'addrs': peerBAddrs},
+          body: {'peer_id': peerBId, 'addrs': peerBDialableCircuitAddrs},  // Full circuit addresses with dest peer ID
         );
         
         await orchestrator.sendControlRequest(
           'peer-b',
           '/connect',
           method: 'POST',
-          body: {'peer_id': peerAId, 'addrs': peerAAddrs},
+          body: {'peer_id': peerAId, 'addrs': peerADialableCircuitAddrs},  // Full circuit addresses with dest peer ID
         );
         
         await Future.delayed(Duration(seconds: 3));
-        print('✅ Peers introduced via peerstore');
+        print('✅ Peers introduced via complete dialable circuit relay addresses');
         
         // Step 4: Test peer-to-peer communication THROUGH relay
         // This should use circuit relay, not direct connection
@@ -290,26 +319,30 @@ void main() {
           reason: 'Ping should succeed using circuit relay. '
                   'Failure indicates CircuitV2Client is not integrated as transport.');
         
-        // Step 5: Verify the connection is relayed, not direct
-        print('\n🔍 Step 5: Verifying connection type...');
+        // Step 5: Verify the connection is using circuit relay
+        print('\n🔍 Step 5: Verifying connection is via circuit relay...');
         
-        if (pingResult.containsKey('connection_details')) {
-          final connections = pingResult['connection_details'] as List;
-          print('📊 Connection details: $connections');
-          
-          // Check if connection address contains p2p-circuit
-          final hasRelayedConn = connections.any((conn) {
-            final remoteAddr = conn['remote_addr'] as String;
-            return remoteAddr.contains('/p2p-circuit');
-          });
-          
-          expect(hasRelayedConn, isTrue,
-            reason: 'Connection should be relayed (address should contain /p2p-circuit). '
-                    'This indicates communication is using circuit relay transport.');
-          print('✅ Verified connection is relayed, not direct');
-        } else {
-          print('⚠️  Connection details not available in ping response');
-        }
+        expect(pingResult.containsKey('connection_details'), isTrue,
+          reason: 'Ping response should include connection_details');
+        
+        final connections = pingResult['connection_details'] as List;
+        print('📊 Connection details: $connections');
+        
+        expect(connections, isNotEmpty,
+          reason: 'Should have at least one connection to peer');
+        
+        // Check if connection address contains p2p-circuit
+        final hasRelayedConn = connections.any((conn) {
+          final remoteAddr = conn['remote_addr'] as String;
+          print('   Connection address: $remoteAddr');
+          return remoteAddr.contains('/p2p-circuit');
+        });
+        
+        expect(hasRelayedConn, isTrue,
+          reason: 'Connection MUST be relayed (address should contain /p2p-circuit). '
+                  'This indicates communication is using circuit relay transport. '
+                  'Actual connections: $connections');
+        print('✅ Verified: Connection is using circuit relay');
         
         // Step 6: Verify relay server sees both connections
         print('\n📊 Step 6: Verifying relay server metrics...');

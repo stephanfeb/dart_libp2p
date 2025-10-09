@@ -390,19 +390,28 @@ class IntegrationTestPeer {
       final targetPeerId = PeerId.fromString(targetPeerIdStr);
       final addrs = addrsJson.map((a) => MultiAddr(a)).toList();
       
-      // Add peer addresses to peerstore
+      print('🔗 Adding ${addrs.length} addresses for peer $targetPeerIdStr to peerstore');
       for (final addr in addrs) {
-        host.peerStore.addrBook.addAddr(targetPeerId, addr, Duration(hours: 1));
+        print('   - $addr');
       }
       
-      print('✅ Added ${addrs.length} addresses for peer $targetPeerIdStr');
+      // Clear existing addresses and add only the provided circuit addresses
+      // This forces the connection to use circuit relay
+      await host.peerStore.addrBook.clearAddrs(targetPeerId);
+      for (final addr in addrs) {
+        await host.peerStore.addrBook.addAddr(targetPeerId, addr, Duration(hours: 1));
+      }
+      
+      print('✅ Added ${addrs.length} addresses for peer $targetPeerIdStr (cleared previous addresses)');
+      
       request.response.headers.contentType = ContentType.json;
       request.response.write(jsonEncode({
         'success': true,
-        'message': 'Peer addresses added to peerstore',
+        'message': 'Peer addresses added to peerstore (previous addresses cleared)',
         'addresses_added': addrs.length,
       }));
     } catch (e) {
+      print('❌ Failed to add peer addresses: $e');
       request.response.statusCode = 500;
       request.response.headers.contentType = ContentType.json;
       request.response.write(jsonEncode({
@@ -465,10 +474,11 @@ class IntegrationTestPeer {
         
         // Get connection info for debugging
         final connectedness = host.network.connectedness(targetPeerId);
-        final connections = host.network.conns;
+        // Get connections specifically to the target peer, not all connections
+        final connections = host.network.connsToPeer(targetPeerId);
         
         print('📊 Connection state: $connectedness');
-        print('📊 Active connections: ${connections.length}');
+        print('📊 Active connections to target peer: ${connections.length}');
         
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({

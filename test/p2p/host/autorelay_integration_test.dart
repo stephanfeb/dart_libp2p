@@ -7,6 +7,7 @@ import 'package:dart_libp2p/core/network/network.dart'; // For Reachability
 import 'package:dart_libp2p/core/event/reachability.dart'; // For EvtLocalReachabilityChanged
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRelayAddrsUpdated
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
+import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // For Protocols
 import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart' as p2p_conn_mgr;
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart' as p2p_event_bus;
@@ -207,30 +208,41 @@ void main() {
         return addrStr.contains('/p2p-circuit') && addrStr.contains(relayPeerId.toBase58());
       }).toList();
       
-      final peerBCircuitAddrs = peerBAddrs.where((addr) {
+      final peerBBaseCircuitAddrs = peerBAddrs.where((addr) {
         final addrStr = addr.toString();
         return addrStr.contains('/p2p-circuit') && addrStr.contains(relayPeerId.toBase58());
       }).toList();
       
       print('Peer A circuit addresses: $peerACircuitAddrs');
-      print('Peer B circuit addresses: $peerBCircuitAddrs');
+      print('Peer B base circuit addresses: $peerBBaseCircuitAddrs');
       
       expect(peerACircuitAddrs, isNotEmpty, 
         reason: 'Peer A should advertise at least one circuit relay address through relay ${relayPeerId.toBase58()}');
-      expect(peerBCircuitAddrs, isNotEmpty,
+      expect(peerBBaseCircuitAddrs, isNotEmpty,
         reason: 'Peer B should advertise at least one circuit relay address through relay ${relayPeerId.toBase58()}');
       
       print('✅ Both peers advertise circuit relay addresses');
 
-      // Step 4: Add ONLY circuit addresses to peer A's peerstore
+      // Step 4: Construct full dialable circuit addresses for peer B
+      // AutoRelay advertises: /ip4/X.X.X.X/udp/PORT/udx/p2p/RELAY_ID/p2p-circuit
+      // We need to dial:      /ip4/X.X.X.X/udp/PORT/udx/p2p/RELAY_ID/p2p-circuit/p2p/DEST_PEER_ID
+      print('\n📋 Step 4: Constructing dialable circuit addresses for peer B...');
+      final peerBDialableCircuitAddrs = peerBBaseCircuitAddrs.map((addr) {
+        // Append destination peer ID to make it dialable
+        return addr.encapsulate(Protocols.p2p.name, peerBPeerId.toString());
+      }).toList();
+      
+      print('Peer B dialable circuit addresses: $peerBDialableCircuitAddrs');
+      
+      // Add ONLY dialable circuit addresses to peer A's peerstore
       // This forces peer A to dial peer B via circuit relay
-      print('\n📋 Step 4: Adding peer B circuit addresses to peer A peerstore...');
+      await peerAHost.peerStore.addrBook.clearAddrs(peerBPeerId);
       await peerAHost.peerStore.addrBook.addAddrs(
         peerBPeerId,
-        peerBCircuitAddrs,  // Only circuit addresses, not all addresses
+        peerBDialableCircuitAddrs,  // Full circuit addresses with destination peer ID
         Duration(hours: 1),
       );
-      print('✅ Peer B circuit addresses added to peer A peerstore (${peerBCircuitAddrs.length} addresses)');
+      print('✅ Peer B dialable circuit addresses added to peer A peerstore (${peerBDialableCircuitAddrs.length} addresses)');
 
       // Step 5: Ping peer B from peer A via circuit relay
       print('\n🏓 Step 5: Pinging peer B from peer A via circuit relay...');

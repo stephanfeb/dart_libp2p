@@ -12,6 +12,7 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/relay/resources.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
+import 'package:dart_libp2p/p2p/protocol/multistream/client.dart'; // For encodeVarint
 import 'package:fixnum/fixnum.dart';
 import 'package:meta/meta.dart';
 
@@ -175,23 +176,51 @@ class Relay {
     }
 
     try {
-      // Open a stream to the destination peer
-      final dstStream = await _host.newStream(dstInfo.peerId, [CircuitV2Protocol.protoIDv2Stop], Context());
+      // Open a STOP stream to the destination peer
+      // Host.newStream() will:
+      // 1. Check for existing connection (via connect())
+      // 2. Create stream on that connection (via network.newStream())  
+      // 3. Wait for identify
+      // 4. Negotiate protocol
+      // 5. Register protocol in peerstore
+      print('[Relay] Opening STOP stream to destination peer: ${dstInfo.peerId.toBase58()}');
+      final dstStream = await _host.newStream(
+        dstInfo.peerId, 
+        [CircuitV2Protocol.protoIDv2Stop], 
+        Context()
+      );
+      print('[Relay] STOP stream opened and protocol negotiated with destination peer: ${dstInfo.peerId.toBase58()}');
 
       // Create a stop message
+      print('[Relay] Creating STOP message...');
       final stopMsg = StopMessage()
         ..type = StopMessage_Type.CONNECT
         ..peer = peerInfoToPeerV2(PeerInfo(peerId: srcInfo.peerId, addrs: <MultiAddr>[].toSet()));
+      print('[Relay] STOP message created, type: ${stopMsg.type}');
 
-      // Write the message
-      await dstStream.write(stopMsg.writeToBuffer());
-
-      // Read the response
-      final stopResponse = await dstStream.read();
-      if (stopResponse.isEmpty) {
-        throw Exception('unexpected EOF');
+      // Write the message with length prefix (required for DelimitedReader on the receiving end)
+      // We write manually to ensure both the length and message are sent before reading response
+      print('[Relay] Encoding STOP message to bytes...');
+      final messageBytes = stopMsg.writeToBuffer();
+      print('[Relay] Message encoded to ${messageBytes.length} bytes');
+      final lengthBytes = encodeVarint(messageBytes.length);
+      print('[Relay] Writing length prefix (${lengthBytes.length} bytes) to STOP stream...');
+      await dstStream.write(lengthBytes);
+      print('[Relay] Length prefix written, now writing message bytes (${messageBytes.length} bytes)...');
+      await dstStream.write(messageBytes);
+      print('[Relay] Message bytes written, flushing stream...');
+      // Flush the stream to ensure data is sent immediately
+      if (dstStream is Sink) {
+        // Most streams don't have a flush method, so we can't call it
+        // The write should already flush automatically
       }
-      final pb = StopMessage.fromBuffer(stopResponse);
+      print('[Relay] STOP message written successfully to destination peer: ${dstInfo.peerId.toBase58()}');
+
+      // Read the response (destination sends with length prefix)
+      print('[Relay] Reading STOP response from destination peer: ${dstInfo.peerId.toBase58()}...');
+      final reader = DelimitedReader(_p2pStreamToDartStream(dstStream), 4096);
+      final pb = await reader.readMsg(StopMessage());
+      print('[Relay] STOP response received from destination peer: ${dstInfo.peerId.toBase58()}, status: ${pb.status}');
 
       // Check the status
       if (pb.status != Status.OK) {
@@ -292,7 +321,13 @@ class Relay {
     final response = HopMessage()
       ..type = HopMessage_Type.STATUS
       ..status = status;
-    await stream.write(response.writeToBuffer());
+    
+    // Write with length prefix (required for DelimitedReader on the receiving end)
+    final messageBytes = response.writeToBuffer();
+    final lengthBytes = encodeVarint(messageBytes.length);
+    await stream.write(lengthBytes);
+    await stream.write(messageBytes);
+    print('[Relay] Sent HOP STATUS response: $status (${messageBytes.length} bytes)');
   }
 
   /// Starts the garbage collection timer.

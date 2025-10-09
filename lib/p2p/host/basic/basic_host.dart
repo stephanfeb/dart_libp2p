@@ -10,6 +10,7 @@ import 'package:dart_libp2p/core/event/reachability.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/network.dart';
+import 'package:dart_libp2p/p2p/network/swarm/swarm.dart'; // Added for Swarm cast
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
@@ -45,6 +46,7 @@ import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddres
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart'; // Added for BasicUpgrader
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // Added for AutoRelay
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay_config.dart'; // Added for AutoRelayConfig
+import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart'; // Added for CircuitV2Client
 
 final _log = Logger('basichost');
 
@@ -93,6 +95,7 @@ class BasicHost implements Host {
   PingService? _pingService; // Added PingService field
   RelayManager? _relayManager; // Added RelayManager field
   AutoRelay? _autoRelay; // Added AutoRelay field
+  CircuitV2Client? _circuitV2Client; // Added CircuitV2Client field
   AutoNATv2? _autoNATService; // Changed to AutoNATv2 service field
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
@@ -334,6 +337,27 @@ class BasicHost implements Host {
       await _holePunchService!.start(); // Call start as per its interface
       _log.fine('[BasicHost start] After _holePunchService.start. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       _log.fine('HolePunch service started.');
+    }
+
+    // Initialize CircuitV2Client if relay or autoRelay is enabled
+    // This registers circuit relay as a transport so peers can dial /p2p-circuit addresses
+    if (_config.enableRelay || _config.enableAutoRelay) {
+      _log.fine('[BasicHost start] Initializing CircuitV2Client transport...');
+      _circuitV2Client = CircuitV2Client(
+        host: this,
+        upgrader: _upgrader,
+        connManager: _cmgr,
+      );
+      
+      // Start the CircuitV2Client to register STOP protocol handler
+      await _circuitV2Client!.start();
+      
+      // Add CircuitV2Client as a transport to the network (Swarm)
+      // This allows dialing addresses with /p2p-circuit
+      // CircuitV2Client now properly implements Transport interface
+      (_network as Swarm).addTransport(_circuitV2Client!);
+      
+      _log.fine('[BasicHost start] CircuitV2Client initialized and registered as transport');
     }
 
     // Initialize AutoRelay if enabled
@@ -617,6 +641,7 @@ class BasicHost implements Host {
 
   void _newStreamHandler(P2PStream stream) async {
     final startTime = DateTime.now();
+    _log.warning('[_newStreamHandler] 🎯 ENTERED for stream ${stream.id()} from ${stream.conn.remotePeer}');
 
     // Set negotiation timeout if configured
     if (_negtimeout > Duration.zero) {
@@ -625,7 +650,9 @@ class BasicHost implements Host {
 
     try {
       // Negotiate protocol
+      _log.warning('[_newStreamHandler] 🔄 Starting protocol negotiation for stream ${stream.id()}');
       final (protocol, handler) = await _mux.negotiate(stream); // Use MultistreamMuxer.negotiate
+      _log.warning('[_newStreamHandler] ✅ Protocol negotiated: $protocol for stream ${stream.id()}');
 
       // Clear deadline after negotiation
       if (_negtimeout > Duration.zero) {
@@ -639,10 +666,12 @@ class BasicHost implements Host {
       _log.fine('Negotiated protocol: $protocol (took ${elapsed.inMilliseconds}ms)');
 
       // Handle the stream using the handler returned by negotiate
+      _log.warning('[_newStreamHandler] 🚀 Invoking handler for protocol: $protocol, stream ${stream.id()}');
       handler(protocol, stream);
+      _log.warning('[_newStreamHandler] ✅ Handler invoked for protocol: $protocol, stream ${stream.id()}');
     } catch (e) {
       final elapsed = DateTime.now().difference(startTime);
-      _log.severe('Protocol negotiation failed for incoming stream: $e (took ${elapsed.inMilliseconds}ms)');
+      _log.severe('[_newStreamHandler] ❌ Protocol negotiation failed for incoming stream ${stream.id()}: $e (took ${elapsed.inMilliseconds}ms)');
       stream.reset();
     }
   }
@@ -1025,6 +1054,7 @@ class BasicHost implements Host {
   @override
   Future<P2PStream> newStream(PeerId p, List<ProtocolID> pids, Context context) async {
     final startTime = DateTime.now();
+    _log.warning('🎯 [newStream] ENTERED for peer ${p.toBase58()}, protocols: $pids');
 
     
     // Set up a timeout context if needed
@@ -1035,8 +1065,10 @@ class BasicHost implements Host {
     // Phase 1: Connection
 
     final connectStartTime = DateTime.now();
+    _log.warning('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
     await connect(AddrInfo(p, []), context: context);
+    _log.warning('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
     final connectTime = DateTime.now().difference(connectStartTime);
 
@@ -1044,8 +1076,10 @@ class BasicHost implements Host {
     // Phase 2: Stream Creation
 
     final streamCreateStartTime = DateTime.now();
+    _log.warning('🎯 [newStream Phase 2] Creating stream to peer ${p.toBase58()}...');
     
     final stream = await _network.newStream(context, p);
+    _log.warning('✅ [newStream Phase 2] Stream ${stream.id()} created to peer ${p.toBase58()}');
     
     final streamCreateTime = DateTime.now().difference(streamCreateStartTime);
 
@@ -1056,8 +1090,10 @@ class BasicHost implements Host {
     // Phase 3: Identify Wait
 
     final identifyStartTime = DateTime.now();
+    _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
     
     await _idService.identifyWait(stream.conn);
+    _log.warning('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
     
     final identifyTime = DateTime.now().difference(identifyStartTime);
 
@@ -1076,8 +1112,10 @@ class BasicHost implements Host {
       // DEBUG: Add detailed protocol negotiation tracking
 
       final selectStartTime = DateTime.now();
+      _log.warning('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
       
       final selectedProtocol = await _mux.selectOneOf(stream, pids);
+      _log.warning('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
       
       final selectTime = DateTime.now().difference(selectStartTime);
 
@@ -1099,6 +1137,7 @@ class BasicHost implements Host {
       // Phase 5: Protocol Setup
 
       final setupStartTime = DateTime.now();
+      _log.warning('🎯 [newStream Phase 5] Setting up protocol $selectedProtocol on stream ${stream.id()}...');
       
       // DEBUG: Add protocol assignment tracking
 
@@ -1119,6 +1158,8 @@ class BasicHost implements Host {
       final negotiationTime = DateTime.now().difference(negotiationStartTime);
       final totalTime = DateTime.now().difference(startTime);
       
+      _log.warning('✅ [newStream Phase 5] Protocol setup complete for stream ${stream.id()}');
+      _log.warning('✅ [newStream] COMPLETE - Returning stream ${stream.id()} with protocol $selectedProtocol');
 
 
 
@@ -1181,6 +1222,12 @@ class BasicHost implements Host {
       await _autoRelay!.close();
       _autoRelay = null;
       _autoRelayAddrs = [];
+    }
+
+    // Close CircuitV2Client if initialized
+    if (_circuitV2Client != null) {
+      await _circuitV2Client!.stop();
+      _circuitV2Client = null;
     }
 
     // Close NAT manager if available

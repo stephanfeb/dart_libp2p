@@ -475,7 +475,9 @@ class Swarm implements Network {
           if (conn.streamHandler != null) {
             // Don't await this; let each stream be handled concurrently.
             // The handler itself is async.
+            _logger.warning('🎯 [Swarm._handleIncomingStreams] Accepted stream ${acceptedP2PStream.id()} from ${conn.remotePeer} on conn ${conn.id}. Invoking streamHandler...');
             conn.streamHandler!(acceptedP2PStream);
+            _logger.warning('✅ [Swarm._handleIncomingStreams] streamHandler invoked for stream ${acceptedP2PStream.id()}');
           } else {
             // This case should ideally not happen if _handleIncomingStreams is always called
             // before streams can be accepted, or if streamHandler is set at conn construction.

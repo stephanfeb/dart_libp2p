@@ -153,6 +153,13 @@ class TCPTransport implements Transport {
     // Check if the address has either ip4 or ip6 and tcp protocols
     final hasIP = addr.hasProtocol('ip4') || addr.hasProtocol('ip6');
     final hasTCP = addr.hasProtocol('tcp');
+    
+    // Refuse circuit relay addresses - those should be handled by CircuitV2Client
+    final hasCircuit = addr.hasProtocol('p2p-circuit');
+    if (hasCircuit) {
+      return false;
+    }
+    
     return hasIP && hasTCP;
   }
 

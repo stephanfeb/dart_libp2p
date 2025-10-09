@@ -201,7 +201,7 @@ void main() {
     group('Protocol Information', () {
       test('should expose correct protocol IDs', () {
         // Act
-        final protocols = client.protocols();
+        final protocols = client.protocols;
 
         // Assert
         expect(protocols, contains(CircuitV2Protocol.protoIDv2Hop));

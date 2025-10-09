@@ -252,6 +252,11 @@ class UDXTransport implements Transport {
 
   @override
   bool canDial(MultiAddr addr) {
+    // Refuse circuit relay addresses - those should be handled by CircuitV2Client
+    if (addr.hasProtocol('p2p-circuit')) {
+      return false;
+    }
+    
     return addr.hasProtocol('udx') && 
            (addr.hasProtocol('ip4') || addr.hasProtocol('ip6')) &&
            addr.hasProtocol('udp');
