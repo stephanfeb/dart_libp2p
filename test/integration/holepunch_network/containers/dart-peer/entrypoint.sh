@@ -21,6 +21,12 @@ if [ -n "$RELAY_SERVERS" ]; then
     fi
 fi
 
+# Configure routing for NAT traversal
+if [ -n "$PUBLIC_NET_SUBNET" ] && [ -n "$NAT_GATEWAY" ]; then
+    echo "🔀 Configuring route to $PUBLIC_NET_SUBNET via NAT gateway $NAT_GATEWAY..."
+    ip route add $PUBLIC_NET_SUBNET via $NAT_GATEWAY || echo "⚠️  Route already exists or failed to add"
+fi
+
 # Show network configuration
 echo "📡 Network Configuration:"
 echo "   Hostname: $(hostname)"

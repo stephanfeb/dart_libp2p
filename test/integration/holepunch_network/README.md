@@ -11,32 +11,50 @@ This directory contains comprehensive integration tests for the dart-libp2p hole
 │               Uses localhost:808x for control APIs                   │
 └──────────────────────────────────────────────────────────────────────┘
                           │ HTTP Control API
-                          ▼ (host port mappings)
+                          ▼ (host port mappings: 8081, 8082, 8083)
 ┌──────────────────────────────────────────────────────────────────────┐
 │                  CONTAINER NETWORK TOPOLOGY                          │
-│                        (Internal Docker Networks)                    │
+│                        (4 Isolated Docker Networks)                  │
 │                                                                      │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐               │
-│  │   NAT-A     │    │ RELAY SERVER│    │   NAT-B     │               │
-│  │ 192.168.1.10│    │ 10.10.3.10  │    │ 192.168.2.10│               │
-│  │ (Gateway)   │    │ :8083→:8080 │    │ (Gateway)   │               │
-│  └─────────────┘    └─────────────┘    └─────────────┘               │
-│         │                  │                  │                      │
-│         ▼                  │                  ▼                      │
-│  ┌─────────────┐           │           ┌─────────────┐               │
-│  │   PEER-A    │           │           │   PEER-B    │               │
-│  │ 192.168.1.20│ ◄─────────┼─────────► │ 192.168.2.20│               │
-│  │ :8081→:8080 │           │           │ :8082→:8080 │               │
-│  └─────────────┘           │           └─────────────┘               │
-│                            │                                         │
-│                      ┌─────────────┐                                 │
-│                      │ STUN SERVER │                                 │
-│                      │ 10.10.2.10  │                                 │
-│                      │ :3478 (int) │                                 │
-│                      └─────────────┘                                 │
+│  PUBLIC NETWORK (10.10.0.0/16) - Relay, STUN, NAT Gateways          │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
+│  │   NAT-A     │    │ RELAY SERVER│    │   NAT-B     │             │
+│  │ 10.10.1.10  │    │ 10.10.3.10  │    │ 10.10.1.20  │             │
+│  │ (Gateway)   │    └─────┬───────┘    │ (Gateway)   │             │
+│  └─────┬───────┘          │            └─────┬───────┘             │
+│        │                  │                  │                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
+│  │ STUN SERVER │    │             │    │             │             │
+│  │ 10.10.2.10  │    │             │    │             │             │
+│  └─────────────┘    │             │    │             │             │
+│                     │             │    │             │             │
+│  PRIVATE NETWORK A (192.168.1.0/24) - Isolated                      │
+│  ┌──────────────────┴─────────┐   │    │             │             │
+│  │        PEER-A              │   │    │             │             │
+│  │     192.168.1.100          │   │    │             │             │
+│  │  (NAT-isolated from B)     │   │    │             │             │
+│  └────────────────────────────┘   │    │             │             │
+│                                    │    │             │             │
+│  PRIVATE NETWORK B (192.168.2.0/24) - Isolated                      │
+│  ┌────────────────────────────────┴────┴─────────┐                 │
+│  │                  PEER-B                       │                 │
+│  │               192.168.2.100                   │                 │
+│  │          (NAT-isolated from A)                │                 │
+│  └───────────────────────────────────────────────┘                 │
+│                                                                      │
+│  CONTROL NETWORK (172.25.0.0/16) - Test Orchestration Only          │
+│  ┌──────────────────────────────────────────────────────┐           │
+│  │  RELAY: 172.25.0.12   PEER-A: 172.25.0.10           │           │
+│  │                       PEER-B: 172.25.0.11           │           │
+│  │  (HTTP Control APIs bound to this network)          │           │
+│  └──────────────────────────────────────────────────────┘           │
 └──────────────────────────────────────────────────────────────────────┘
 
-Key:  :XXXX→:YYYY = Host port XXXX mapped to container port YYYY
+Key:  
+- :XXXX→:YYYY = Host port XXXX mapped to container port YYYY
+- Peers are ISOLATED from public_net - cannot reach each other directly
+- All libp2p traffic goes through NAT gateways
+- Control API uses separate control_net for test orchestration
 ```
 
 ## 🧩 Components
@@ -51,12 +69,14 @@ Key:  :XXXX→:YYYY = Host port XXXX mapped to container port YYYY
 - **Relay Server**: Circuit relay for initial connectivity
 - **Control APIs**: HTTP endpoints for test coordination (exposed via host port mappings)
 
-### 🔒 **Network Isolation & Local Compensations**
+### 🔒 **Network Isolation & NAT Enforcement**
 - **No External STUN**: Uses internal STUN server (10.10.2.10:3478), NOT stun.google.com
-- **Internal Container Networks**: All libp2p traffic uses internal Docker networks only
-- **Host Port Mappings**: Control APIs exposed on host ports 8081-8083 for test orchestration
-- **Public Address Fallback**: Since no true public addresses exist in this local setup, `BasicHost.publicAddrs` includes a testing fallback mechanism that uses non-relay addresses
-- **Deterministic Results**: Tests are immune to external services (though not completely isolated due to host port mappings)
+- **True NAT Isolation**: Peers ONLY have access to their private networks + control_net
+- **No Direct Peer-to-Peer**: Peers cannot reach each other directly - must use NAT traversal
+- **Separate Control Network**: Test orchestration uses dedicated control_net (172.25.0.0/16)
+- **libp2p Traffic Isolation**: All libp2p communication goes through NAT gateways
+- **Host Port Mappings**: Control APIs exposed on host ports 8081-8083 for test orchestration only
+- **Deterministic Results**: Tests are immune to external services and enforce realistic NAT scenarios
 
 ### 🏠 **Local Network Adaptations**
 This test setup simulates real-world NAT scenarios within a local Docker environment. Key adaptations:
@@ -175,13 +195,16 @@ docker-compose down -v --remove-orphans
 
 ### Port Mappings (Fixed)
 
-| Container | Host Port | Container Port | Purpose |
-|-----------|-----------|----------------|---------|
-| `peer-a` | 8081 | 8080 | Control API for test orchestration |
-| `peer-b` | 8082 | 8080 | Control API for test orchestration |
-| `relay-server` | 8083 | 8080 | Control API for test orchestration |
+| Container | Host Port | Container Port | Control Network IP | Purpose |
+|-----------|-----------|----------------|-------------------|---------|
+| `peer-a` | 8081 | 8080 | 172.25.0.10 | Control API for test orchestration |
+| `peer-b` | 8082 | 8080 | 172.25.0.11 | Control API for test orchestration |
+| `relay-server` | 8083 | 8080 | 172.25.0.12 | Control API for test orchestration |
 
-**Note**: These host port mappings are required for test orchestration and break complete network isolation. However, they do not affect the actual libp2p holepunch traffic, which uses internal Docker networks only.
+**Note**: Control APIs bind to the control_net (172.25.0.0/16) which is separate from libp2p traffic networks. This ensures:
+- Test orchestrator can coordinate scenarios via HTTP
+- Peers remain isolated from each other for libp2p traffic
+- NAT traversal is properly enforced
 
 ### NAT Types Explained
 

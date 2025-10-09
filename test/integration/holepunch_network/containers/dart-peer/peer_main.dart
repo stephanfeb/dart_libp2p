@@ -59,7 +59,7 @@ class IntegrationTestPeer {
 
   Future<void> initialize() async {
     // Setup logging
-    Logger.root.level = Level.FINE; // Temporarily set to FINE for debugging AutoRelay
+    Logger.root.level = Level.INFO;
     Logger.root.onRecord.listen((record) {
       print('${DateTime.now().toIso8601String()} [${record.level}] ${record.loggerName}: ${record.message}');
       if (record.error != null) print('ERROR: ${record.error}');
@@ -161,15 +161,10 @@ class IntegrationTestPeer {
   Future<void> _setupRelayServer() async {
     print('🌐 Setting up relay server...');
     
-    // For integration testing: Emit initial reachability as public to trigger RelayManager
-    // to start the relay service. In production, this would be determined by AutoNAT.
-    if (config.enableRelay && !config.enableAutoNAT) {
-      print('🔧 Emitting initial reachability as public to trigger relay service (test setup)');
-      final reachabilityEmitter = await host.eventBus.emitter(EvtLocalReachabilityChanged);
-      await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.public));
-      await reachabilityEmitter.close();
-      print('✅ Relay service should now be active');
-    }
+    // Note: Relay service is automatically started by BasicHost when:
+    // - config.enableRelay = true AND
+    // - config.enableAutoNAT = false
+    // No manual event emission needed!
     
     print('📡 Relay server ready to accept connections');
   }
@@ -312,8 +307,13 @@ class IntegrationTestPeer {
   Future<void> _startControlAPI() async {
     final port = int.tryParse(Platform.environment['CONTROL_PORT'] ?? '8080') ?? 8080;
     
-    final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    print('🌐 Control API listening on port $port');
+    // Bind to control network IP if specified (for test isolation)
+    // Otherwise bind to all interfaces
+    final bindIp = Platform.environment['CONTROL_BIND_IP'];
+    final bindAddress = bindIp != null ? InternetAddress(bindIp) : InternetAddress.anyIPv4;
+    
+    final server = await HttpServer.bind(bindAddress, port);
+    print('🌐 Control API listening on $bindAddress:$port');
     
     server.listen((request) async {
       print('📥 [HTTP] Incoming request received!');
