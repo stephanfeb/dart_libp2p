@@ -51,13 +51,12 @@ class Relay {
   /// Handles incoming streams for the relay protocol.
   Future<void> _handleStream(P2PStream stream) async {
     try {
-      // Read the message
-      final msg = await stream.read();
-      if (msg == null) {
-        throw Exception('unexpected EOF');
-      }
-
-      final pb = HopMessage.fromBuffer(msg);
+      // Read the length-delimited message (client sends with length prefix)
+      print('[Relay] Creating stream reader for incoming message');
+      final reader = DelimitedReader(_p2pStreamToDartStream(stream), 4096); // maxMessageSize
+      print('[Relay] Reading message...');
+      final pb = await reader.readMsg(HopMessage());
+      print('[Relay] Message read successfully, type: ${pb.type}');
 
       // Handle the message based on its type
       switch (pb.type) {
@@ -88,27 +87,26 @@ class Relay {
 
   /// Handles a reservation request.
   Future<void> _handleReserve(P2PStream stream, HopMessage msg) async {
-    // Extract the peer info
-    final peerInfo = peerToPeerInfoV2(msg.peer);
-    if (peerInfo.peerId.toString().isEmpty) {
-      await _writeResponse(stream, Status.MALFORMED_MESSAGE);
-      return;
-    }
-
+    // For RESERVE requests, the peer making the reservation is the remote peer of the stream
+    final peerId = stream.conn.remotePeer;
+    print('[Relay] Handling RESERVE from peer: ${peerId.toBase58()}');
+    
     // Check if we have resources for a new reservation
-    if (!_resources.canReserve(peerInfo.peerId)) {
+    if (!_resources.canReserve(peerId)) {
+      print('[Relay] Resource limit exceeded for peer: ${peerId.toBase58()}');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
 
     // Create a reservation
     final expire = DateTime.now().add(Duration(seconds: _resources.reservationTtl));
-    _reservations[peerInfo.peerId.toString()] = expire;
+    _reservations[peerId.toString()] = expire;
+    print('[Relay] Reservation created for peer: ${peerId.toBase58()}, expires: $expire');
 
     // Create a reservation voucher
     final voucher = ReservationVoucherData(
       relay: _host.id,
-      peer: peerInfo.peerId,
+      peer: peerId,
       expiration: expire,
     );
 
@@ -123,13 +121,16 @@ class Relay {
       ..duration = _resources.connectionDuration
       ..data = Int64(_resources.connectionData);
 
-    // Write the response
+    // Write the response (length-delimited)
     final response = HopMessage()
       ..type = HopMessage_Type.STATUS
       ..status = Status.OK
       ..reservation = reservation
       ..limit = limit;
-    await stream.write(response.writeToBuffer());
+    print('[Relay] Sending reservation response to peer: ${peerId.toBase58()}');
+    final writer = StreamSinkFromP2PStream(stream);
+    writeDelimitedMessage(writer, response);
+    print('[Relay] Reservation response sent');
   }
 
   /// Handles a connection request.
@@ -294,5 +295,57 @@ class Relay {
     for (final key in expired) {
       _reservations.remove(key);
     }
+  }
+}
+
+/// Helper function to adapt P2PStream.read() to a Dart Stream for DelimitedReader
+/// Uses a StreamController to allow multiple subscriptions via await-for loops
+Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
+  print('[Relay] _p2pStreamToDartStream called');
+  final controller = StreamController<Uint8List>();
+
+  Future<void> readLoop() async {
+    try {
+      while (true) {
+        if (controller.isClosed) break;
+        print('[Relay] Reading chunk from P2PStream...');
+        final data = await p2pStream.read();
+        print('[Relay] Read ${data.length} bytes, adding to controller...');
+        controller.add(data);
+      }
+    } catch (e, s) {
+      // Stream closed or error
+      print('[Relay] Stream read error or closed: $e');
+      if (!controller.isClosed) {
+        controller.addError(e, s);
+      }
+    } finally {
+      if (!controller.isClosed) {
+        await controller.close();
+      }
+    }
+  }
+
+  // Start reading immediately
+  readLoop();
+
+  // Return as broadcast stream to allow multiple await-for loops in DelimitedReader
+  return controller.stream.asBroadcastStream();
+}
+
+/// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage
+class StreamSinkFromP2PStream implements Sink<List<int>> {
+  final P2PStream _stream;
+  StreamSinkFromP2PStream(this._stream);
+
+  @override
+  void add(List<int> data) {
+    _stream.write(Uint8List.fromList(data));
+  }
+
+  @override
+  void close() {
+    // Closing the sink doesn't necessarily close the underlying P2PStream
+    // as the stream's lifecycle is managed by the caller
   }
 }
