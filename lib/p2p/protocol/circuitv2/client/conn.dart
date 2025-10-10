@@ -98,7 +98,17 @@ class RelayedConn implements TransportConn {
   Future<PublicKey?> get remotePublicKey => _stream.conn.remotePublicKey;
 
   @override
-  ConnState get state => _stream.conn.state;
+  ConnState get state {
+    // Return empty state to indicate this connection needs to be upgraded.
+    // The Swarm will then negotiate Noise + Yamux on top of this relay stream.
+    // This matches go-libp2p's behavior where the circuit relay Conn is upgraded.
+    return ConnState(
+      streamMultiplexer: '', // Empty = not yet multiplexed
+      security: '',          // Empty = not yet secured
+      transport: 'circuit-relay',
+      usedEarlyMuxerNegotiation: false,
+    );
+  }
 
   @override
   ConnStats get stat => _connStats;

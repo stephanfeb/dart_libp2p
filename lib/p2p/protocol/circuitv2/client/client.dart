@@ -411,7 +411,7 @@ class CircuitV2Client implements Transport {
         localPeer: host.id,
         remotePeer: destId,
         localMultiaddr: addr, // The address we dialed
-        remoteMultiaddr: addr.decapsulate(Protocols.circuit.name)!, // Decapsulate /p2p-circuit part
+        remoteMultiaddr: addr, // Keep the full circuit address including /p2p-circuit
         // isInitiator: true, // This is derived from stream.stat().direction in RelayedConn
       );
       _log.info('[CircuitV2Client.dial] 🎉 Successfully dialed ${destId.toString()} via relay ${relayId.toString()}');

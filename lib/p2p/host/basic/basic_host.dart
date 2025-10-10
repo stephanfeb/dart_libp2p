@@ -357,7 +357,12 @@ class BasicHost implements Host {
       // CircuitV2Client now properly implements Transport interface
       (_network as Swarm).addTransport(_circuitV2Client!);
       
-      _log.fine('[BasicHost start] CircuitV2Client initialized and registered as transport');
+      // Listen on the circuit address to accept incoming relayed connections
+      // This creates a listener that will accept and upgrade incoming RelayedConn instances
+      final circuitAddr = MultiAddr('/p2p-circuit');
+      await _network.listen([circuitAddr]);
+      
+      _log.fine('[BasicHost start] CircuitV2Client initialized, transport registered, and listening on circuit address');
     }
 
     // Initialize AutoRelay if enabled
