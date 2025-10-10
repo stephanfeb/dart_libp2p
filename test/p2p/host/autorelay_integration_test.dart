@@ -4,8 +4,8 @@ import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/network/network.dart'; // For Reachability
-import 'package:dart_libp2p/core/event/reachability.dart'; // For EvtLocalReachabilityChanged
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRelayAddrsUpdated
+import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart'; // For AmbientAutoNATv2Config
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // For Protocols
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -20,11 +20,13 @@ import '../../real_net_stack.dart';
 void main() {
   Logger.root.level = Level.FINE; // Enable more detailed logging
   Logger.root.onRecord.listen((record) {
-    // Only show logs from AutoRelay, RelayFinder, BasicHost
+    // Show logs from AutoRelay, RelayFinder, BasicHost, RelayManager, AutoNAT
     if (record.loggerName.contains('AutoRelay') || 
         record.loggerName.contains('RelayFinder') || 
         record.loggerName.contains('BasicHost') ||
-        record.loggerName.contains('RelayManager')) {
+        record.loggerName.contains('RelayManager') ||
+        record.loggerName.contains('ambient_autonat_v2') ||
+        record.loggerName.contains('autonatv2')) {
       print('${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
     }
   });
@@ -40,8 +42,8 @@ void main() {
     late PeerId peerAPeerId;
     late PeerId peerBPeerId;
     late UDX udx;
-    late StreamSubscription autoRelaySubA;
-    late StreamSubscription autoRelaySubB;
+    StreamSubscription? autoRelaySubA;
+    StreamSubscription? autoRelaySubB;
 
     setUp(() async {
       udx = UDX();
@@ -50,7 +52,7 @@ void main() {
 
       print('\n=== Setting up test nodes ===');
 
-      // Create relay server with its own event bus
+      // Create relay server with forced public reachability
       print('Creating relay server...');
       final relayEventBus = p2p_event_bus.BasicBus();
       relayNode = await createLibp2pNode(
@@ -61,22 +63,24 @@ void main() {
         enableRelay: true,
         enablePing: true,
         userAgentPrefix: 'relay-server',
+        forceReachability: Reachability.public, // Force public to start relay service
       );
       relayHost = relayNode.host;
       relayPeerId = relayNode.peerId;
       print('Relay server created: ${relayPeerId.toBase58()}');
       print('Relay addresses: ${relayHost.addrs}');
-
-      // Trigger relay service to start by emitting a reachability event
-      print('Triggering relay service to start...');
-      final emitter = await relayEventBus.emitter(EvtLocalReachabilityChanged);
-      await emitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.public));
+      
       await Future.delayed(Duration(milliseconds: 500)); // Give it time to start
-      print('Relay service should now be active');
+      print('Relay service should now be active (via forceReachability)');
 
-      // Create peer A with its own event bus
+      // Create peer A with its own event bus and fast AutoNAT config
       print('\nCreating peer A...');
       final peerAEventBus = p2p_event_bus.BasicBus();
+      final autoNATConfig = AmbientAutoNATv2Config(
+        bootDelay: Duration(milliseconds: 500), // Fast boot for testing
+        retryInterval: Duration(seconds: 1),
+        refreshInterval: Duration(seconds: 5),
+      );
       peerANode = await createLibp2pNode(
         udxInstance: udx,
         resourceManager: resourceManager,
@@ -85,13 +89,14 @@ void main() {
         enableAutoRelay: true,
         enablePing: true,
         userAgentPrefix: 'peer-a',
+        ambientAutoNATConfig: autoNATConfig,
       );
       peerAHost = peerANode.host;
       peerAPeerId = peerANode.peerId;
       print('Peer A created: ${peerAPeerId.toBase58()}');
       print('Peer A addresses: ${peerAHost.addrs}');
 
-      // Create peer B with its own event bus
+      // Create peer B with its own event bus and fast AutoNAT config
       print('\nCreating peer B...');
       final peerBEventBus = p2p_event_bus.BasicBus();
       peerBNode = await createLibp2pNode(
@@ -102,6 +107,7 @@ void main() {
         enableAutoRelay: true,
         enablePing: true,
         userAgentPrefix: 'peer-b',
+        ambientAutoNATConfig: autoNATConfig, // Use same config as peer A
       );
       peerBHost = peerBNode.host;
       peerBPeerId = peerBNode.peerId;
@@ -164,16 +170,13 @@ void main() {
       expect(peerBHost.network.connectedness(relayPeerId).name, equals('connected'));
       print('✅ Both peers connected to relay server');
       
-      // Step 1b: NOW set reachability to private to trigger AutoRelay (AFTER connections are established)
-      print('\n🔧 Setting peer reachability to private to trigger AutoRelay...');
-      final peerAReachEmitter = await peerAHost.eventBus.emitter(EvtLocalReachabilityChanged);
-      await peerAReachEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.private));
-      await peerAReachEmitter.close();
-      
-      final peerBReachEmitter = await peerBHost.eventBus.emitter(EvtLocalReachabilityChanged);
-      await peerBReachEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.private));
-      await peerBReachEmitter.close();
-      print('✅ Reachability set to private for both peers');
+      // Step 1b: AutoNAT will automatically detect reachability after connections are established
+      // No manual event emission needed - AmbientAutoNATv2 handles this automatically
+      print('\n🔧 Waiting for AutoNAT to detect reachability and trigger AutoRelay...');
+      // Give AutoNAT time to probe and determine reachability
+      // bootDelay=500ms + probe time + AutoRelay processing
+      await Future.delayed(Duration(seconds: 2));
+      print('✅ AutoNAT should have detected reachability by now');
       
       // Debug: Check what protocols the relay server advertises
       print('\n🔍 Debug: Checking relay server protocols...');

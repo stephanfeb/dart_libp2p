@@ -3,6 +3,7 @@ import '../core/network/transport_conn.dart'; // For TransportConn type
 import '../p2p/transport/multiplexing/yamux/session.dart';
 import '../p2p/transport/multiplexing/multiplexer.dart'; // For MultiplexerConfig and Multiplexer interface
 import 'config.dart'; // For Config, Option, Libp2p
+import '../p2p/host/autonat/ambient_config.dart'; // For AmbientAutoNATv2Config
 
 // Imports for new defaults
 import '../core/crypto/keys.dart'; // For KeyPair, KeyType
@@ -119,11 +120,17 @@ Future<void> applyDefaults(Config config) async {
   // Default AddrsFactory
   config.addrsFactory ??= _defaultAddrsFactoryInternal; // Use internal version
 
-  // Default service enable flags (already have defaults in Config, but can be asserted here if needed)
+  // Default service enable flags
   // config.enablePing is already true by default in Config.
   // config.enableRelay is already false by default.
-  // config.enableAutoNAT is already false by default.
+  // AutoNAT: Enable by default to automatically detect reachability
+  config.enableAutoNAT = true; // Changed to true by default
   // config.enableHolePunching is already true by default.
+  
+  // Default AmbientAutoNATv2 configuration
+  if (config.ambientAutoNATConfig == null) {
+    config.ambientAutoNATConfig = const AmbientAutoNATv2Config();
+  }
 
   // Note: PeerStore and ResourceManager are created later in Config.newNode(),
   // but the defaults set here (like PeerKey for PeerStore) will be used by their creation.

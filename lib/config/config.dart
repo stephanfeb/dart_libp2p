@@ -37,6 +37,7 @@ import '../core/peer/record.dart'; // Added for RecordRegistry
 import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
+import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
 
 final Logger _logger = Logger('Config');
 
@@ -95,6 +96,12 @@ class Config {
 
   // AutoNATv2 specific configurations
   List<AutoNATv2Option> autoNATv2Options = [];
+  
+  // AmbientAutoNATv2 specific configurations
+  AmbientAutoNATv2Config? ambientAutoNATConfig;
+  
+  // Force reachability option (for edge cases like relay servers)
+  Reachability? forceReachability;
 
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
@@ -322,6 +329,10 @@ extension ConfigOptions on Config {
     enableRelay = enabled;
   }
 
+  Future<void> withAutoRelay(bool enabled) async {
+    enableAutoRelay = enabled;
+  }
+
   /// Configures libp2p to enable/disable the AutoNAT service.
   Future<void> withAutoNAT(bool enabled) async {
     enableAutoNAT = enabled;
@@ -454,6 +465,10 @@ class Libp2p {
 
   static Option relay(bool enabled) {
     return (config) => config.withRelay(enabled);
+  }
+
+  static Option autoRelay(bool enabled) {
+    return (config) => config.withAutoRelay(enabled);
   }
 
   static Option autoNAT(bool enabled) {

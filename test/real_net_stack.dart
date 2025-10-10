@@ -24,6 +24,8 @@ import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/p2p/host/peerstore/pstoremem.dart';
 import 'package:dart_libp2p/core/event/bus.dart' as core_event_bus; // Interface
+import 'package:dart_libp2p/core/network/network.dart' show Reachability; // For forceReachability parameter
+import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart'; // For AmbientAutoNATv2Config
 
 // Logger for this utility file
 final _log = Logger('RealNetStack');
@@ -69,6 +71,8 @@ Future<Libp2pNode> createLibp2pNode({
   bool enableRelay = false,
   bool enableAutoRelay = false,
   bool enablePing = false,
+  Reachability? forceReachability, // Force reachability for testing
+  AmbientAutoNATv2Config? ambientAutoNATConfig, // Custom config for AutoNAT
 }) async {
   final kp = keyPair ?? await crypto_ed25519.generateEd25519KeyPair();
   final peerId = await core_peer_id_lib.PeerId.fromPublicKey(kp.publicKey);
@@ -128,11 +132,13 @@ Future<Libp2pNode> createLibp2pNode({
     ..peerKey = kp
     ..eventBus = hostEventBus // Shared event bus for hosts
     ..connManager = connManager
-    ..enableAutoNAT= false
+    ..enableAutoNAT= true // Enable AutoNAT for automatic reachability detection
     ..enableHolePunching = false
     ..enableRelay = enableRelay
     ..enableAutoRelay = enableAutoRelay
     ..enablePing = enablePing
+    ..forceReachability = forceReachability // Set forced reachability if provided
+    ..ambientAutoNATConfig = ambientAutoNATConfig // Custom AutoNAT config
     ..disableSignedPeerRecord = false
     ..addrsFactory = passThroughAddrsFactory
     ..negotiationTimeout = Duration(seconds: 20)

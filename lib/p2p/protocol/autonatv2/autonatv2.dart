@@ -11,6 +11,8 @@ import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/event/bus.dart';
+import '../../../core/event/identify.dart';
+import '../../../core/event/protocol.dart';
 
 final _log = Logger('autonatv2');
 
@@ -51,9 +53,8 @@ class AutoNATv2Impl implements AutoNATv2 {
   static Subscription? _subscribeToEvents(Host host) {
     try {
       return host.eventBus.subscribe([
-        'peer.protocols.updated',
-        'peer.connectedness.changed',
-        'peer.identification.completed',
+        EvtPeerIdentificationCompleted,
+        EvtPeerProtocolsUpdated,
       ]);
     } catch (e) {
       _log.warning('Failed to subscribe to events: $e');
@@ -68,13 +69,12 @@ class AutoNATv2Impl implements AutoNATv2 {
 
     // Process events for peer discovery
     _subscription?.stream.listen((event) {
-      final type = event['type'];
-      final peerId = event['peerId'];
-
-      if (type == 'peer.protocols.updated' ||
-          type == 'peer.connectedness.changed' ||
-          type == 'peer.identification.completed') {
-        _updatePeer(peerId);
+      if (event is EvtPeerIdentificationCompleted) {
+        _log.fine('Peer ${event.peer} identification completed, updating peer map');
+        _updatePeer(event.peer);
+      } else if (event is EvtPeerProtocolsUpdated) {
+        _log.fine('Peer ${event.peer} protocols updated, updating peer map');
+        _updatePeer(event.peer);
       }
     });
   }
@@ -120,9 +120,13 @@ class AutoNATv2Impl implements AutoNATv2 {
     final protocols = await host.peerStore.protoBook.getProtocols(peerId);
     final connectedness = host.network.connectedness(peerId);
 
+    _log.fine('Updating peer $peerId: protocols=$protocols, connectedness=$connectedness');
+
     if (protocols.contains(AutoNATv2Protocols.dialProtocol) && connectedness == Connectedness.connected) {
+      _log.fine('Adding peer $peerId to AutoNAT v2 peer map (supports ${AutoNATv2Protocols.dialProtocol})');
       _peers.put(peerId);
     } else {
+      _log.fine('Removing peer $peerId from AutoNAT v2 peer map');
       _peers.delete(peerId);
     }
   }

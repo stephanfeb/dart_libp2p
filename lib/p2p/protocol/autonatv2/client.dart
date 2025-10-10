@@ -14,7 +14,6 @@ import '../../../core/multiaddr.dart';
 import '../../../core/network/context.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/network/stream.dart';
-import '../../../core/protocol/protocol.dart';
 
 final _log = Logger('autonatv2.client');
 
@@ -162,11 +161,20 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
 
   /// Process a dial response
   Future<Result> _processDialResponse(DialResponse response, List<Request> requests, Completer<MultiAddr> completer) async {
-    // Check response status
+    // Handle E_DIAL_REFUSED - this means the server cannot/will not dial the address
+    // This typically means the peer is NOT publicly reachable
+    if (response.status == DialResponse_ResponseStatus.E_DIAL_REFUSED) {
+      // Return a result indicating the peer is not publicly reachable
+      // Use the first request address as the address being probed
+      return Result(
+        addr: requests.isNotEmpty ? requests[0].addr : MultiAddr('/'),
+        reachability: Reachability.private, // Dial refused = not publicly reachable
+        status: response.status.value, // Convert enum to int
+      );
+    }
+    
+    // Check other response statuses
     if (response.status != DialResponse_ResponseStatus.OK) {
-      if (response.status == DialResponse_ResponseStatus.E_DIAL_REFUSED) {
-        throw ClientErrors.dialRefused;
-      }
       throw Exception('Dial request failed: response status ${response.status}');
     }
 

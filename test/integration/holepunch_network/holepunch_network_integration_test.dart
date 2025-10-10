@@ -189,9 +189,10 @@ void main() {
         await orchestrator.start();
         
         // Allow infrastructure to warm up and AutoRelay to initialize
-        // AutoRelay needs: ~5s bootDelay + ~15s discovery + processing
-        print('\n⏰ Waiting 30 seconds for AutoRelay initialization...');
-        await Future.delayed(Duration(seconds: 30));
+        // AmbientAutoNATv2: 500ms boot + ~1-2s for probes
+        // AutoRelay: ~2-3s to discover relays and make reservations
+        print('\n⏰ Waiting 10 seconds for AmbientAutoNATv2 and AutoRelay initialization...');
+        await Future.delayed(Duration(seconds: 10));
         
         // Get peer and relay information
         final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
@@ -360,7 +361,7 @@ void main() {
         print('   ✓ Connection verified as relayed (not direct)');
         
         // Note: tearDown will handle stopping the orchestrator
-      }, timeout: Timeout(Duration(minutes: 5))); // Increased for 30s AutoRelay wait
+      }, timeout: Timeout(Duration(minutes: 5)));
     });
   });
 }

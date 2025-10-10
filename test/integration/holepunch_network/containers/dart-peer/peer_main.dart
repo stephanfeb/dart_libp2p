@@ -11,12 +11,13 @@ import 'package:dart_libp2p/core/peer/pb/peer_record.pb.dart' as pb;
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/config/stream_muxer.dart';
+import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
+import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart' show allowPrivateAddrs;
 
 
 
 
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
-import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
 import 'package:dart_libp2p/p2p/transport/tcp_transport.dart';
@@ -97,13 +98,25 @@ class IntegrationTestPeer {
       ..peerKey = keyPair
       ..enableHolePunching = _getBoolEnv('ENABLE_HOLEPUNCH', true)
       ..enableRelay = _getBoolEnv('ENABLE_RELAY', role == 'relay')
-      ..enableAutoNAT = _getBoolEnv('ENABLE_AUTONAT', false)
+      ..enableAutoNAT = _getBoolEnv('ENABLE_AUTONAT', true) // ✅ Now enabled by default with AmbientAutoNATv2
       ..enableAutoRelay = _getBoolEnv('ENABLE_AUTORELAY', role != 'relay') // Enable AutoRelay for non-relay peers
       ..enablePing = true
       // 🔒 SECURITY: Add Noise security protocol (fixes "No security protocols configured")
       ..securityProtocols = [await NoiseSecurity.create(keyPair)]
       // 🔀 MUXING: Add Yamux multiplexer (fixes "No muxers configured")  
-      ..muxers = [_YamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
+      ..muxers = [_YamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)]
+      // ⏱️ AUTONAT: Configure AmbientAutoNATv2 with fast boot delay for testing
+      ..ambientAutoNATConfig = AmbientAutoNATv2Config(
+        bootDelay: Duration(milliseconds: 500), // Fast boot for testing
+        retryInterval: Duration(seconds: 1),
+        refreshInterval: Duration(seconds: 30),
+      )
+      // 🌐 AUTONAT SERVER: For relay servers, allow private addresses (local testing)
+      ..autoNATv2Options = role == 'relay' 
+        ? [allowPrivateAddrs()] 
+        : []
+      // 🔒 FORCE REACHABILITY: Relay servers are always public
+      ..forceReachability = role == 'relay' ? Reachability.public : null;
     
     // Debug: Print config flags
     print('🔧 Config flags:');
@@ -111,6 +124,8 @@ class IntegrationTestPeer {
     print('   - enableRelay: ${config.enableRelay}');
     print('   - enableAutoNAT: ${config.enableAutoNAT}');
     print('   - enableAutoRelay: ${config.enableAutoRelay}');
+    print('   - ambientAutoNATConfig.bootDelay: ${config.ambientAutoNATConfig?.bootDelay}');
+    print('   - forceReachability: ${config.forceReachability}');
 
     // Parse listen addresses
     final listenAddrsStr = Platform.environment['LISTEN_ADDRS'] ?? '/ip4/0.0.0.0/tcp/4001';
@@ -202,16 +217,10 @@ class IntegrationTestPeer {
   }
   
   Future<void> _triggerAutoRelay() async {
-    // For integration testing: If AutoRelay is enabled but AutoNAT is disabled,
-    // emit an initial reachability event to trigger AutoRelay functionality.
-    // This simulates being behind a NAT for testing purposes.
-    if (config.enableAutoRelay && !config.enableAutoNAT) {
-      print('🔧 Emitting initial reachability as private to trigger AutoRelay (test setup)');
-      final reachabilityEmitter = await host.eventBus.emitter(EvtLocalReachabilityChanged);
-      await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.private));
-      await reachabilityEmitter.close();
-      print('✅ Initial reachability event emitted');
-    }
+    // ✅ NO LONGER NEEDED: AmbientAutoNATv2 automatically detects reachability and emits events!
+    // AutoRelay will automatically start when AmbientAutoNATv2 detects private/unknown reachability.
+    // This is the canonical solution - no manual event emission required.
+    print('✅ AmbientAutoNATv2 will automatically handle reachability detection and trigger AutoRelay');
   }
 
   Future<void> _connectToRelay(MultiAddr relayAddr) async {
@@ -261,12 +270,14 @@ class IntegrationTestPeer {
       // Give connections a moment to establish
       await Future.delayed(Duration(seconds: 2));
       
-      // STEP 4: Trigger AutoRelay by emitting reachability event
+      // STEP 4: AmbientAutoNATv2 automatically handles reachability detection
       await _triggerAutoRelay();
       
-      // STEP 5: Give AutoRelay time to discover relays and make reservations
-      print('⏰ Waiting 10 seconds for AutoRelay to discover relays and make reservations...');
-      await Future.delayed(Duration(seconds: 10));
+      // STEP 5: Wait for AmbientAutoNATv2 + AutoRelay initialization
+      // AmbientAutoNATv2: 500ms boot + ~1-2s for probes
+      // AutoRelay: ~2-3s to discover relays and make reservations
+      print('⏰ Waiting 5 seconds for AmbientAutoNATv2 and AutoRelay initialization...');
+      await Future.delayed(Duration(seconds: 5));
       
       print('📍 Listening on addresses after AutoRelay initialization:');
       for (final addr in host.addrs) {

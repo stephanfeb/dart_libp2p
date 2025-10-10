@@ -13,7 +13,6 @@ import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart'; // Added for Swarm cast
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
-import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/core/protocol/switch.dart';
 import 'package:dart_libp2p/core/record/envelope.dart'; // Added for Envelope
@@ -39,7 +38,8 @@ import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart'; // Added for PingService
 import 'package:dart_libp2p/p2p/host/relaysvc/relay_manager.dart'; // Added for RelayManager
-// Removed old AutoNAT import - using AutoNATv2 instead
+import 'package:dart_libp2p/p2p/host/autonat/ambient_autonat_v2.dart'; // AmbientAutoNATv2 orchestrator
+import 'package:dart_libp2p/p2p/protocol/autonatv2/autonatv2.dart'; // AutoNATv2Impl
 import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart'; // Added for HolePunchService interface
 import 'package:dart_libp2p/p2p/protocol/holepunch/service.dart' as holepunch_impl; // Added for HolePunchServiceImpl and Options
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddress; // Added for isRelayAddress
@@ -96,7 +96,7 @@ class BasicHost implements Host {
   RelayManager? _relayManager; // Added RelayManager field
   AutoRelay? _autoRelay; // Added AutoRelay field
   CircuitV2Client? _circuitV2Client; // Added CircuitV2Client field
-  AutoNATv2? _autoNATService; // Changed to AutoNATv2 service field
+  AmbientAutoNATv2? _autoNATService; // Changed to AmbientAutoNATv2 orchestrator
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
   
@@ -291,38 +291,50 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] Before RelayManager.create. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       _relayManager = await RelayManager.create(this);
       _log.fine('[BasicHost start] After RelayManager.create. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
-      
-      // If AutoNAT is disabled, assume public reachability and start the relay service immediately.
-      // This provides a simple API for developers running dedicated relay servers:
-      // just set enableRelay=true and disable AutoNAT, without manual event emission.
-      if (!_config.enableAutoNAT) {
-        _log.fine('[BasicHost start] AutoNAT disabled with relay enabled - assuming public reachability, starting relay service');
-        final reachabilityEmitter = await _eventBus.emitter(EvtLocalReachabilityChanged);
-        await reachabilityEmitter.emit(EvtLocalReachabilityChanged(reachability: Reachability.public));
-        await reachabilityEmitter.close();
-        _log.fine('[BasicHost start] Relay service should now be active');
-      }
-      
       _log.fine('RelayManager created and service monitoring started.');
     }
 
-    // Initialize AutoNATv2 service if enabled
+    // Handle forceReachability option for edge cases (e.g., relay servers)
+    if (_config.forceReachability != null) {
+      _log.fine('[BasicHost start] Force reachability set to ${_config.forceReachability}');
+      final reachabilityEmitter = await _eventBus.emitter(EvtLocalReachabilityChanged);
+      await reachabilityEmitter.emit(
+        EvtLocalReachabilityChanged(reachability: _config.forceReachability!)
+      );
+      await reachabilityEmitter.close();
+      _log.fine('[BasicHost start] Emitted forced reachability event');
+    }
+
+    // Initialize AutoNAT v2 service if enabled
     if (_config.enableAutoNAT) {
       _log.fine('[BasicHost start] Before AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       
-      // Create AutoNATv2 with settings from config
-      // Both host and dialerHost are the same (this) - they should have same dialing capabilities
-      _autoNATService = AutoNATv2Impl(
+      // First create the underlying AutoNATv2 protocol implementation
+      // This starts the AutoNAT v2 SERVER (to provide service to other peers)
+      final autoNATv2 = AutoNATv2Impl(
         this, // host
         this, // dialerHost - same as host since they have same dialing capabilities
         options: _config.autoNATv2Options, // Use options from config
       );
+      await autoNATv2.start();
+      _log.fine('[BasicHost start] AutoNATv2 server started (providing service to other peers)');
       
-      // Start the AutoNATv2 service
-      await _autoNATService!.start();
+      // Only wrap with ambient orchestrator if forceReachability is NOT set
+      // CRITICAL: Skip ambient probing when forceReachability is set to avoid contradicting the forced status
+      if (_config.forceReachability == null) {
+        // Wrap with ambient orchestrator for automatic probing and event emission
+        _autoNATService = await AmbientAutoNATv2.create(
+          this,
+          autoNATv2,
+          config: _config.ambientAutoNATConfig,
+        );
+        _log.fine('[BasicHost start] AmbientAutoNATv2 orchestrator created for ambient probing');
+      } else {
+        _log.fine('[BasicHost start] Skipping AmbientAutoNATv2 orchestrator because forceReachability is set to ${_config.forceReachability}');
+        _log.fine('[BasicHost start] AutoNATv2 server is active, but ambient probing is disabled');
+      }
       
       _log.fine('[BasicHost start] After AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
-      _log.fine('AutoNATv2 service created and started.');
     }
 
     // Initialize HolePunchService if enabled
@@ -871,7 +883,7 @@ class BasicHost implements Host {
 
   PingService? get pingService => _pingService;
   RelayManager? get relayManager => _relayManager;
-  AutoNATv2? get autoNATService => _autoNATService;
+  AmbientAutoNATv2? get autoNATService => _autoNATService;
 
   /// Returns only public/observed addresses suitable for holepunching.
   /// This includes:
@@ -886,22 +898,17 @@ class BasicHost implements Host {
     final observed = _idService.ownObservedAddrs();
     publicAddresses.addAll(observed);
     
-    // AutoNATv2 doesn't provide a simple status property like v1
-    // Instead, we include addresses that appear public based on other heuristics
-    // The actual reachability verification is done on-demand via getReachability()
-    if (_autoNATService != null) {
-      _log.fine('[BasicHost publicAddrs] AutoNATv2 service is available for reachability checks');
+    // AmbientAutoNATv2 provides reachability status automatically
+    // Only include addresses when we've confirmed public reachability
+    if (_autoNATService != null && _autoNATService!.status == Reachability.public) {
+      _log.fine('[BasicHost publicAddrs] AmbientAutoNATv2 status is public');
       
-      // For now, we assume addresses might be public and include them
-      // This could be enhanced to cache previous getReachability() results
-      // When AutoNAT confirms we're publicly reachable, we can trust addresses that "look public"
-      // This helps when observed addresses aren't available yet
+      // When AutoNAT confirms we're publicly reachable, include public addresses
       final candidateAddrs = allAddrs.where((addr) {
-        // Only include addresses that appear to be public (not private ranges)
         return addr.isPublic() && !isRelayAddress(addr);
       }).toList();
       
-      _log.fine('[BasicHost publicAddrs] AutoNATv2 available, adding ${candidateAddrs.length} candidate addresses for reachability checks');
+      _log.fine('[BasicHost publicAddrs] Adding ${candidateAddrs.length} verified public addresses');
       publicAddresses.addAll(candidateAddrs);
     }
     

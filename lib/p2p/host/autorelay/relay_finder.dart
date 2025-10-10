@@ -641,19 +641,23 @@ class RelayFinder {
       _relays.forEach((peerId, reservation) {
         _log.fine('RelayFinder: Processing relay: ${peerId.toBase58()}');
         // Use the addresses from the reservation - these are provided by the relay server
-        // and should be trusted as-is without filtering. The relay knows best which addresses
-        // it's reachable at (public IPs, private network IPs, etc.)
         final relayPeerAddrs = reservation.addrs;
         _log.fine('RelayFinder: Reservation has ${relayPeerAddrs.length} addresses for relay ${peerId.toBase58()}');
         
-        // Don't filter relay addresses - trust the relay server's advertised addresses
-        relayAddrCountForMetrics += relayPeerAddrs.length;
         for (var relayAddr in relayPeerAddrs) {
             try {
+                // Skip addresses that already contain /p2p-circuit (listen addresses)
+                // We only want to encapsulate /p2p-circuit on top of actual transport addresses
+                if (relayAddr.toString().contains('/p2p-circuit')) {
+                  _log.fine('RelayFinder: Skipping address that already contains /p2p-circuit: $relayAddr');
+                  continue;
+                }
+                
                 var circuitAddr = relayAddr
                     .encapsulate(Protocols.p2p.name, peerId.toString())
                     .encapsulate(Protocols.circuit.name, '');
                 raddrs.add(circuitAddr);
+                relayAddrCountForMetrics++;
                 _log.fine('RelayFinder: Created circuit address: $circuitAddr');
             } catch (e) {
                 _log.warning('RelayFinder: Failed to create circuit address for relay $peerId via $relayAddr: $e');
