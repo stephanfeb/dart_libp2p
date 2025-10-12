@@ -102,6 +102,9 @@ class Config {
   
   // Force reachability option (for edge cases like relay servers)
   Reachability? forceReachability;
+  
+  // Relay server configuration
+  List<String> relayServers = []; // List of relay multiaddr strings to auto-connect
 
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
@@ -351,6 +354,11 @@ extension ConfigOptions on Config {
   Future<void> withHolePunching(bool enabled) async {
     enableHolePunching = enabled;
   }
+  
+  /// Configures relay servers to automatically connect to during startup
+  Future<void> withRelayServers(List<String> servers) async {
+    relayServers = servers;
+  }
 
   // AutoNATv2 specific configuration methods
 
@@ -490,6 +498,10 @@ class Libp2p {
 
   static Option autoNAT(bool enabled) {
     return (config) => config.withAutoNAT(enabled);
+  }
+  
+  static Option relayServers(List<String> servers) {
+    return (config) => config.withRelayServers(servers);
   }
 
   // AutoNATv2 specific options

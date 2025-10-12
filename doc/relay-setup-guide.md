@@ -138,6 +138,57 @@ print('📍 Circuit addresses: $circuitAddrs');
 7. Discovers the relay server and makes a reservation
 8. Advertises circuit addresses via `EvtAutoRelayAddrsUpdated`
 
+### Automatic Relay Connection
+
+Configure relay servers to automatically connect during host startup:
+
+```dart
+import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
+
+final config = Config()
+  ..enableAutoRelay = true   // Enable AutoRelay client
+  ..enableAutoNAT = true     // Enable AmbientAutoNATv2 for automatic detection
+  ..relayServers = [
+    '/ip4/relay.example.com/tcp/4001/p2p/12D3KooW...',
+    '/ip4/backup-relay.example.com/tcp/4001/p2p/12D3KooW...',
+  ]
+  ..ambientAutoNATConfig = AmbientAutoNATv2Config(
+    bootDelay: Duration(milliseconds: 500),  // Fast boot for testing
+    retryInterval: Duration(seconds: 1),
+    refreshInterval: Duration(seconds: 30),
+  );
+
+final host = await BasicHost.create(
+  network: network,
+  config: config,
+);
+
+await host.start();
+// ✅ Host automatically connects to configured relay servers during startup
+// No manual connect() calls needed!
+
+// Wait for AmbientAutoNATv2 + AutoRelay initialization
+await Future.delayed(Duration(seconds: 6));
+
+// Verify circuit addresses are advertised
+final myAddrs = host.addrs;
+final circuitAddrs = myAddrs.where((a) => a.toString().contains('/p2p-circuit')).toList();
+print('📍 Circuit addresses: $circuitAddrs');
+```
+
+**What happens automatically:**
+1. During `host.start()`, connects to all configured relay servers (blocking)
+2. Failed relay connections are logged and skipped (non-blocking)
+3. AmbientAutoNATv2 can immediately use these relays for probing
+4. AutoRelay has immediate relay candidates if you're behind NAT
+5. Opportunistic relay discovery continues from peer connections
+
+**Benefits:**
+- **No manual connect()** - relay connections happen automatically
+- **Fast initialization** - relays are available before AutoNAT probing starts
+- **Graceful degradation** - failed connections don't block startup
+- **Flexibility** - still discovers new relays from normal peer connections
+
 ### Alternative: Manual Trigger (For Testing Only)
 
 If you need to skip AutoNAT for testing purposes:

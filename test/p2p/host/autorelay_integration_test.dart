@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/network/network.dart'; // For Reachability
@@ -73,7 +72,20 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500)); // Give it time to start
       print('Relay service should now be active (via forceReachability)');
 
-      // Create peer A with its own event bus and fast AutoNAT config
+      // Build relay server addresses for auto-connect configuration
+      // Filter to get only direct (non-circuit) addresses
+      final relayDirectAddrs = relayHost.addrs
+          .where((addr) => !addr.toString().contains('/p2p-circuit'))
+          .toList();
+      
+      // Construct full relay addresses with peer ID
+      final relayServerAddrs = relayDirectAddrs.map((addr) {
+        return '${addr.toString()}/p2p/${relayPeerId.toBase58()}';
+      }).toList();
+      
+      print('Relay server addresses for auto-connect: $relayServerAddrs');
+
+      // Create peer A with its own event bus, fast AutoNAT config, and relay auto-connect
       print('\nCreating peer A...');
       final peerAEventBus = p2p_event_bus.BasicBus();
       final autoNATConfig = AmbientAutoNATv2Config(
@@ -90,13 +102,15 @@ void main() {
         enablePing: true,
         userAgentPrefix: 'peer-a',
         ambientAutoNATConfig: autoNATConfig,
+        relayServers: relayServerAddrs, // Auto-connect to relay servers
       );
       peerAHost = peerANode.host;
       peerAPeerId = peerANode.peerId;
       print('Peer A created: ${peerAPeerId.toBase58()}');
       print('Peer A addresses: ${peerAHost.addrs}');
+      print('✅ Peer A configured to auto-connect to ${relayServerAddrs.length} relay servers');
 
-      // Create peer B with its own event bus and fast AutoNAT config
+      // Create peer B with its own event bus, fast AutoNAT config, and relay auto-connect
       print('\nCreating peer B...');
       final peerBEventBus = p2p_event_bus.BasicBus();
       peerBNode = await createLibp2pNode(
@@ -108,11 +122,13 @@ void main() {
         enablePing: true,
         userAgentPrefix: 'peer-b',
         ambientAutoNATConfig: autoNATConfig, // Use same config as peer A
+        relayServers: relayServerAddrs, // Auto-connect to relay servers
       );
       peerBHost = peerBNode.host;
       peerBPeerId = peerBNode.peerId;
       print('Peer B created: ${peerBPeerId.toBase58()}');
       print('Peer B addresses: ${peerBHost.addrs}');
+      print('✅ Peer B configured to auto-connect to ${relayServerAddrs.length} relay servers');
 
       print('\n=== Test: Circuit Relay Advertisement and Ping ===');
 
@@ -157,18 +173,14 @@ void main() {
     });
 
     test('Peers advertise circuit relay addresses and can ping through relay', () async {
-      // Step 1: Connect both peers to relay server FIRST
-      print('\n📡 Step 1: Connecting peers to relay server...');
-      await peerAHost.connect(AddrInfo(relayPeerId, relayHost.addrs));
-      print('✅ Peer A connected to relay');
+      // Step 1: Verify auto-connection to relay server
+      // NOTE: Peers should already be connected to relay via Config.relayServers during host.start()
+      print('\n📡 Step 1: Verifying auto-connection to relay server...');
       
-      await peerBHost.connect(AddrInfo(relayPeerId, relayHost.addrs));
-      print('✅ Peer B connected to relay');
-      
-      // Verify connections
+      // Verify connections established automatically
       expect(peerAHost.network.connectedness(relayPeerId).name, equals('connected'));
       expect(peerBHost.network.connectedness(relayPeerId).name, equals('connected'));
-      print('✅ Both peers connected to relay server');
+      print('✅ Both peers automatically connected to relay server via Config.relayServers');
       
       // Step 1b: AutoNAT will automatically detect reachability after connections are established
       // No manual event emission needed - AmbientAutoNATv2 handles this automatically

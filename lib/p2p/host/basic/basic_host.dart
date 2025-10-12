@@ -377,6 +377,13 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] CircuitV2Client initialized, transport registered, and listening on circuit address');
     }
 
+    // Connect to configured relay servers (if any)
+    if (_config.relayServers.isNotEmpty) {
+      _log.fine('[BasicHost start] Connecting to ${_config.relayServers.length} configured relay servers...');
+      await _connectToConfiguredRelays(_config.relayServers);
+      _log.fine('[BasicHost start] Relay server connections completed');
+    }
+
     // Initialize AutoRelay if enabled
     if (_config.enableAutoRelay) {
       _log.fine('[BasicHost start] Initializing AutoRelay...');
@@ -1261,6 +1268,42 @@ class BasicHost implements Host {
 
     // Close peerstore
     await peerStore.close();
+  }
+
+  /// Connect to configured relay servers during startup
+  Future<void> _connectToConfiguredRelays(List<String> relayAddrs) async {
+    int successCount = 0;
+    int failCount = 0;
+    
+    for (final addrStr in relayAddrs) {
+      try {
+        // Parse multiaddr string
+        final addr = MultiAddr(addrStr);
+        
+        // Extract peer ID and address from multiaddr
+        final addrInfo = AddrInfo.fromMultiaddr(addr);
+        
+        _log.fine('[BasicHost] Connecting to relay: $addrStr');
+        
+        // Connect with timeout
+        await connect(addrInfo).timeout(
+          Duration(seconds: 10),
+          onTimeout: () {
+            throw TimeoutException('Connection timeout after 10 seconds');
+          },
+        );
+        
+        successCount++;
+        _log.fine('[BasicHost] Successfully connected to relay: ${addrInfo.id.toBase58()}');
+        
+      } catch (e) {
+        failCount++;
+        _log.warning('[BasicHost] Failed to connect to relay $addrStr: $e');
+        // Continue to next relay (non-blocking)
+      }
+    }
+    
+    _log.fine('[BasicHost] Relay connections: $successCount successful, $failCount failed');
   }
 }
 

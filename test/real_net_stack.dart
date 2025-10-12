@@ -73,6 +73,7 @@ Future<Libp2pNode> createLibp2pNode({
   bool enablePing = false,
   Reachability? forceReachability, // Force reachability for testing
   AmbientAutoNATv2Config? ambientAutoNATConfig, // Custom config for AutoNAT
+  List<String>? relayServers, // List of relay multiaddrs to auto-connect
 }) async {
   final kp = keyPair ?? await crypto_ed25519.generateEd25519KeyPair();
   final peerId = await core_peer_id_lib.PeerId.fromPublicKey(kp.publicKey);
@@ -139,6 +140,7 @@ Future<Libp2pNode> createLibp2pNode({
     ..enablePing = enablePing
     ..forceReachability = forceReachability // Set forced reachability if provided
     ..ambientAutoNATConfig = ambientAutoNATConfig // Custom AutoNAT config
+    ..relayServers = relayServers ?? [] // Set relay servers for auto-connect
     ..disableSignedPeerRecord = false
     ..addrsFactory = passThroughAddrsFactory
     ..negotiationTimeout = Duration(seconds: 20)
