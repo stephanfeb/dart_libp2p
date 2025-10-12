@@ -113,7 +113,11 @@ class Relay {
     // Create a reservation message
     final reservation = Reservation()
       ..expire = Int64(expire.millisecondsSinceEpoch ~/ 1000)
-      ..addrs.addAll(_host.addrs.map((addr) => addr.toBytes()))
+      ..addrs.addAll(
+          _host.addrs
+              .where((addr) => !addr.toString().contains('/p2p-circuit'))  // ← Filter!
+              .map((addr) => addr.toBytes())
+      )
       ..voucher = voucher.marshalRecord();
 
   // Create a limit message

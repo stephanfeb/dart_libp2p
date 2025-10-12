@@ -228,6 +228,7 @@ class Config {
 
     // Add more validation as needed
   }
+
 }
 
 /// Option is a libp2p config option that can be given to the libp2p constructor.
@@ -269,6 +270,14 @@ extension ConfigOptions on Config {
   /// Configures libp2p to use the given user agent.
   Future<void> withUserAgent(String agent) async {
     userAgent = agent;
+  }
+
+  Future<void> withReachability(Reachability r) async {
+    forceReachability = r;
+  }
+
+  Future<void> withAmbientAutoNAT(AmbientAutoNATv2Config conf) async {
+    ambientAutoNATConfig = conf;
   }
 
   /// Configures libp2p to use the given protocol version.
@@ -408,6 +417,10 @@ class Libp2p {
     return (config) => config.withUserAgent(agent);
   }
 
+  static Option forceReachability(Reachability reachability){
+    return (config)  => config.withReachability(reachability);
+  }
+
   /// Configures libp2p to use the given protocol version.
   static Option protocolVersion(String version) {
     return (config) => config.withProtocolVersion(version);
@@ -454,6 +467,10 @@ class Libp2p {
 
   static Option identifyDisableObservedAddrManager(bool disable) {
     return (config) => config.withIdentifyDisableObservedAddrManager(disable);
+  }
+
+  static Option ambientAutoNATv2Config(AmbientAutoNATv2Config conf){
+    return (config) => config.withAmbientAutoNAT(conf);
   }
 
   /// Configures libp2p to enable/disable the Ping service.

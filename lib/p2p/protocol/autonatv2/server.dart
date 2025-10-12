@@ -87,13 +87,32 @@ class AutoNATv2ServerImpl implements AutoNATv2Server {
 
   /// Handle a dial request
   Future<void> _handleDialRequest(P2PStream stream, PeerId peerId) async {
-    _log.fine('Received dial-request from: ${stream.conn.remotePeer}, addr: ${stream.conn.remoteMultiaddr}');
+    try {
+      _log.fine( 'Received dial-request from: ${stream.conn.remotePeer}, addr: ${stream.conn.remoteMultiaddr}');
 
-    final evt = await _serveDialRequest(stream);
+      final evt = await _serveDialRequest(stream);
 
-    _log.fine('Completed dial-request from ${stream.conn.remotePeer}, response status: ${evt.responseStatus}, dial status: ${evt.dialStatus}, err: ${evt.error}');
+      _log.fine( 'Completed dial-request from ${stream.conn.remotePeer}, response status: ${evt.responseStatus}, dial status: ${evt.dialStatus}, err: ${evt.error}');
 
-    metricsTracer?.completedRequest(evt);
+      metricsTracer?.completedRequest(evt);
+    } catch (e, stackTrace) {
+      _log.warning( 'Error handling dial request from ${stream.conn.remotePeer}: $e');
+      _log.fine('Stack trace: $stackTrace');
+
+      try {
+        stream.reset();
+      } catch (_) {
+        // Ignore errors resetting stream
+      }
+
+      // Report error to metrics
+      metricsTracer?.completedRequest(EventDialRequestCompleted(
+        error: e is Exception ? e : Exception(e.toString()),
+        responseStatus: DialResponse_ResponseStatus.E_INTERNAL_ERROR,
+        dialStatus: DialStatus.UNUSED,
+        dialDataRequired: false,
+      ));
+    }
   }
 
   /// Serve a dial request
@@ -274,7 +293,7 @@ class AutoNATv2ServerImpl implements AutoNATv2Server {
     // Get dial data if required
     if (isDialDataRequired) {
       try {
-        _getDialData(stream, addrIdx);
+        await _getDialData(stream, addrIdx);
       } catch (e) {
         stream.reset();
         _log.fine('$peerId refused dial data request: $e');
