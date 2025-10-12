@@ -24,6 +24,7 @@ import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/p2p/peerstore.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart';
+import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRelayAddrsUpdated
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart'; // Added import
@@ -318,6 +319,7 @@ class IdentifyService implements IDService {
     _eventBusSubscription = await host.eventBus.subscribe([
       EvtLocalProtocolsUpdated,
       EvtLocalAddressesUpdated,
+      EvtAutoRelayAddrsUpdated,
     ]);
 
     // Set up a stream controller for pushes

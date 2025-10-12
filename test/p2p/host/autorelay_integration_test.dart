@@ -20,12 +20,14 @@ void main() {
   Logger.root.level = Level.FINE; // Enable more detailed logging
   Logger.root.onRecord.listen((record) {
     // Show logs from AutoRelay, RelayFinder, BasicHost, RelayManager, AutoNAT
-    if (record.loggerName.contains('AutoRelay') || 
-        record.loggerName.contains('RelayFinder') || 
+    if (record.loggerName.contains('AutoRelay') ||
+        record.loggerName.contains('RelayFinder') ||
         record.loggerName.contains('BasicHost') ||
         record.loggerName.contains('RelayManager') ||
         record.loggerName.contains('ambient_autonat_v2') ||
-        record.loggerName.contains('autonatv2')) {
+        record.loggerName.contains('identify') ||
+        record.loggerName.contains('autonatv2'))
+    {
       print('${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
     }
   });
@@ -238,6 +240,43 @@ void main() {
       
       print('✅ Both peers advertise circuit relay addresses');
 
+      // Step 3.5: Verify relay server's peerstore was updated via Identify Push
+      print('\n🔍 Step 3.5: Verifying relay server\'s peerstore has peers\' circuit addresses...');
+      
+      // Check relay's peerstore for peer A's addresses
+      final relayKnownPeerAAddrs = await relayHost.peerStore.addrBook.addrs(peerAPeerId);
+      print('Relay server knows ${relayKnownPeerAAddrs.length} addresses for Peer A:');
+      for (var addr in relayKnownPeerAAddrs) {
+        print('   - $addr');
+      }
+      
+      // Check relay's peerstore for peer B's addresses
+      final relayKnownPeerBAddrs = await relayHost.peerStore.addrBook.addrs(peerBPeerId);
+      print('Relay server knows ${relayKnownPeerBAddrs.length} addresses for Peer B:');
+      for (var addr in relayKnownPeerBAddrs) {
+        print('   - $addr');
+      }
+      
+      // Filter for circuit addresses
+      final relayKnownPeerACircuitAddrs = relayKnownPeerAAddrs.where((addr) {
+        return addr.toString().contains('/p2p-circuit');
+      }).toList();
+      
+      final relayKnownPeerBCircuitAddrs = relayKnownPeerBAddrs.where((addr) {
+        return addr.toString().contains('/p2p-circuit');
+      }).toList();
+      
+      print('Relay knows ${relayKnownPeerACircuitAddrs.length} circuit addresses for Peer A');
+      print('Relay knows ${relayKnownPeerBCircuitAddrs.length} circuit addresses for Peer B');
+      
+      // Verify relay server received circuit addresses via Identify Push
+      expect(relayKnownPeerACircuitAddrs, isNotEmpty,
+        reason: 'Relay server should have received Peer A\'s circuit addresses via Identify Push');
+      expect(relayKnownPeerBCircuitAddrs, isNotEmpty,
+        reason: 'Relay server should have received Peer B\'s circuit addresses via Identify Push');
+      
+      print('✅ Relay server\'s peerstore correctly updated with both peers\' circuit addresses');
+
       // Step 4: Construct full dialable circuit addresses for peer B
       // AutoRelay advertises: /ip4/X.X.X.X/udp/PORT/udx/p2p/RELAY_ID/p2p-circuit
       // We need to dial:      /ip4/X.X.X.X/udp/PORT/udx/p2p/RELAY_ID/p2p-circuit/p2p/DEST_PEER_ID
@@ -249,6 +288,23 @@ void main() {
       
       print('Peer B dialable circuit addresses: $peerBDialableCircuitAddrs');
       
+      // Debug: Check what addresses peer A already knows about peer B (if any)
+      // NOTE: Peer A and Peer B have NOT connected to each other yet, only to the relay server.
+      // Identify runs when peers connect, so peer A shouldn't know peer B's addresses yet
+      // unless there's automatic discovery through the relay.
+      print('\n🔍 Debug: Checking peer A\'s peerstore for peer B BEFORE manual add...');
+      final existingPeerBAddrs = await peerAHost.peerStore.addrBook.addrs(peerBPeerId);
+      print('Existing addresses for peer B in peer A\'s peerstore: ${existingPeerBAddrs.length}');
+      if (existingPeerBAddrs.isEmpty) {
+        print('   → Empty (as expected - peers haven\'t connected to each other yet)');
+      } else {
+        for (var addr in existingPeerBAddrs) {
+          print('   - $addr');
+          final hasCircuit = addr.toString().contains('/p2p-circuit');
+          print('     Is circuit: $hasCircuit');
+        }
+      }
+      
       // Add ONLY dialable circuit addresses to peer A's peerstore
       // This forces peer A to dial peer B via circuit relay
       await peerAHost.peerStore.addrBook.clearAddrs(peerBPeerId);
@@ -258,6 +314,28 @@ void main() {
         Duration(hours: 1),
       );
       print('✅ Peer B dialable circuit addresses added to peer A peerstore (${peerBDialableCircuitAddrs.length} addresses)');
+
+      // Verify peerstore was properly updated with circuit addresses
+      print('\n🔍 Verifying peerstore contains circuit addresses...');
+      final storedAddrs = await peerAHost.peerStore.addrBook.addrs(peerBPeerId);
+      print('Stored addresses for peer B in peer A\'s peerstore: ${storedAddrs.length}');
+      for (var addr in storedAddrs) {
+        print('   - $addr');
+      }
+      
+      final storedCircuitAddrs = storedAddrs.where((addr) {
+        final addrStr = addr.toString();
+        return addrStr.contains('/p2p-circuit') && 
+               addrStr.contains(relayPeerId.toBase58()) &&
+               addrStr.contains(peerBPeerId.toBase58());
+      }).toList();
+      
+      expect(storedCircuitAddrs.length, equals(peerBDialableCircuitAddrs.length),
+        reason: 'Peerstore should contain exactly ${peerBDialableCircuitAddrs.length} circuit addresses');
+      expect(storedCircuitAddrs, isNotEmpty,
+        reason: 'Peerstore must contain circuit relay addresses for peer B');
+      
+      print('✅ Peerstore verified: ${storedCircuitAddrs.length} circuit addresses stored correctly');
 
       // Step 5: Ping peer B from peer A via circuit relay
       print('\n🏓 Step 5: Pinging peer B from peer A via circuit relay...');

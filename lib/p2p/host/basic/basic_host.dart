@@ -424,10 +424,13 @@ class BasicHost implements Host {
       _autoRelayAddrsSubscription = _eventBus
           .subscribe(EvtAutoRelayAddrsUpdated)
           .stream
-          .listen((event) {
+          .listen((event) async {
         if (event is EvtAutoRelayAddrsUpdated) {
           _log.fine('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
           _autoRelayAddrs = List.from(event.advertisableAddrs);
+          
+          // Regenerate signed peer record with new circuit addresses
+          await _regenerateSelfSignedPeerRecord();
           
           // Trigger address change to notify other components
           _addrChangeChan.add(null);
@@ -1304,6 +1307,49 @@ class BasicHost implements Host {
     }
     
     _log.fine('[BasicHost] Relay connections: $successCount successful, $failCount failed');
+  }
+
+  /// Regenerates and persists the self-signed peer record with current addresses.
+  /// This should be called whenever the host's addresses change (e.g., when circuit addresses are added).
+  Future<void> _regenerateSelfSignedPeerRecord() async {
+    if (_config.disableSignedPeerRecord ?? false) {
+      return; // Signed peer records are disabled
+    }
+
+    if (!(peerStore.addrBook is CertifiedAddrBook)) {
+      return; // AddrBook doesn't support certified records
+    }
+
+    final cab = peerStore.addrBook as CertifiedAddrBook;
+    final selfId = id;
+    final privKey = await peerStore.keyBook.privKey(selfId);
+
+    if (privKey == null) {
+      _log.warning('[BasicHost] Cannot regenerate signed peer record: no private key available');
+      return;
+    }
+
+    final currentAddrs = addrs;
+    _log.fine('[BasicHost] Regenerating signed peer record with ${currentAddrs.length} addresses');
+
+    try {
+      final recordPayload = peer_record.PeerRecord(
+        peerId: selfId,
+        seq: DateTime.now().millisecondsSinceEpoch,
+        addrs: currentAddrs,
+      );
+
+      final envelope = await Envelope.seal(recordPayload, privKey);
+
+      if (envelope != null) {
+        await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
+        _log.fine('[BasicHost] Successfully regenerated signed peer record with addresses: $currentAddrs');
+      } else {
+        _log.warning('[BasicHost] Failed to seal signed peer record envelope');
+      }
+    } catch (e, s) {
+      _log.severe('[BasicHost] Error regenerating signed peer record: $e\n$s');
+    }
   }
 }
 
