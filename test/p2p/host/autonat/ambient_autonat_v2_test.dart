@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';
@@ -11,6 +10,7 @@ import 'package:dart_libp2p/core/event/identify.dart';
 import 'package:dart_libp2p/core/event/reachability.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
+import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
@@ -18,7 +18,7 @@ import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/host/autonat/ambient_autonat_v2.dart';
 import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
 
-@GenerateMocks([Host, EventBus, Emitter, Subscription, Peerstore, ProtoBook, AutoNATv2])
+@GenerateMocks([Host, EventBus, Emitter, Subscription, Peerstore, ProtoBook, AutoNATv2, Conn])
 import 'ambient_autonat_v2_test.mocks.dart';
 
 void main() {
@@ -30,6 +30,7 @@ void main() {
     late MockPeerstore mockPeerstore;
     late MockProtoBook mockProtoBook;
     late MockAutoNATv2 mockAutoNATv2;
+    late MockConn mockConn;
     late StreamController<dynamic> eventStreamController;
     late AmbientAutoNATv2Config config;
 
@@ -41,6 +42,7 @@ void main() {
       mockPeerstore = MockPeerstore();
       mockProtoBook = MockProtoBook();
       mockAutoNATv2 = MockAutoNATv2();
+      mockConn = MockConn();
       eventStreamController = StreamController<dynamic>.broadcast();
       
       config = const AmbientAutoNATv2Config(
@@ -64,6 +66,7 @@ void main() {
           .thenReturn(mockSubscription);
       when(mockSubscription.stream)
           .thenAnswer((_) => eventStreamController.stream);
+      when(mockSubscription.close()).thenAnswer((_) async {});
       when(mockAutoNATv2.start()).thenAnswer((_) async {});
       when(mockAutoNATv2.close()).thenAnswer((_) async {});
     });
@@ -111,9 +114,9 @@ void main() {
       when(mockProtoBook.getProtocols(testPeerId))
           .thenAnswer((_) async => [AutoNATv2Protocols.dialProtocol]);
       
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.public);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.public
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((_) async => result);
@@ -127,7 +130,14 @@ void main() {
       
       // Emit peer identification event
       eventStreamController.add(
-        EvtPeerIdentificationCompleted(peer: testPeerId),
+        EvtPeerIdentificationCompleted(
+          peer: testPeerId,
+          conn: mockConn,
+          listenAddrs: [],
+          protocols: [],
+          agentVersion: 'test/1.0.0',
+          protocolVersion: 'test/1.0',
+        ),
       );
       
       // Wait for probe to be scheduled and executed
@@ -141,9 +151,9 @@ void main() {
 
     test('emits public reachability on successful probe', () async {
       // Arrange
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.public);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.public
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((_) async => result);
@@ -173,9 +183,9 @@ void main() {
 
     test('emits private reachability on failed probe', () async {
       // Arrange
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.private);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.private
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((_) async => result);
@@ -205,9 +215,9 @@ void main() {
 
     test('increases confidence on consistent results', () async {
       // Arrange
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.public);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.public
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((_) async => result);
@@ -243,9 +253,9 @@ void main() {
 
     test('reschedules probe on address change', () async {
       // Arrange
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.public);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.public
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((_) async => result);
@@ -263,7 +273,12 @@ void main() {
       // (In real scenario, this would happen after multiple probes)
       
       // Emit address change event
-      eventStreamController.add(EvtLocalAddressesUpdated());
+      eventStreamController.add(
+        EvtLocalAddressesUpdated(
+          diffs: false,
+          current: [],
+        ),
+      );
       
       // Wait a bit for processing
       await Future.delayed(const Duration(milliseconds: 100));
@@ -287,7 +302,7 @@ void main() {
       await ambient.close();
 
       // Assert
-      verify(mockSubscription.cancel()).called(1);
+      verify(mockSubscription.close()).called(1);
       verify(mockEmitter.close()).called(1);
     });
 
@@ -305,9 +320,9 @@ void main() {
         addressFunc: () => customAddrs,
       );
       
-      final result = _MockResult();
-      when(result.reachability).thenReturn(Reachability.public);
-      when(result.validatedAddrs).thenReturn([]);
+      final result = _MockResult()
+        ..reachability = Reachability.public
+        ..validatedAddrs = [];
       
       when(mockAutoNATv2.getReachability(any))
           .thenAnswer((invocation) async {
@@ -338,9 +353,15 @@ void main() {
 /// Helper class to mock Result
 class _MockResult implements Result {
   @override
+  MultiAddr addr = MultiAddr('/ip4/1.2.3.4/tcp/4001');
+  
+  @override
   Reachability reachability = Reachability.unknown;
   
   @override
+  int status = 0;
+  
+  // Note: validatedAddrs is not part of the Result interface
   List<MultiAddr> validatedAddrs = [];
 }
 
