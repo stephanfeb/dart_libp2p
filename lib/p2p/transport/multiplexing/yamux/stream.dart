@@ -89,8 +89,15 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   /// Flag to indicate if a local read has been closed via closeRead()
   bool _localReadClosed = false;
 
-  /// Stream deadline for timeout management
+  /// Stream deadline for timeout management (for both read and write)
   DateTime? _deadline;
+
+  /// Read-specific deadline
+  DateTime? _readDeadline;
+
+  /// Write-specific deadline (reserved for future write timeout implementation)
+  // ignore: unused_field
+  DateTime? _writeDeadline;
 
   final String _logPrefix;
 
@@ -127,9 +134,19 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   }
 
   /// Gets the remaining time until deadline, or null if no deadline set
+  /// Get the remaining time until the deadline, considering both general and read-specific deadlines
   Duration? _getRemainingDeadlineTime() {
-    if (_deadline == null) return null;
-    final remaining = _deadline!.difference(DateTime.now());
+    DateTime? effectiveDeadline = _deadline;
+    
+    // If read deadline is set, use the earlier of the two deadlines
+    if (_readDeadline != null) {
+      if (effectiveDeadline == null || _readDeadline!.isBefore(effectiveDeadline)) {
+        effectiveDeadline = _readDeadline;
+      }
+    }
+    
+    if (effectiveDeadline == null) return null;
+    final remaining = effectiveDeadline.difference(DateTime.now());
     return remaining.isNegative ? Duration.zero : remaining;
   }
 
@@ -525,12 +542,15 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       // Use deadline-based timeout
       currentTimeout = remainingDeadlineTime;
       maxAttempts = 1; // Don't retry if we have a deadline
-
+    } else if (_deadline == null && _readDeadline == null) {
+      // No deadline set - use very long timeout for long-lived connections like relay streams
+      // This prevents the progressive 10s→20s→40s timeouts that cause delays on idle relay streams
+      currentTimeout = const Duration(minutes: 5);
+      maxAttempts = 1; // Single long wait
     } else {
-      // Use progressive timeout strategy for faster failure detection
+      // Deadline expired but still waiting - use progressive timeout strategy
       currentTimeout = const Duration(seconds: 10);
       maxAttempts = 3;
-
     }
     
     while (attempts < maxAttempts) {
@@ -946,6 +966,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   @override
   Future<void> setDeadline(DateTime? time) async {
     _deadline = time;
+    _readDeadline = time;
+    _writeDeadline = time;
     if (time != null) {
       _log.fine('$_logPrefix setDeadline() set to ${time.toIso8601String()}');
     } else {
@@ -955,12 +977,14 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   @override
   Future<void> setReadDeadline(DateTime time) async {
-    _log.warning('$_logPrefix setReadDeadline() not implemented for YamuxStream.');
+    _readDeadline = time;
+    _log.fine('$_logPrefix setReadDeadline() set to ${time.toIso8601String()}');
   }
 
   @override
   Future<void> setWriteDeadline(DateTime time) async {
-    _log.warning('$_logPrefix setWriteDeadline() not implemented for YamuxStream.');
+    _writeDeadline = time;
+    _log.fine('$_logPrefix setWriteDeadline() set to ${time.toIso8601String()}');
   }
 
   @override

@@ -76,13 +76,12 @@ class BackoffConnector {
         _host.network.peerstore.addrBook.addAddr(pi.id, addr, Duration(hours: 1));
       }
 
-      // Create a context with a timeout
-      final context = Context(timeout: _connTryDur);
+      // Create a context without timeout (timeout handled by Future.timeout below)
+      final context = Context();
 
-
-      // Try to dial the peer
+      // Try to dial the peer with timeout
       try {
-        await _host.network.dialPeer(context, pi.id);
+        await _host.network.dialPeer(context, pi.id).timeout(_connTryDur);
         return; // Successfully connected
       } catch (e) {
         print('Error connecting to peer ${pi.id}: $e');

@@ -193,6 +193,11 @@ class Relay {
         Context()
       );
       print('[Relay] STOP stream opened and protocol negotiated with destination peer: ${dstInfo.peerId.toBase58()}');
+      
+      // Set handshake deadline for the STOP protocol handshake messages
+      // This gives enough time for the STOP handshake to complete
+      await dstStream.setDeadline(DateTime.now().add(Duration(minutes: 1)));
+      print('[Relay] Set 1-minute handshake deadline on STOP stream');
 
       // Create a stop message with SOURCE peer info
       print('[Relay] Creating STOP message...');
@@ -235,9 +240,22 @@ class Relay {
       // Write the response to the source
       await _writeResponse(stream, Status.OK);
 
+      // Clear stream deadlines to allow unlimited relay time (like go-libp2p)
+      // This prevents yamux read timeouts from closing the relay connection prematurely
+      await stream.setDeadline(null);
+      await dstStream.setDeadline(null);
+      print('[Relay] Cleared deadlines on relay streams:');
+      print('[Relay]   - HOP stream (from ${srcPeerId.toBase58()}): id=${stream.id()}');
+      print('[Relay]   - STOP stream (to ${dstInfo.peerId.toBase58()}): id=${dstStream.id()}');
+
       // Add the connection to the active connections
       final connKey = '${srcPeerId}-${dstInfo.peerId}';
-      _connections[connKey] = (_connections[connKey] ?? 0) + 1;
+      final currentCount = _connections[connKey] ?? 0;
+      _connections[connKey] = currentCount + 1;
+      print('[Relay] Active relay connections for ${srcPeerId.toBase58()} -> ${dstInfo.peerId.toBase58()}: ${currentCount + 1}');
+      if (currentCount > 0) {
+        print('[Relay] ⚠️  WARNING: Multiple concurrent relay connections detected!');
+      }
 
       // Relay data between the peers
       _relayData(stream, dstStream, srcPeerId, dstInfo.peerId);
@@ -259,39 +277,60 @@ class Relay {
   }
 
   /// Relays data between two peers (internal).
+  /// Implements bidirectional relay with proper EOF propagation and error handling.
   void _relayData(
     P2PStream srcStream,
     P2PStream dstStream,
     PeerId srcPeer,
     PeerId dstPeer,
   ) {
-    // Create a connection key
     final connKey = '${srcPeer}-${dstPeer}';
+    var cleanupDone = false;
 
-    // Create a function to clean up the connection
-    void cleanup() async {
-      await srcStream.close();
-      await dstStream.close();
+    // Idempotent cleanup function
+    // Note: We do NOT close streams here - each direction closes its own write side via closeWrite()
+    // and the streams will naturally close when both directions complete. Closing streams here
+    // causes the other direction's blocking read() to fail with "stream closed" error.
+    void cleanup() {
+      if (cleanupDone) return;
+      cleanupDone = true;
+      
+      // Update connection count
       final count = _connections[connKey] ?? 0;
       if (count <= 1) {
         _connections.remove(connKey);
       } else {
         _connections[connKey] = count - 1;
       }
+      
+      print('[Relay] Cleanup completed for ${srcPeer.toBase58()} -> ${dstPeer.toBase58()}');
     }
 
     // Relay data from source to destination
     Future<void> relaySourceToDest() async {
       try {
-        while (!srcStream.isClosed && !dstStream.isClosed) {
+        int bytesRelayed = 0;
+        while (true) {
           final data = await srcStream.read();
           if (data.isEmpty) {
+            // EOF received - propagate to destination via closeWrite
+            await dstStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on destination: $e');
+            });
             break;
           }
+          bytesRelayed += data.length;
           await dstStream.write(data);
         }
       } catch (e) {
-        print('Error relaying data from source to destination: $e');
+        print('[Relay] Error relaying data from source to destination: $e');
+        // Reset both streams on error (like go-libp2p)
+        await srcStream.reset().catchError((resetErr) {
+          print('[Relay] Error resetting source stream: $resetErr');
+        });
+        await dstStream.reset().catchError((resetErr) {
+          print('[Relay] Error resetting destination stream: $resetErr');
+        });
       } finally {
         cleanup();
       }
@@ -300,23 +339,62 @@ class Relay {
     // Relay data from destination to source
     Future<void> relayDestToSource() async {
       try {
-        while (!srcStream.isClosed && !dstStream.isClosed) {
+        int bytesRelayed = 0;
+        while (true) {
           final data = await dstStream.read();
           if (data.isEmpty) {
+            // EOF received - propagate to source via closeWrite
+            print('[Relay] EOF from destination after relaying $bytesRelayed bytes total');
+            await srcStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on source: $e');
+            });
             break;
           }
+          bytesRelayed += data.length;
           await srcStream.write(data);
         }
       } catch (e) {
-        print('Error relaying data from destination to source: $e');
+        print('[Relay] Error relaying data from destination to source: $e');
+        // Reset both streams on error (like go-libp2p)
+        await dstStream.reset().catchError((resetErr) {
+          print('[Relay] Error resetting destination stream: $resetErr');
+        });
+        await srcStream.reset().catchError((resetErr) {
+          print('[Relay] Error resetting source stream: $resetErr');
+        });
       } finally {
         cleanup();
       }
     }
 
-    // Start both relay tasks
-    relaySourceToDest();
-    relayDestToSource();
+    // Start both relay tasks concurrently and wait for both to complete
+    // before doing final stream cleanup
+    Future<void> startRelay() async {
+      await Future.wait([
+        relaySourceToDest(),
+        relayDestToSource(),
+      ]);
+      
+      // Both directions completed - now it's safe to close any remaining open streams
+      // This handles edge cases where closeWrite() didn't fully close the stream
+      if (!srcStream.isClosed) {
+        print('[Relay] Final cleanup: closing source stream');
+        await srcStream.close().catchError((e) {
+          print('[Relay] Error in final source stream close: $e');
+        });
+      }
+      if (!dstStream.isClosed) {
+        print('[Relay] Final cleanup: closing destination stream');
+        await dstStream.close().catchError((e) {
+          print('[Relay] Error in final destination stream close: $e');
+        });
+      }
+    }
+    
+    // Start relay (fire and forget - errors are handled within each direction)
+    startRelay().catchError((e) {
+      print('[Relay] Unexpected error in relay coordination: $e');
+    });
   }
 
   /// Writes a response with the given status.

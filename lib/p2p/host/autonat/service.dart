@@ -207,7 +207,7 @@ class AutoNATService {
       return _newDialResponseError(pb.Message_ResponseStatus.E_INTERNAL_ERROR, 'dialer not configured');
     }
 
-    final ctx = Context(timeout: _config.dialTimeout); // Use context with timeout via constructor
+    final ctx = Context(); // No timeout in Context to avoid unhandled exceptions
     
     // Add addresses to a temporary peerstore for this dial attempt.
     // The original Go code uses a separate dialer which might have its own peerstore.
@@ -219,7 +219,7 @@ class AutoNATService {
     Conn? conn;
     try {
       _autonatServiceLog('AutoNATService: Attempting to dial ${pi.id} at ${pi.addrs} with timeout ${_config.dialTimeout}');
-      conn = await dialer.dialPeer(ctx, pi.id);
+      conn = await dialer.dialPeer(ctx, pi.id).timeout(_config.dialTimeout);
       // If dialPeer succeeds, we have a connection.
       // The remote multiaddr from the connection is the one that worked.
       _autonatServiceLog('AutoNATService: Successfully dialed ${pi.id} at ${conn.remoteMultiaddr}');

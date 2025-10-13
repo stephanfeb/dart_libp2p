@@ -38,8 +38,8 @@ class AutoNATV1ClientImpl implements AutoNATV1Client {
   Future<void> dialBack(PeerId peer) async {
     P2PStream? stream;
     try {
-      final ctx = Context(timeout: _requestTimeout); // Use the configured request timeout
-      stream = await _host.newStream(peer, [autoNATV1Proto], ctx); 
+      final ctx = Context(); // No timeout in Context to avoid unhandled exceptions
+      stream = await _host.newStream(peer, [autoNATV1Proto], ctx).timeout(_requestTimeout); 
       
       await stream.scope().setService(serviceName);
       await stream.scope().reserveMemory(_autoNATClientMaxMessageScopeReservation, ReservationPriority.always);
