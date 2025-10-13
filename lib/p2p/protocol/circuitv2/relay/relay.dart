@@ -148,33 +148,32 @@ class Relay {
 
   /// Handles a connection request.
   Future<void> _handleConnect(P2PStream stream, HopMessage msg) async {
-    // Extract the peer info
-    final srcInfo = peerToPeerInfoV2(msg.peer);
-    if (srcInfo.peerId.toString().isEmpty) {
-      await _writeResponse(stream, Status.MALFORMED_MESSAGE);
-      return;
-    }
-
-    // Check if we have a reservation for this peer
-    final reservation = _reservations[srcInfo.peerId.toString()];
-    if (reservation == null || reservation.isBefore(DateTime.now())) {
-      await _writeResponse(stream, Status.NO_RESERVATION);
-      return;
-    }
-
-    // Extract the destination peer info
+    // The SOURCE peer is the one who opened this HOP stream (the peer dialing)
+    final srcPeerId = stream.conn.remotePeer;
+    
+    // The DESTINATION peer is in msg.peer (the peer being dialed)
     if (!msg.hasPeer()) {
       await _writeResponse(stream, Status.MALFORMED_MESSAGE);
       return;
     }
+    
     final dstInfo = peerToPeerInfoV2(msg.peer);
     if (dstInfo.peerId.toString().isEmpty) {
       await _writeResponse(stream, Status.MALFORMED_MESSAGE);
       return;
     }
 
+    // Check if the DESTINATION peer has a reservation
+    // (the peer being dialed TO needs the reservation, not the one dialing FROM)
+    final reservation = _reservations[dstInfo.peerId.toString()];
+    if (reservation == null || reservation.isBefore(DateTime.now())) {
+      print('[Relay] NO_RESERVATION: ${dstInfo.peerId} does not have an active reservation');
+      await _writeResponse(stream, Status.NO_RESERVATION);
+      return;
+    }
+
     // Check if we have resources for a new connection
-    if (!_resources.canConnect(srcInfo.peerId, dstInfo.peerId)) {
+    if (!_resources.canConnect(srcPeerId, dstInfo.peerId)) {
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -195,11 +194,11 @@ class Relay {
       );
       print('[Relay] STOP stream opened and protocol negotiated with destination peer: ${dstInfo.peerId.toBase58()}');
 
-      // Create a stop message
+      // Create a stop message with SOURCE peer info
       print('[Relay] Creating STOP message...');
       final stopMsg = StopMessage()
         ..type = StopMessage_Type.CONNECT
-        ..peer = peerInfoToPeerV2(PeerInfo(peerId: srcInfo.peerId, addrs: <MultiAddr>[].toSet()));
+        ..peer = peerInfoToPeerV2(PeerInfo(peerId: srcPeerId, addrs: <MultiAddr>[].toSet()));
       print('[Relay] STOP message created, type: ${stopMsg.type}');
 
       // Write the message with length prefix (required for DelimitedReader on the receiving end)
@@ -237,11 +236,11 @@ class Relay {
       await _writeResponse(stream, Status.OK);
 
       // Add the connection to the active connections
-      final connKey = '${srcInfo.peerId}-${dstInfo.peerId}';
+      final connKey = '${srcPeerId}-${dstInfo.peerId}';
       _connections[connKey] = (_connections[connKey] ?? 0) + 1;
 
       // Relay data between the peers
-      _relayData(stream, dstStream, srcInfo.peerId, dstInfo.peerId);
+      _relayData(stream, dstStream, srcPeerId, dstInfo.peerId);
     } catch (e) {
       await _writeResponse(stream, Status.CONNECTION_FAILED);
       print('Failed to connect to destination peer: $e');

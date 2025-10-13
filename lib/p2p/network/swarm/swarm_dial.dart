@@ -50,30 +50,34 @@ class AddrDialer {
 
     // Create a completer for the first successful connection
     final completer = Completer<Conn>();
-
-    // Keep track of errors
-    final errors = <Exception>[];
-
-    // Keep track of how many dials are in progress
+    
+    // Track all errors for comprehensive reporting (3b)
+    final errors = <String, Exception>{};
     var dialsInProgress = _addrs.length;
 
-    // Dial each address in parallel
+    // Dial ALL addresses in parallel immediately (1a)
     for (final addr in _addrs) {
       _dialAddr(addr).then((conn) {
-        // If we haven't completed yet, complete with this connection
+        // First success wins
         if (!completer.isCompleted) {
           completer.complete(conn);
         }
       }).catchError((error) {
-        // Add the error to our list
-        errors.add(error is Exception ? error : Exception(error.toString()));
-
-        // Decrement the dials in progress
+        // Collect error for this address
+        errors[addr.toString()] = error is Exception 
+            ? error 
+            : Exception(error.toString());
+        
         dialsInProgress--;
-
-        // If all dials have failed, complete with an error
+        
+        // If all dials failed, report all errors
         if (dialsInProgress == 0 && !completer.isCompleted) {
-          completer.completeError(Exception('Failed to dial any address: ${errors.join(', ')}'));
+          final errorMsg = errors.entries
+              .map((e) => '${e.key}: ${e.value}')
+              .join('; ');
+          completer.completeError(
+            Exception('Failed to dial any address. Errors: $errorMsg')
+          );
         }
       });
     }

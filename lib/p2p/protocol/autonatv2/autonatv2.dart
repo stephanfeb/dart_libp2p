@@ -8,6 +8,7 @@ import 'package:dart_libp2p/p2p/protocol/autonatv2/server.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
+import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' show Protocols;
 import 'package:logging/logging.dart';
 
 import '../../../core/event/bus.dart';
@@ -103,9 +104,40 @@ class AutoNATv2Impl implements AutoNATv2 {
       throw ClientErrors.noValidPeers;
     }
 
+    // Filter out circuit addresses that route through the AutoNAT server peer
+    // This prevents circular dependency where the server tries to dial through itself
+    final filteredRequests = requests.where((req) {
+      // Check if this is a circuit address
+      final components = req.addr.components;
+      for (int i = 0; i < components.length; i++) {
+        final (protocol, value) = components[i];
+        // If we find p2p-circuit, check the previous component for the relay peer ID
+        if (protocol.code == Protocols.circuit.code && i > 0) {
+          final (prevProtocol, prevValue) = components[i - 1];
+          // If the previous component is a p2p peer ID, check if it matches our AutoNAT server
+          if (prevProtocol.code == Protocols.p2p.code) {
+            try {
+              final relayPeerId = PeerId.fromString(prevValue);
+              if (relayPeerId == peerId) {
+                _log.fine('Filtering out circuit address that routes through AutoNAT server $peerId: ${req.addr}');
+                return false; // Exclude this address
+              }
+            } catch (e) {
+              // Invalid peer ID in address, skip filtering
+            }
+          }
+        }
+      }
+      return true; // Include this address
+    }).toList();
+
+    if (filteredRequests.isEmpty) {
+      throw Exception('No valid addresses to check after filtering circuit addresses through AutoNAT server $peerId');
+    }
+
     try {
-      // Get reachability from the peer
-      final result = await client.getReachability(peerId, requests);
+      // Get reachability from the peer with filtered requests
+      final result = await client.getReachability(peerId, filteredRequests);
       _log.fine('Reachability check with $peerId successful');
       return result;
     } catch (e) {

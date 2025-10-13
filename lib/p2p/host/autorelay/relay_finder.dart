@@ -653,9 +653,11 @@ class RelayFinder {
                   continue;
                 }
                 
+                // Build circuit address: relayAddr/p2p/relayPeerID/p2p-circuit/p2p/ownPeerID
                 var circuitAddr = relayAddr
                     .encapsulate(Protocols.p2p.name, peerId.toString())
-                    .encapsulate(Protocols.circuit.name, '');
+                    .encapsulate(Protocols.circuit.name, '')
+                    .encapsulate(Protocols.p2p.name, host.id.toString());
                 raddrs.add(circuitAddr);
                 relayAddrCountForMetrics++;
                 _log.fine('RelayFinder: Created circuit address: $circuitAddr');

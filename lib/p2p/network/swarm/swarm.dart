@@ -18,7 +18,7 @@ import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 import 'dart:io' show NetworkInterface, InternetAddressType; // For NetworkInterface.list
-import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' as multiaddr_protocol; // For protocol constants
+import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' show Protocols;
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux; // Changed to package import
 
 import '../../../core/network/common.dart' show Direction;
@@ -27,6 +27,7 @@ import '../../transport/basic_upgrader.dart'; // Added for BasicUpgrader
 import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm_conn.dart';
 import 'swarm_stream.dart';
+import 'swarm_dial.dart'; // For AddrDialer and DelayDialRanker
 
 /// Swarm is a Network implementation that manages connections to peers and
 /// handles streams over those connections.
@@ -683,6 +684,12 @@ class Swarm implements Network {
       if (ip6Val == '::') {
         return false;
       }
+      // Filter out bare /p2p-circuit (not dialable)
+      final components = addr.components;
+      if (components.length == 1 && 
+          components[0].$1.code == Protocols.circuit.code) {
+        return false;
+      }
       return true;
     }).toList();
 
@@ -691,108 +698,104 @@ class Swarm implements Network {
       throw Exception('No dialable addresses found for peer: $peerId');
     }
 
-    _logger.warning('Swarm.dialPeer: Found dialable addresses for peer $peerId: $dialableAddrs. Trying them...');
+    _logger.warning('Swarm.dialPeer: Found dialable addresses for peer $peerId: $dialableAddrs. Using parallel dialer...');
 
-    // Try each address until we connect
-    Exception? lastError;
-    for (final addr in dialableAddrs) {
-      try {
-        // Find a transport that can dial this address
-        Transport? transport;
-        for (final t in _transports) {
-          if (t.canDial(addr)) {
-            transport = t;
-            break;
-          }
+    // Rank addresses (for logging order - direct before relay)
+    final ranker = DelayDialRanker();
+    final rankedAddrs = ranker(dialableAddrs);
+    final addrs = rankedAddrs.map((ad) => ad.addr).toList();
+
+    // Log ranked order
+    _logger.fine('Swarm.dialPeer: Ranked addresses (direct first, relay second): $addrs');
+
+    // Use AddrDialer for true parallel dialing
+    try {
+      final dialer = AddrDialer(
+        peerId: peerId,
+        addrs: addrs,
+        dialFunc: (ctx, addr, pid) => _dialSingleAddr(addr, pid, ctx),
+        context: context,
+      );
+      
+      final conn = await dialer.dial();
+      _logger.fine('Swarm.dialPeer: Successfully connected to $peerId');
+      
+      // Obtain a ConnManagementScope for the new connection
+      final connManagementScope = await _resourceManager.openConnection(
+        Direction.outbound,
+        true,
+        conn.remoteMultiaddr,
+      );
+      
+      await connManagementScope.setPeer(conn.remotePeer);
+      
+      // Create a swarm connection
+      final connID = _nextConnID++;
+      final swarmConn = SwarmConn(
+        id: connID.toString(),
+        conn: conn,
+        localPeer: _localPeer,
+        remotePeer: conn.remotePeer,
+        direction: Direction.outbound,
+        swarm: this,
+        managementScope: connManagementScope,
+      );
+      
+      // Add to connections map
+      await _connLock.synchronized(() {
+        final peerIDStr = conn.remotePeer.toString();
+        _connections.putIfAbsent(peerIDStr, () => []).add(swarmConn);
+      });
+      
+      // Notify connection
+      await _notifieeLock.synchronized(() async {
+        for (final notifiee in _notifiees) {
+          await notifiee.connected(this, swarmConn);
         }
+      });
+      
+      // Handle incoming streams
+      _handleIncomingStreams(swarmConn);
+      
+      _logger.warning('Swarm.dialPeer: Connection established for $peerId. Conn ID: ${swarmConn.id}');
+      return swarmConn;
+      
+    } catch (e) {
+      _logger.severe('Swarm.dialPeer: All parallel dial attempts failed for $peerId: $e');
+      throw Exception('All dial attempts failed: $e');
+    }
+  }
 
-        if (transport == null) {
-          _logger.warning('No transport found for address: $addr');
-          continue;
-        }
-
-        // Dial the address
-        final transportConn = await transport.dial(addr);
-
-        _logger.fine("transport.dial return :[${transportConn}]");
-        // Upgrade the raw transport connection
-        final Conn upgradedConn;
-        try {
-          upgradedConn = await _upgrader.upgradeOutbound(
-            connection: transportConn as TransportConn,
-            remotePeerId: peerId, // The target peerId
-            config: _config,
-            remoteAddr: transportConn.remoteMultiaddr, // The address we dialed on the transport
-          );
-        } catch (e, s) {
-          _logger.warning('Outbound connection upgrade failed for $peerId at $addr: $e\n$s');
-          await transportConn.close(); // Close the raw transport connection
-          lastError = e is Exception ? e : Exception(e.toString());
-          continue; // Try next address
-        }
-        
-        // Obtain a ConnManagementScope for the new outbound connection
-        // The endpoint is the remote multiaddress of the UPGRADED connection.
-        final connManagementScope = await _resourceManager.openConnection(
-          Direction.outbound,
-          true, // usefd
-          upgradedConn.remoteMultiaddr, 
-        );
-
-        // Set peer on scope (remotePeerId should be available from upgradedConn)
-        // This should match the 'peerId' we intended to dial.
-        await connManagementScope.setPeer(upgradedConn.remotePeer);
-
-        // Create a swarm connection with the UPGRADED connection
-        final connID = _nextConnID++;
-        final swarmConn = SwarmConn(
-          id: connID.toString(),
-          conn: upgradedConn, // Use the UPGRADED connection
-          localPeer: _localPeer, // Swarm's local peer
-          remotePeer: upgradedConn.remotePeer, // PeerId from upgraded connection
-          direction: Direction.outbound,
-          swarm: this,
-          managementScope: connManagementScope,
-        );
-
-        // Add the connection to our map
-        _logger.warning('=== STORING OUTBOUND CONNECTION ===');
-        _logger.warning('Storing connection for peer: ${upgradedConn.remotePeer}');
-        _logger.warning('Peer ID toString(): "$peerIDStr"');
-        _logger.warning('Peer ID toBase58(): ${upgradedConn.remotePeer.toBase58()}');
-        _logger.warning('Connection ID: ${swarmConn.id}');
-        _logger.warning('Target peer we intended to dial: $peerId');
-        _logger.warning('Target peer toString(): "${peerId.toString()}"');
-        _logger.warning('Target peer toBase58(): ${peerId.toBase58()}');
-        _logger.warning('Are they equal? ${upgradedConn.remotePeer == peerId}');
-        _logger.warning('=== END STORING OUTBOUND CONNECTION ===');
-        
-        await _connLock.synchronized(() {
-          if (!_connections.containsKey(peerIDStr)) {
-            _connections[peerIDStr] = [];
-          }
-          _connections[peerIDStr]!.add(swarmConn);
-          _logger.warning('Outbound connection stored. Total connections for "$peerIDStr": ${_connections[peerIDStr]!.length}');
-        });
-
-        // Notify connection opened
-        await _notifieeLock.synchronized(() async {
-          for (final notifiee in _notifiees) {
-            notifiee.connected(this, swarmConn);
-          }
-        });
-
-        // Handle incoming streams
-        _handleIncomingStreams(swarmConn);
-
-        return swarmConn;
-      } catch (e, s) {
-        lastError = e is Exception ? e : Exception(e.toString());
-        _logger.warning('Error dialing $addr: $e\n$s');
+  /// Helper method to dial a single address
+  Future<Conn> _dialSingleAddr(MultiAddr addr, PeerId peerId, Context context) async {
+    _logger.fine('Swarm._dialSingleAddr: Attempting to dial $peerId at $addr');
+    
+    // Find transport
+    Transport? transport;
+    for (final t in _transports) {
+      if (t.canDial(addr)) {
+        transport = t;
+        break;
       }
     }
-
-    throw lastError ?? Exception('Failed to dial peer: $peerId');
+    
+    if (transport == null) {
+      throw Exception('No transport found for address: $addr');
+    }
+    
+    // Dial the address
+    final transportConn = await transport.dial(addr);
+    
+    // Upgrade the connection
+    final upgradedConn = await _upgrader.upgradeOutbound(
+      connection: transportConn as TransportConn,
+      remotePeerId: peerId,
+      config: _config,
+      remoteAddr: transportConn.remoteMultiaddr,
+    );
+    
+    _logger.fine('Swarm._dialSingleAddr: Successfully dialed and upgraded connection to $peerId at $addr');
+    return upgradedConn;
   }
 
   @override
