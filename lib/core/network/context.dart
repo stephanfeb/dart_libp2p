@@ -14,6 +14,15 @@ class Context {
           _completer.completeError(TimeoutException('Context timed out', timeout));
         }
       });
+      
+      // Add error handler to prevent unhandled exceptions if nobody awaits context.done
+      // This is defensive programming - ideally Context(timeout:) shouldn't be used,
+      // but if it is, we prevent app crashes from unobserved errors
+      _completer.future.catchError((error) {
+        // Silently catch the error if nobody is listening
+        // In production, you might want to log this
+        return;
+      });
     }
   }
 
