@@ -125,7 +125,6 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _protocol = protocolId;
   }
 
-  @override
   Stream<Uint8List> get stream {
     return _incomingDataController.stream;
   }
@@ -166,14 +165,16 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _pendingReadCompleter = Completer<Uint8List>();
 
     try {
+      // Timeout should be longer than keepalive interval to allow pings to keep connection alive
+      // With keepalive at 10s, this 35s timeout allows ~3 keepalive cycles before timeout
       final newData = await _pendingReadCompleter!.future.timeout(
-          const Duration(seconds: 30), // Slightly increased timeout
+          const Duration(seconds: 35), // 3.5x keepalive interval (10s * 3.5)
           onTimeout: () {
-            _logger.fine('[UDXP2PStreamAdapter ${id()}] Read timeout on _pendingReadCompleter.');
+            _logger.fine('[UDXP2PStreamAdapter ${id()}] Read timeout after 35 seconds on _pendingReadCompleter.');
             if (_pendingReadCompleter?.isCompleted == false) {
-              _pendingReadCompleter!.completeError(TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 25)));
+              _pendingReadCompleter!.completeError(TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35)));
             }
-            throw TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 30));
+            throw TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35));
           }
       );
       // _pendingReadCompleter is set to null by the listener when it completes it.
@@ -300,6 +301,8 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
   }
 
   @override
+  bool get isWritable => !_isClosed;
+
   Future<void> get onClose {
     return _closedCompleter.future;
   }
@@ -330,14 +333,12 @@ typedef UDXSessionConnFactory = UDXSessionConn Function({
 
 class UDXListener implements Listener {
   final UDXMultiplexer _multiplexer;
-  final UDX _udxInstance;
   final MultiAddr _boundAddr;
   final UDXTransport _transport;
   final ConnManager _connManager;
   final UDXSessionConnFactory _sessionConnFactory;
 
   final StreamController<TransportConn> _incomingSessionController = StreamController<TransportConn>.broadcast();
-  late StreamSubscription _connectionSubscription;
   bool _isClosed = false;
   final Map<String, UDXSessionConn> _activeSessions = {};
 
@@ -349,7 +350,6 @@ class UDXListener implements Listener {
     required ConnManager connManager,
     UDXSessionConnFactory? sessionConnFactory,
   }) : _multiplexer = listeningSocket,
-        _udxInstance = udxInstance,
         _boundAddr = boundAddr,
         _transport = transport,
         _connManager = connManager,
@@ -357,7 +357,9 @@ class UDXListener implements Listener {
     _logger.fine('[UDXListener $addr] Constructor: Initializing for $_boundAddr.');
     _logger.fine('[UDXListener $addr] Constructor: Subscribing to multiplexer connections...');
 
-    _connectionSubscription = _multiplexer.connections.listen(
+    // Note: This subscription lives for the lifetime of the listener
+    // ignore: unused_local_variable
+    final connectionSubscription = _multiplexer.connections.listen(
         (UDPSocket socket) {
           _logger.fine('[UDXListener $addr] Received new connection from multiplexer. Calling _handleIncomingConnection.');
           _handleIncomingConnection(socket);

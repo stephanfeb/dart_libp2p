@@ -463,7 +463,8 @@ class YamuxExceptionUtils {
         currentState: currentState,
       );
     } catch (e, stackTrace) {
-      if (e is Exception) {
+      // Handle both Exception and Error types (StateError extends Error, not Exception)
+      if (e is Exception || e is Error) {
         throw YamuxExceptionHandler.classifyYamuxException(
           e,
           stackTrace,

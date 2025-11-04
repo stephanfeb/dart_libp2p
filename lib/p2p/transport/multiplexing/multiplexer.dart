@@ -4,7 +4,6 @@ import '../../../core/network/stream.dart';
 import '../../../core/network/mux.dart' as core_mux;
 import '../../../core/network/transport_conn.dart';
 import '../../../core/network/rcmgr.dart';
-import '../../../core/network/context.dart'; // Added for Context
 
 /// Represents a stream multiplexer that can create and manage multiple logical streams
 /// over a single connection.
@@ -75,8 +74,13 @@ class MultiplexerConfig {
   /// Stream write timeout (default: 30 seconds)
   final Duration streamWriteTimeout;
 
-  /// Keep-alive interval (default: 30 seconds)
+  /// Keep-alive interval (default: 10 seconds)
   final Duration keepAliveInterval;
+
+  /// Connection-level read timeout for idle connections (default: 35 seconds)
+  /// This should be at least 3x the keepAliveInterval to allow for keepalive pings
+  /// before timing out an idle connection.
+  final Duration connectionReadTimeout;
 
   const MultiplexerConfig({
     this.maxStreams = 1000,
@@ -84,6 +88,7 @@ class MultiplexerConfig {
     this.maxStreamWindowSize = 16 * 1024 * 1024, // 16MB
     this.streamReadTimeout = const Duration(seconds: 30),
     this.streamWriteTimeout = const Duration(seconds: 30),
-    this.keepAliveInterval = const Duration(seconds: 30),
+    this.keepAliveInterval = const Duration(seconds: 10),
+    this.connectionReadTimeout = const Duration(seconds: 35), // 3.5x keepalive
   });
 }

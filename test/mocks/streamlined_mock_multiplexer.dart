@@ -351,6 +351,10 @@ class StreamlinedMockStream implements core_mux.MuxedStream, P2PStream<Uint8List
   /// Get diagnostic information about this stream
   Duration get age => DateTime.now().difference(_createdAt);
   int get writeCount => _writeBuffer.length;
+
+  @override
+  // TODO: implement isWritable
+  bool get isWritable => throw UnimplementedError();
 }
 
 /// Null scope implementation for testing

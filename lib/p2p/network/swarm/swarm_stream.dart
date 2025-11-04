@@ -202,6 +202,9 @@ class SwarmStream implements P2PStream<Uint8List> {
   @override
   bool get isClosed => _isClosed;
 
+  @override
+  bool get isWritable => !_isClosed && _underlyingMuxedStream.isWritable;
+
   /// Checks if this stream is available for reuse by other protocols
   /// A stream is NOT available for reuse if it's closed but scope cleanup is still pending
   bool get isAvailableForReuse => _isClosed && _scopeCleanedUp;

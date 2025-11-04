@@ -274,6 +274,9 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
   bool get isClosed => _isClosed;
 
   @override
+  bool get isWritable => !_isClosed;
+
+  @override
   Conn get conn => _parentConnection;
 
 

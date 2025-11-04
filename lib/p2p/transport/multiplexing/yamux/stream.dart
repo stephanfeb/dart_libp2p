@@ -203,7 +203,12 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     if (_state != YamuxStreamState.open) {
       _log.warning('$_logPrefix YamuxStream.write: Called on non-open stream. State: $_state. Requested: $inputDataLength bytes.');
-      throw StateError('Stream is not open for writing. Current state: $_state');
+      throw YamuxStreamStateException(
+        'Stream is not open for writing',
+        currentState: _state.name,
+        requestedOperation: 'write',
+        streamId: streamId,
+      );
     }
 
     if (inputDataLength == 0) {
@@ -607,8 +612,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
           },
           timeout: currentTimeout,
           streamId: streamId,
-          operationName: 'read_wait_attempt_$attempts',
-          currentState: _state.toString(),
+          operationName: 'read',
+          currentState: _state.name,
         );
       } on YamuxStreamTimeoutException catch (e) {
         final attemptDuration = DateTime.now().difference(attemptStartTime);
@@ -880,6 +885,9 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   @override
   bool get isClosed => _state == YamuxStreamState.closed || _state == YamuxStreamState.reset || _state == YamuxStreamState.closing;
+
+  @override
+  bool get isWritable => _state == YamuxStreamState.open;
 
   YamuxStreamState get streamState => _state; // Expose state for testing/debugging
 

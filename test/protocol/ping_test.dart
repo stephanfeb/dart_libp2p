@@ -305,6 +305,8 @@ class PingPongMockStream implements P2PStream<Uint8List> {
   @override
   bool get isClosed => _closed;
   @override
+  bool get isWritable => !_closed;
+  @override
   String id() => 'pingpong-mock-id-${DateTime.now().microsecondsSinceEpoch}'; // More unique ID
   @override
   String protocol() => protocolName;

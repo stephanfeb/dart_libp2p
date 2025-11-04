@@ -178,6 +178,9 @@ class MockP2PStream implements P2PStream {
   @override
   bool get isClosed => _isStreamClosed;
 
+  @override
+  bool get isWritable => !_isStreamClosed && !_writeClosed;
+
   bool _writeClosed = false;
   bool _readClosed = false;
   List<Uint8List> writtenData = [];

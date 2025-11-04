@@ -274,6 +274,10 @@ class MockMuxedStream implements core_mux.MuxedStream, P2PStream<Uint8List> {
 
   /// Get the data written to this stream for testing
   List<Uint8List> get writtenData => List.unmodifiable(_writeBuffer);
+
+  @override
+  // TODO: implement isWritable
+  bool get isWritable => throw UnimplementedError();
 }
 
 /// Null scope implementation for testing

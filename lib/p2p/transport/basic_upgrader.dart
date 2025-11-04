@@ -41,6 +41,9 @@ class NegotiationStreamWrapper implements P2PStream<Uint8List> {
   bool get isClosed => _conn.isClosed;
 
   @override
+  bool get isWritable => !_conn.isClosed;
+
+  @override
   Future<Uint8List> read([int? maxLength]) async {
     if (maxLength == null || maxLength == 0) {
       return await _conn.read();

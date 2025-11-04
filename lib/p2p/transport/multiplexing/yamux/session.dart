@@ -782,14 +782,25 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   @override
   Future<YamuxStream> acceptStream() async {
-    if (_closed && _incomingStreamsController.isClosed) {
+    // Changed from AND to OR - if either is closed, we can't accept
+    if (_closed || _incomingStreamsController.isClosed) {
         throw StateError('Session is closed, cannot accept new streams.');
     }
-    final p2pStream = await incomingStreams.first;
-    if (p2pStream is YamuxStream) {
-      return p2pStream;
-    } else {
-      throw StateError('Incoming stream is not a YamuxStream, which is unexpected.');
+    
+    try {
+      final p2pStream = await incomingStreams.first;
+      if (p2pStream is YamuxStream) {
+        return p2pStream;
+      } else {
+        throw StateError('Incoming stream is not a YamuxStream, which is unexpected.');
+      }
+    } on StateError {
+      // Handle the case where the stream was closed during the await
+      if (_closed || _incomingStreamsController.isClosed) {
+        throw StateError('Session closed while waiting for stream');
+      }
+      // If it's a different StateError (like "not a YamuxStream"), rethrow it
+      rethrow;
     }
   }
 
