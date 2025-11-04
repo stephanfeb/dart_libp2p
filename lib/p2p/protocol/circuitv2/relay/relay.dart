@@ -67,20 +67,20 @@ class Relay {
           await _handleConnect(stream, pb);
           break;
         default:
-          // Write an error response
-          final response = HopMessage()
-            ..type = HopMessage_Type.STATUS
-            ..status = Status.UNEXPECTED_MESSAGE;
-          await stream.write(response.writeToBuffer());
-          await stream.close();
+          await _writeResponse(stream, Status.UNEXPECTED_MESSAGE);
+          try {
+            await stream.close();
+          } catch (closeError) {
+            print('[Relay] Failed to close stream after unexpected message: $closeError');
+          }
       }
     } catch (e) {
-      // Write an error response
-      final response = HopMessage()
-        ..type = HopMessage_Type.STATUS
-        ..status = Status.MALFORMED_MESSAGE;
-      await stream.write(response.writeToBuffer());
-      await stream.close();
+      await _writeResponse(stream, Status.MALFORMED_MESSAGE);
+      try {
+        await stream.close();
+      } catch (closeError) {
+        print('[Relay] Failed to close stream after error: $closeError');
+      }
       print('Error handling stream: $e');
     }
   }
@@ -399,16 +399,21 @@ class Relay {
 
   /// Writes a response with the given status.
   Future<void> _writeResponse(P2PStream stream, Status status) async {
-    final response = HopMessage()
-      ..type = HopMessage_Type.STATUS
-      ..status = status;
-    
-    // Write with length prefix (required for DelimitedReader on the receiving end)
-    final messageBytes = response.writeToBuffer();
-    final lengthBytes = encodeVarint(messageBytes.length);
-    await stream.write(lengthBytes);
-    await stream.write(messageBytes);
-    print('[Relay] Sent HOP STATUS response: $status (${messageBytes.length} bytes)');
+    try {
+      final response = HopMessage()
+        ..type = HopMessage_Type.STATUS
+        ..status = status;
+      
+      // Write with length prefix (required for DelimitedReader on the receiving end)
+      final messageBytes = response.writeToBuffer();
+      final lengthBytes = encodeVarint(messageBytes.length);
+      await stream.write(lengthBytes);
+      await stream.write(messageBytes);
+      print('[Relay] Sent HOP STATUS response: $status (${messageBytes.length} bytes)');
+    } catch (e) {
+      print('[Relay] Failed to write response (stream likely closed/reset): $e');
+      // Don't rethrow - this is best-effort error reporting
+    }
   }
 
   /// Starts the garbage collection timer.

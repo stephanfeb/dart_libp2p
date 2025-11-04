@@ -133,7 +133,7 @@ class RoutingDiscovery implements Discovery {
     final hash = sha256.convert(bytes);
 
     // Create a CID from the hash
-    return CID.create(CID.V1, 'sha-256', Uint8List.fromList(hash.bytes));
+    return CID.create(CID.V1, 'sha2-256', Uint8List.fromList(hash.bytes));
   }
 }
 
