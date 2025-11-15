@@ -1110,6 +1110,9 @@ class BasicHost implements Host {
 
 
     // Phase 3: Identify Wait
+    // CRITICAL FIX: Do NOT set stream deadline before identify wait
+    // Identify has its own internal timeout handling (30s)
+    // Setting deadline here causes it to expire during identify, breaking protocol negotiation
 
     final identifyStartTime = DateTime.now();
     _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
@@ -1121,13 +1124,16 @@ class BasicHost implements Host {
 
 
     // Phase 4: Protocol Negotiation
+    // CRITICAL FIX: Set deadline AFTER identify completes to give protocol negotiation a fresh timeout window
 
     final negotiationStartTime = DateTime.now();
     
     try {
+      // Set deadline NOW, after identify is complete
+      // This gives protocol negotiation its own full timeout window
       if (hasTimeout && deadline != null) {
-
-        stream.setDeadline(deadline);
+        final freshDeadline = DateTime.now().add(_negtimeout);
+        stream.setDeadline(freshDeadline);
       }
 
 

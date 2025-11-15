@@ -685,6 +685,12 @@ class IdentifyService implements IDService {
         return null;
       }
       
+      // CRITICAL FIX: Reset stream deadline after successful protocol negotiation
+      // This gives the actual identify data exchange its own full timeout window,
+      // preventing deadline exhaustion when negotiation takes significant time
+      stream.setDeadline(DateTime.now().add(timeout));
+      _log.warning(' [IDENTIFY-DEADLINE-RESET] Reset stream deadline after negotiation for peer=$peerId, stream_id=${stream.id()}, new_deadline=${DateTime.now().add(timeout).toIso8601String()}');
+      
       // DEBUG: Log protocol assignment
       _log.warning(' [IDENTIFY-PROTOCOL-ASSIGN-START] Setting protocol scope and stream protocol for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
 
@@ -1458,9 +1464,11 @@ class IdentifyService implements IDService {
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
       _log.warning(' [IDENTIFY-WAIT-ERROR] Identify completer for peer=$peerId completed with error, total_duration=${totalDuration.inMilliseconds}ms, error=$e\n$st');
-      // The error should have been emitted by _spawnIdentifyConn.
-      // Rethrow if this path needs to signal failure upwards.
-      // For now, just log, as the event bus should have handled it.
+      // CRITICAL: Identify failures are non-fatal and communicated via EvtPeerIdentificationFailed events.
+      // The error has already been emitted by _spawnIdentifyConn via the event bus.
+      // Do NOT rethrow - identify is internal infrastructure and errors must not propagate.
+      // Callers should listen to the event bus for identification failures, not await this method.
+      return; // Explicitly absorb the error
     }
   }
 
