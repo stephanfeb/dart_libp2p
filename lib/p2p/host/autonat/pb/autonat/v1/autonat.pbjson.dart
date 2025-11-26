@@ -1,13 +1,14 @@
+// This is a generated file - do not edit.
 //
-//  Generated code. Do not modify.
-//  source: autonat/v1/autonat.proto
-//
-// @dart = 2.12
+// Generated from autonat.proto.
+
+// @dart = 3.3
 
 // ignore_for_file: annotate_overrides, camel_case_types, comment_references
-// ignore_for_file: constant_identifier_names, library_prefixes
-// ignore_for_file: non_constant_identifier_names, prefer_final_fields
-// ignore_for_file: unnecessary_import, unnecessary_this, unused_import
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, unused_import
 
 import 'dart:convert' as $convert;
 import 'dart:core' as $core;
@@ -17,9 +18,30 @@ import 'dart:typed_data' as $typed_data;
 const Message$json = {
   '1': 'Message',
   '2': [
-    {'1': 'type', '3': 1, '4': 1, '5': 14, '6': '.autonat.pb.Message.MessageType', '10': 'type'},
-    {'1': 'dial', '3': 2, '4': 1, '5': 11, '6': '.autonat.pb.Message.Dial', '10': 'dial'},
-    {'1': 'dialResponse', '3': 3, '4': 1, '5': 11, '6': '.autonat.pb.Message.DialResponse', '10': 'dialResponse'},
+    {
+      '1': 'type',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.autonat.pb.Message.MessageType',
+      '10': 'type'
+    },
+    {
+      '1': 'dial',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.autonat.pb.Message.Dial',
+      '10': 'dial'
+    },
+    {
+      '1': 'dialResponse',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.autonat.pb.Message.DialResponse',
+      '10': 'dialResponse'
+    },
   ],
   '3': [Message_PeerInfo$json, Message_Dial$json, Message_DialResponse$json],
   '4': [Message_MessageType$json, Message_ResponseStatus$json],
@@ -38,7 +60,14 @@ const Message_PeerInfo$json = {
 const Message_Dial$json = {
   '1': 'Dial',
   '2': [
-    {'1': 'peer', '3': 1, '4': 1, '5': 11, '6': '.autonat.pb.Message.PeerInfo', '10': 'peer'},
+    {
+      '1': 'peer',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.autonat.pb.Message.PeerInfo',
+      '10': 'peer'
+    },
   ],
 };
 
@@ -46,7 +75,14 @@ const Message_Dial$json = {
 const Message_DialResponse$json = {
   '1': 'DialResponse',
   '2': [
-    {'1': 'status', '3': 1, '4': 1, '5': 14, '6': '.autonat.pb.Message.ResponseStatus', '10': 'status'},
+    {
+      '1': 'status',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.autonat.pb.Message.ResponseStatus',
+      '10': 'status'
+    },
     {'1': 'statusText', '3': 2, '4': 1, '5': 9, '10': 'statusText'},
     {'1': 'addr', '3': 3, '4': 1, '5': 12, '10': 'addr'},
   ],
@@ -86,4 +122,3 @@ final $typed_data.Uint8List messageDescriptor = $convert.base64Decode(
     'SUFMX1JFU1BPTlNFEAEiaQoOUmVzcG9uc2VTdGF0dXMSBgoCT0sQABIQCgxFX0RJQUxfRVJST1'
     'IQZBISCg5FX0RJQUxfUkVGVVNFRBBlEhIKDUVfQkFEX1JFUVVFU1QQyAESFQoQRV9JTlRFUk5B'
     'TF9FUlJPUhCsAg==');
-
