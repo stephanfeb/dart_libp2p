@@ -1,6 +1,6 @@
 // This is a generated file - do not edit.
 //
-// Generated from envelope.proto.
+// Generated from payload.proto.
 
 // @dart = 3.3
 

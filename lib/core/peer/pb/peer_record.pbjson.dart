@@ -1,13 +1,14 @@
+// This is a generated file - do not edit.
 //
-//  Generated code. Do not modify.
-//  source: peer_record.proto
-//
-// @dart = 2.12
+// Generated from peer_record.proto.
+
+// @dart = 3.3
 
 // ignore_for_file: annotate_overrides, camel_case_types, comment_references
-// ignore_for_file: constant_identifier_names, library_prefixes
-// ignore_for_file: non_constant_identifier_names, prefer_final_fields
-// ignore_for_file: unnecessary_import, unnecessary_this, unused_import
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, unused_import
 
 import 'dart:convert' as $convert;
 import 'dart:core' as $core;
@@ -19,7 +20,14 @@ const PeerRecord$json = {
   '2': [
     {'1': 'peer_id', '3': 1, '4': 1, '5': 12, '10': 'peerId'},
     {'1': 'seq', '3': 2, '4': 1, '5': 4, '10': 'seq'},
-    {'1': 'addresses', '3': 3, '4': 3, '5': 11, '6': '.peer.pb.PeerRecord.AddressInfo', '10': 'addresses'},
+    {
+      '1': 'addresses',
+      '3': 3,
+      '4': 3,
+      '5': 11,
+      '6': '.peer.pb.PeerRecord.AddressInfo',
+      '10': 'addresses'
+    },
   ],
   '3': [PeerRecord_AddressInfo$json],
 };
@@ -37,4 +45,3 @@ final $typed_data.Uint8List peerRecordDescriptor = $convert.base64Decode(
     'CgpQZWVyUmVjb3JkEhcKB3BlZXJfaWQYASABKAxSBnBlZXJJZBIQCgNzZXEYAiABKARSA3NlcR'
     'I9CglhZGRyZXNzZXMYAyADKAsyHy5wZWVyLnBiLlBlZXJSZWNvcmQuQWRkcmVzc0luZm9SCWFk'
     'ZHJlc3NlcxorCgtBZGRyZXNzSW5mbxIcCgltdWx0aWFkZHIYASABKAxSCW11bHRpYWRkcg==');
-

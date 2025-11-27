@@ -1,13 +1,14 @@
+// This is a generated file - do not edit.
 //
-//  Generated code. Do not modify.
-//  source: lib/src/core/crypto/pb/crypto.proto
-//
-// @dart = 2.12
+// Generated from crypto.proto.
+
+// @dart = 3.3
 
 // ignore_for_file: annotate_overrides, camel_case_types, comment_references
-// ignore_for_file: constant_identifier_names, library_prefixes
-// ignore_for_file: non_constant_identifier_names, prefer_final_fields
-// ignore_for_file: unnecessary_import, unnecessary_this, unused_import
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, unused_import
 
 import 'dart:convert' as $convert;
 import 'dart:core' as $core;
@@ -33,7 +34,14 @@ final $typed_data.Uint8List keyTypeDescriptor = $convert.base64Decode(
 const PublicKey$json = {
   '1': 'PublicKey',
   '2': [
-    {'1': 'Type', '3': 1, '4': 2, '5': 14, '6': '.crypto.pb.KeyType', '10': 'Type'},
+    {
+      '1': 'Type',
+      '3': 1,
+      '4': 2,
+      '5': 14,
+      '6': '.crypto.pb.KeyType',
+      '10': 'Type'
+    },
     {'1': 'Data', '3': 2, '4': 2, '5': 12, '10': 'Data'},
   ],
 };
@@ -47,7 +55,14 @@ final $typed_data.Uint8List publicKeyDescriptor = $convert.base64Decode(
 const PrivateKey$json = {
   '1': 'PrivateKey',
   '2': [
-    {'1': 'Type', '3': 1, '4': 2, '5': 14, '6': '.crypto.pb.KeyType', '10': 'Type'},
+    {
+      '1': 'Type',
+      '3': 1,
+      '4': 2,
+      '5': 14,
+      '6': '.crypto.pb.KeyType',
+      '10': 'Type'
+    },
     {'1': 'Data', '3': 2, '4': 2, '5': 12, '10': 'Data'},
   ],
 };
@@ -56,4 +71,3 @@ const PrivateKey$json = {
 final $typed_data.Uint8List privateKeyDescriptor = $convert.base64Decode(
     'CgpQcml2YXRlS2V5EiYKBFR5cGUYASACKA4yEi5jcnlwdG8ucGIuS2V5VHlwZVIEVHlwZRISCg'
     'REYXRhGAIgAigMUgREYXRh');
-
