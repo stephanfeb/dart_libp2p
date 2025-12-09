@@ -28,6 +28,7 @@ import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRe
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart'; // Added import
+import 'package:dart_libp2p/p2p/protocol/identify/identify_exceptions.dart';
 
 import 'package:dart_libp2p/core/certified_addr_book.dart';
 import 'package:dart_libp2p/core/event/addrs.dart';
@@ -715,18 +716,37 @@ class IdentifyService implements IDService {
         _log.severe('[IdentifyService] PREMATURE_CLOSURE_CONTEXT: stream_id=${stream?.id() ?? 'null'}, protocol=$protoIDString, error_detail=$e');
       }
       
-      // This is a common race condition on shutdown, where the connection is closed
-      // between the check and the stream creation. It's not a critical error.
-      if (e.toString().contains('Bad state: Stream is closed')) {
-        _log.warning('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
-      } else {
-        _log.severe('IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
-      }
+      // Cleanup the stream if it was opened
       if (stream != null && !stream.isClosed) {
         _log.warning('IdentifyService._newStreamAndNegotiate: Resetting stream due to error for ${conn.remotePeer}.');
         await stream.reset();
       }
-      return null;
+      
+      // Check if this is a timeout-related exception
+      if (isTimeoutException(e)) {
+        _log.severe('[IdentifyService] TIMEOUT_DETECTED: peer=$peerId, duration=${totalDuration.inMilliseconds}ms');
+        throw IdentifyTimeoutException(
+          peerId: peerId,
+          message: 'Identify stream negotiation timed out for peer $peerId',
+          timeout: timeout,
+          cause: e,
+        );
+      }
+      
+      // This is a common race condition on shutdown, where the connection is closed
+      // between the check and the stream creation. It's not a critical error.
+      if (e.toString().contains('Bad state: Stream is closed')) {
+        _log.warning('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
+        return null;
+      }
+      
+      // For other errors, wrap in typed exception
+      _log.severe('IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
+      throw IdentifyStreamException(
+        peerId: peerId,
+        message: 'Error opening or negotiating stream with $peerId for $protoIDString',
+        cause: e,
+      );
     }
   }
 
@@ -1464,12 +1484,33 @@ class IdentifyService implements IDService {
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
       _log.warning(' [IDENTIFY-WAIT-ERROR] Identify completer for peer=$peerId completed with error, total_duration=${totalDuration.inMilliseconds}ms, error=$e\n$st');
-      // CRITICAL SECURITY FIX: We MUST rethrow here.
-      // If identify fails, the connection is unverified and potentially insecure (missing keys/metadata).
+      
+      // Handle timeout exceptions gracefully.
+      // A timeout indicates the peer is unreachable, not a security concern.
+      // The failure event has already been emitted by _spawnIdentifyConn's catchError,
+      // so applications can listen for EvtPeerIdentificationFailed if needed.
+      // Rethrowing typed IdentifyTimeoutException allows callers to specifically handle timeouts.
+      if (e is IdentifyTimeoutException) {
+        _log.warning(' [IDENTIFY-WAIT-TIMEOUT] Identify timeout for peer=$peerId handled gracefully. Rethrowing typed exception for caller to handle.');
+        rethrow;
+      }
+      
+      // Also handle timeout detection from generic exceptions
+      if (isTimeoutException(e)) {
+        _log.warning(' [IDENTIFY-WAIT-TIMEOUT-DETECTED] Identify timeout detected for peer=$peerId. Converting to typed exception.');
+        throw IdentifyTimeoutException(
+          peerId: peerId,
+          message: 'Identify timed out for peer $peerId',
+          cause: e,
+        );
+      }
+      
+      // CRITICAL SECURITY FIX: For non-timeout errors, we MUST rethrow.
+      // If identify fails (other than timeout), the connection is unverified 
+      // and potentially insecure (missing keys/metadata).
       // Callers (like BasicHost.connect or newStream) expect identifyWait to complete successfully
       // before proceeding. If we swallow the error, they proceed with a degraded connection.
       // By rethrowing, we ensure BasicHost aborts the connection.
-      // The process crash issue is handled by the safety net in the main entry point and proper try/catch in BasicHost.
       rethrow;
     }
   }
@@ -1524,7 +1565,10 @@ class IdentifyService implements IDService {
       final streamNegotiationDuration = DateTime.now().difference(identifyStart);
       if (stream == null) {
         _log.severe(' [IDENTIFY-CONN-STREAM-FAILED] peer=$peerId, duration=${streamNegotiationDuration.inMilliseconds}ms, reason=stream_negotiation_failed');
-        throw Exception('Failed to open or negotiate identify stream with $peerId');
+        throw IdentifyStreamException(
+          peerId: peerId,
+          message: 'Failed to open or negotiate identify stream with $peerId',
+        );
       }
       
 

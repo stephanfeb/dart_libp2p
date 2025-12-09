@@ -27,6 +27,7 @@ import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Import Ad
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart'; // Added import
 import 'package:dart_libp2p/p2p/protocol/identify/identify.dart';   // Added import
+import 'package:dart_libp2p/p2p/protocol/identify/identify_exceptions.dart'; // Added for typed exceptions
 import 'package:dart_libp2p/p2p/protocol/identify/options.dart';  // Added import
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
@@ -994,6 +995,19 @@ class BasicHost implements Host {
       final totalTime = DateTime.now().difference(startTime);
 
 
+    } on IdentifyTimeoutException catch (e, stackTrace) {
+      // Handle identify timeout gracefully - log warning instead of error
+      final dialTime = DateTime.now().difference(dialStartTime);
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [CONNECT-TIMEOUT] Connection to ${pi.id} timed out during identify after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e');
+      // Rethrow the typed exception so callers can handle it specifically
+      rethrow;
+    } on IdentifyException catch (e, stackTrace) {
+      // Handle other identify exceptions
+      final dialTime = DateTime.now().difference(dialStartTime);
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [CONNECT-IDENTIFY-ERROR] Connection failed due to identify error after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e\n$stackTrace');
+      rethrow;
     } catch (e, stackTrace) {
       final dialTime = DateTime.now().difference(dialStartTime);
       final totalTime = DateTime.now().difference(startTime);
@@ -1017,6 +1031,22 @@ class BasicHost implements Host {
       
       final identifyTime = DateTime.now().difference(identifyStartTime);
 
+    } on IdentifyTimeoutException catch (e, stackTrace) {
+      // Handle identify timeout gracefully - this is not a critical error,
+      // the peer may have gone offline or be unreachable.
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [DIAL-PEER-TIMEOUT] Identify timed out for ${p.toString()} after ${totalTime.inMilliseconds}ms: $e');
+      // Rethrow the typed exception so callers can handle it appropriately
+      throw IdentifyTimeoutException(
+        peerId: p,
+        message: 'Dial failed due to identify timeout',
+        cause: e,
+      );
+    } on IdentifyException catch (e, stackTrace) {
+      // Handle other identify exceptions
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [DIAL-PEER-IDENTIFY-ERROR] Identify failed for ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
+      rethrow;
     } catch (e, stackTrace) {
       final totalTime = DateTime.now().difference(startTime);
       _log.severe('❌ [DIAL-PEER-ERROR] Failed to dial ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
@@ -1089,7 +1119,17 @@ class BasicHost implements Host {
     final connectStartTime = DateTime.now();
     _log.warning('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
-    await connect(AddrInfo(p, []), context: context);
+    try {
+      await connect(AddrInfo(p, []), context: context);
+    } on IdentifyTimeoutException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
+      rethrow;
+    } on IdentifyException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [newStream Phase 1] Connection to ${p.toBase58()} failed due to identify error after ${totalTime.inMilliseconds}ms: $e');
+      rethrow;
+    }
     _log.warning('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
     final connectTime = DateTime.now().difference(connectStartTime);
@@ -1117,7 +1157,19 @@ class BasicHost implements Host {
     final identifyStartTime = DateTime.now();
     _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
     
-    await _idService.identifyWait(stream.conn);
+    try {
+      await _idService.identifyWait(stream.conn);
+    } on IdentifyTimeoutException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
+      await stream.reset();
+      rethrow;
+    } on IdentifyException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e');
+      await stream.reset();
+      rethrow;
+    }
     _log.warning('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
     
     final identifyTime = DateTime.now().difference(identifyStartTime);
