@@ -1464,11 +1464,13 @@ class IdentifyService implements IDService {
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
       _log.warning(' [IDENTIFY-WAIT-ERROR] Identify completer for peer=$peerId completed with error, total_duration=${totalDuration.inMilliseconds}ms, error=$e\n$st');
-      // CRITICAL: Identify failures are non-fatal and communicated via EvtPeerIdentificationFailed events.
-      // The error has already been emitted by _spawnIdentifyConn via the event bus.
-      // Do NOT rethrow - identify is internal infrastructure and errors must not propagate.
-      // Callers should listen to the event bus for identification failures, not await this method.
-      return; // Explicitly absorb the error
+      // CRITICAL SECURITY FIX: We MUST rethrow here.
+      // If identify fails, the connection is unverified and potentially insecure (missing keys/metadata).
+      // Callers (like BasicHost.connect or newStream) expect identifyWait to complete successfully
+      // before proceeding. If we swallow the error, they proceed with a degraded connection.
+      // By rethrowing, we ensure BasicHost aborts the connection.
+      // The process crash issue is handled by the safety net in the main entry point and proper try/catch in BasicHost.
+      rethrow;
     }
   }
 

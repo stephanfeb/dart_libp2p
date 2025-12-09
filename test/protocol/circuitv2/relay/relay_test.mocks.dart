@@ -409,6 +409,15 @@ class MockP2PStream<T> extends _i1.Mock implements _i8.P2PStream<T> {
           as bool);
 
   @override
+  bool get isWritable =>
+      (super.noSuchMethod(
+            Invocation.getter(#isWritable),
+            returnValue: false,
+            returnValueForMissingStub: false,
+          )
+          as bool);
+
+  @override
   String id() =>
       (super.noSuchMethod(
             Invocation.method(#id, []),
