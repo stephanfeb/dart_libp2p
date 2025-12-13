@@ -98,9 +98,22 @@ class SecuredConnection implements TransportConn {
   final PeerId? establishedRemotePeer;
   final PublicKey? establishedRemotePublicKey;
   final String securityProtocolId; // Added to resolve circular dependency
-  int _sendNonce = 0;
-  int _recvNonce = 0;
+  int _sendNonce;
+  int _recvNonce;
   final _DecryptedDataBuffer _decryptedBuffer = _DecryptedDataBuffer(); // Optimized buffer
+  
+  // Read lock to serialize read operations and prevent framing desync
+  // This is critical for chunked transports (UDP/UDX) where data arrives
+  // in arbitrary boundaries. Without serialization, concurrent reads can
+  // cause one read to consume part of another's length prefix or encrypted data.
+  final Queue<Completer<void>> _readLockQueue = Queue<Completer<void>>();
+  bool _readLockHeld = false;
+  
+  // Write lock to serialize write operations and prevent data interleaving
+  // Without this, multiple concurrent writes can interleave their chunks,
+  // causing the reader to see mixed encrypted data from different messages.
+  final Queue<Completer<void>> _writeLockQueue = Queue<Completer<void>>();
+  bool _writeLockHeld = false;
 
   SecuredConnection(
       this._connection,
@@ -109,15 +122,23 @@ class SecuredConnection implements TransportConn {
         this.establishedRemotePeer,
         this.establishedRemotePublicKey,
         required this.securityProtocolId, // Make it required
-      }) {
+        int initialSendNonce = 0,
+        int initialRecvNonce = 0,
+      }) : _sendNonce = initialSendNonce, _recvNonce = initialRecvNonce {
     // ADDED LOGGING
-    _log.finer('SecuredConnection Constructor: Peer ${establishedRemotePeer?.toString() ?? 'unknown'}');
+    _log.info('SecuredConnection Constructor: Peer ${establishedRemotePeer?.toString() ?? 'unknown'}, initialSendNonce=$initialSendNonce, initialRecvNonce=$initialRecvNonce');
     _log.finer('  - _encryptionKey.hashCode: ${_encryptionKey.hashCode}');
     _encryptionKey.extractBytes().then((bytes) => _log.finer('  - _encryptionKey.bytes: $bytes'));
     _log.finer('  - _decryptionKey.hashCode: ${_decryptionKey.hashCode}');
     _decryptionKey.extractBytes().then((bytes) => _log.finer('  - _decryptionKey.bytes: $bytes'));
 
   }
+  
+  /// Get the current send nonce value (useful for continuing nonces after handshake)
+  int get currentSendNonce => _sendNonce;
+  
+  /// Get the current recv nonce value (useful for continuing nonces after handshake)
+  int get currentRecvNonce => _recvNonce;
 
   Uint8List _getNonce(int counter) {
     final nonce = Uint8List(12);  // ChaCha20-Poly1305 uses 12-byte nonces
@@ -132,27 +153,107 @@ class SecuredConnection implements TransportConn {
     return nonce;
   }
 
+  /// Acquire read lock to serialize read operations.
+  /// 
+  /// This prevents concurrent reads from interfering with each other's message boundaries.
+  /// Without this, chunked transports (UDX/UDP) can cause one read to consume bytes
+  /// intended for another read's length prefix or encrypted data payload.
+  ///
+  /// Example failure without lock:
+  /// 1. Read A starts: reads 2-byte length prefix (expecting 96KB message)
+  /// 2. Data arrives in chunks due to UDP fragmentation (~70 packets)
+  /// 3. Read B starts concurrently: reads next 2 bytes
+  /// 4. Those 2 bytes are actually from the MIDDLE of Read A's encrypted data!
+  /// 5. Read B interprets 0x78CE (30,926) as length instead of encrypted payload
+  /// 6. MAC authentication fails: "wrong message authentication code"
+  Future<void> _acquireReadLock() async {
+    final completer = Completer<void>();
+    _readLockQueue.add(completer);
+    _log.fine('SecuredConnection: 🔒 QUEUED for read lock. Queue length: ${_readLockQueue.length}, Lock held: $_readLockHeld');
+    
+    // Try to grant lock immediately if available
+    _tryGrantReadLock();
+    
+    // Wait for our turn
+    await completer.future;
+    _log.fine('SecuredConnection: 🔒 GRANTED read lock. Queue length: ${_readLockQueue.length}');
+  }
+
+  /// Attempts to grant the read lock to the next waiter if the lock is free.
+  /// This method is synchronous to ensure atomic check-and-grant.
+  void _tryGrantReadLock() {
+    if (!_readLockHeld && _readLockQueue.isNotEmpty) {
+      _readLockHeld = true;
+      final next = _readLockQueue.removeFirst();
+      _log.fine('SecuredConnection: 🔒 GRANTING read lock to next waiter. Remaining queue: ${_readLockQueue.length}');
+      next.complete();
+    }
+  }
+
+  /// Release read lock, allowing the next queued read to proceed
+  void _releaseReadLock() {
+    _readLockHeld = false;
+    _log.fine('SecuredConnection: 🔓 Released read lock. Queue length: ${_readLockQueue.length}');
+    _tryGrantReadLock();
+  }
+
+  /// Acquire write lock to serialize write operations.
+  /// 
+  /// Prevents concurrent writes from interleaving their encrypted data chunks.
+  /// Without this, chunked transports can deliver mixed data from different messages.
+  Future<void> _acquireWriteLock() async {
+    final completer = Completer<void>();
+    _writeLockQueue.add(completer);
+    
+    // Try to grant lock immediately if available
+    _tryGrantWriteLock();
+    
+    // Wait for our turn
+    await completer.future;
+  }
+
+  /// Attempts to grant the write lock to the next waiter if the lock is free.
+  void _tryGrantWriteLock() {
+    if (!_writeLockHeld && _writeLockQueue.isNotEmpty) {
+      _writeLockHeld = true;
+      final next = _writeLockQueue.removeFirst();
+      next.complete();
+    }
+  }
+
+  /// Release write lock, allowing the next queued write to proceed
+  void _releaseWriteLock() {
+    _writeLockHeld = false;
+    _tryGrantWriteLock();
+  }
+
   @override
   Future<void> close() => _connection.close();
 
   @override
   Future<Uint8List> read([int? length]) async {
-    _log.finer('SecuredConnection.read: Called with length: $length, _decryptedBuffer.length: ${_decryptedBuffer.length}'); // ADDED
-    if (length == 0) {
-      _log.finer('SecuredConnection.read: Requested length is 0, returning empty Uint8List.'); // ADDED
-      return Uint8List(0); // Handle zero length request immediately
-    }
-
-    if (length == null) {
-      if (!_decryptedBuffer.isEmpty) {
-        final data = _decryptedBuffer.takeAll();
-        _log.finer('SecuredConnection.read (length=null): Returning buffered data of length ${data.length}. Data preview: ${data.take(20).toList()}'); // ADDED
-        return data;
+    // Acquire read lock to ensure message framing integrity
+    _log.fine('SecuredConnection.read: 🔒 ACQUIRING read lock for length=$length');
+    await _acquireReadLock();
+    _log.fine('SecuredConnection.read: 🔒 READ LOCK ACQUIRED for length=$length');
+    
+    try {
+      _log.finer('SecuredConnection.read: Called with length: $length, _decryptedBuffer.length: ${_decryptedBuffer.length}'); // ADDED
+      if (length == 0) {
+        _log.finer('SecuredConnection.read: Requested length is 0, returning empty Uint8List.'); // ADDED
+        return Uint8List(0); // Handle zero length request immediately
       }
-      final decryptedMessage = await _readAndDecryptMessage();
-      _log.finer('SecuredConnection.read (length=null): Returning directly from _readAndDecryptMessage, length ${decryptedMessage.length}. Data preview: ${decryptedMessage.take(20).toList()}'); // ADDED
-      return decryptedMessage;
-    }
+
+      if (length == null) {
+        if (!_decryptedBuffer.isEmpty) {
+          final data = _decryptedBuffer.takeAll();
+          _log.finer('SecuredConnection.read (length=null): Returning buffered data of length ${data.length}. Data preview: ${data.take(20).toList()}'); // ADDED
+          return data;
+        }
+        final decryptedMessage = await _readAndDecryptMessage();
+        _log.finer('SecuredConnection.read (length=null): Returning directly from _readAndDecryptMessage, length ${decryptedMessage.length}. Data preview: ${decryptedMessage.take(20).toList()}'); // ADDED
+        return decryptedMessage;
+      }
 
     // length is not null here
     while (_decryptedBuffer.length < length) {
@@ -179,19 +280,24 @@ class SecuredConnection implements TransportConn {
       _log.finer('SecuredConnection.read (length=$length): Added ${decryptedChunk.length} bytes to _decryptedBuffer. New _decryptedBuffer.length: ${_decryptedBuffer.length}'); // ADDED
     }
 
-    if (_decryptedBuffer.isEmpty) {
-      _log.finer('SecuredConnection.read (length=$length): _decryptedBuffer is empty after loop. Returning empty Uint8List.'); // ADDED
-      return Uint8List(0);
-    }
+      if (_decryptedBuffer.isEmpty) {
+        _log.finer('SecuredConnection.read (length=$length): _decryptedBuffer is empty after loop. Returning empty Uint8List.'); // ADDED
+        return Uint8List(0);
+      }
 
-    if (_decryptedBuffer.length >= length) {
-      final dataToReturn = _decryptedBuffer.takeBytes(length);
-      _log.finer('SecuredConnection.read (length=$length): Returning ${dataToReturn.length} bytes. Remaining _decryptedBuffer.length: ${_decryptedBuffer.length}. Data preview: ${dataToReturn.take(20).toList()}'); // ADDED
-      return dataToReturn;
-    } else { // Less data than requested due to EOF
-      final dataToReturn = _decryptedBuffer.takeAll();
-      _log.finer('SecuredConnection.read (length=$length): Returning ${dataToReturn.length} bytes (less than requested due to EOF). _decryptedBuffer is now empty. Data preview: ${dataToReturn.take(20).toList()}'); // ADDED
-      return dataToReturn;
+      if (_decryptedBuffer.length >= length) {
+        final dataToReturn = _decryptedBuffer.takeBytes(length);
+        _log.finer('SecuredConnection.read (length=$length): Returning ${dataToReturn.length} bytes. Remaining _decryptedBuffer.length: ${_decryptedBuffer.length}. Data preview: ${dataToReturn.take(20).toList()}'); // ADDED
+        return dataToReturn;
+      } else { // Less data than requested due to EOF
+        final dataToReturn = _decryptedBuffer.takeAll();
+        _log.finer('SecuredConnection.read (length=$length): Returning ${dataToReturn.length} bytes (less than requested due to EOF). _decryptedBuffer is now empty. Data preview: ${dataToReturn.take(20).toList()}'); // ADDED
+        return dataToReturn;
+      }
+    } finally {
+      // Always release the read lock, even if an exception occurs
+      _log.fine('SecuredConnection.read: 🔓 RELEASING read lock for length=$length');
+      _releaseReadLock();
     }
   }
 
@@ -217,16 +323,16 @@ class SecuredConnection implements TransportConn {
       }
       
       final remaining = expectedLength - buffer.length;
-      _log.finer('SecuredConnection: _readFullMessage attempt $readAttempts: need $remaining more bytes (have ${buffer.length}/$expectedLength)');
+      _log.fine('SecuredConnection: _readFullMessage attempt $readAttempts: need $remaining more bytes (have ${buffer.length}/$expectedLength)');
       
       final chunk = await _connection.read(remaining);
       
       if (chunk.isEmpty) {
-        _log.finer('SecuredConnection: _readFullMessage got EOF after $readAttempts attempts. Expected: $expectedLength, Got: ${buffer.length}');
+        _log.fine('SecuredConnection: _readFullMessage got EOF after $readAttempts attempts. Expected: $expectedLength, Got: ${buffer.length}');
         break; // EOF - return what we have
       }
       
-      _log.finer('SecuredConnection: _readFullMessage attempt $readAttempts: received ${chunk.length} bytes');
+      _log.fine('SecuredConnection: _readFullMessage attempt $readAttempts: received ${chunk.length} bytes. First 4 bytes: ${chunk.take(4).toList()}');
       
       // Efficiently append chunk to buffer
       final newBuffer = Uint8List(buffer.length + chunk.length);
@@ -236,14 +342,21 @@ class SecuredConnection implements TransportConn {
     }
     
     _log.finer('SecuredConnection: _readFullMessage completed after $readAttempts attempts. Expected: $expectedLength, Got: ${buffer.length}');
+    
+    // Sanity check: if we got more bytes than expected, truncate and warn
+    if (buffer.length > expectedLength) {
+      _log.warning('SecuredConnection: _readFullMessage got ${buffer.length} bytes but only expected $expectedLength. This should not happen - check UDXP2PStreamAdapter.read()');
+      return Uint8List.fromList(buffer.sublist(0, expectedLength));
+    }
     return buffer;
   }
 
   Future<Uint8List> _readAndDecryptMessage() async {
     // This method now encapsulates reading one full encrypted message and decrypting it.
     // It handles partial reads from the underlying transport robustly.
-    _log.finer('SecuredConnection: Reading length prefix');
+    _log.info('SecuredConnection: Reading length prefix (2 bytes)');
     final lengthBytes = await _readFullMessage(2);
+    _log.info('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}]');
     _log.finer('SecuredConnection: FROM_UNDERLYING_READ (Length Prefix) - Bytes: ${hex.encode(lengthBytes)}');
 
     if (lengthBytes.isEmpty) {
@@ -280,8 +393,9 @@ class SecuredConnection implements TransportConn {
     _log.finer('SecuredConnection: Full MAC: ${mac.toList()}');
 
     final algorithm = crypto.Chacha20.poly1305Aead();
-    final nonce = _getNonce(_recvNonce++);
-    _log.finer('SecuredConnection: Attempting decryption with nonce: ${nonce.toList()}');
+    final nonceValue = _recvNonce++;
+    final nonce = _getNonce(nonceValue);
+    _log.fine('SecuredConnection: 🔑 DECRYPTING with RECV NONCE=$nonceValue (${nonce.toList()})');
     // ADDED LOGGING for hashCode
     _log.finer('SecuredConnection: Using decryption key (hashCode: ${_decryptionKey.hashCode}): ${await _decryptionKey.extractBytes()}');
 
@@ -295,65 +409,89 @@ class SecuredConnection implements TransportConn {
         secretKey: _decryptionKey,
         aad: Uint8List(0),
       );
-      _log.finer('SecuredConnection: Decryption successful, got ${plaintext.length} bytes');
+      _log.fine('SecuredConnection: ✅ DECRYPTION SUCCESS for RECV NONCE=$nonceValue, got ${plaintext.length} bytes');
       return Uint8List.fromList(plaintext);
     } catch (e) {
-      _log.finer('SecuredConnection: Decryption failed with error: $e');
-      _log.finer('SecuredConnection: Full message details:');
-      _log.finer('  - Length prefix: ${lengthBytes.toList()}');
-      _log.finer('  - Total data length: $dataLength');
-      _log.finer('  - Encrypted data length: ${encrypted.length}');
-      _log.finer('  - MAC length: ${mac.length}');
-      _log.finer('  - Nonce: ${nonce.toList()}');
+      _log.severe('SecuredConnection: ❌ DECRYPTION FAILED for RECV NONCE=$nonceValue with error: $e');
+      _log.severe('SecuredConnection: Full message details:');
+      _log.severe('  - Length prefix: ${lengthBytes.toList()}');
+      _log.severe('  - Total data length: $dataLength');
+      _log.severe('  - Encrypted data length: ${encrypted.length}');
+      _log.severe('  - MAC length: ${mac.length}');
+      _log.severe('  - Nonce used: ${nonce.toList()}');
+      _log.severe('  - Current _recvNonce counter: $_recvNonce (after increment)');
       rethrow;
     }
   }
 
   @override
   Future<void> write(Uint8List data) async {
-    // ADDED LOGGING: Print the initial plaintext data received by write()
+    // Acquire write lock to ensure writes are atomic and don't interleave
+    await _acquireWriteLock();
+    
+    try {
+      // ADDED LOGGING: Print the initial plaintext data received by write()
 
-    _log.finer('SecuredConnection.write: Plaintext data received (length: ${data.length}, first 20 bytes: ${data.take(20).toList()})');
-    _log.finer('SecuredConnection: Writing data of length ${data.length}');
-    final algorithm = crypto.Chacha20.poly1305Aead();
-    final nonce = _getNonce(_sendNonce++);
-    _log.finer('SecuredConnection: Using nonce: ${nonce.toList()}');
-    // ADDED LOGGING for hashCode
-    _log.finer('SecuredConnection: Using encryption key (hashCode: ${_encryptionKey.hashCode}): ${await _encryptionKey.extractBytes()}');
+      _log.finer('SecuredConnection.write: Plaintext data received (length: ${data.length}, first 20 bytes: ${data.take(20).toList()})');
+      _log.finer('SecuredConnection: Writing data of length ${data.length}');
+      final algorithm = crypto.Chacha20.poly1305Aead();
+      final nonceValue = _sendNonce++;
+      final nonce = _getNonce(nonceValue);
+      _log.fine('SecuredConnection: 🔑 ENCRYPTING with SEND NONCE=$nonceValue (${nonce.toList()})');
+      // ADDED LOGGING for hashCode
+      _log.finer('SecuredConnection: Using encryption key (hashCode: ${_encryptionKey.hashCode}): ${await _encryptionKey.extractBytes()}');
 
-    final secretBox = await algorithm.encrypt(
-      data,
-      secretKey: _encryptionKey,
-      nonce: nonce,
-      aad: Uint8List(0),
-    );
-
-
-    // Calculate total length of encrypted data + MAC
-    final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
-    _log.finer('SecuredConnection: Encrypted data length: ${secretBox.cipherText.length}');
-    _log.finer('SecuredConnection: MAC length: ${secretBox.mac.bytes.length}');
-    _log.finer('SecuredConnection: MAC: ${secretBox.mac.bytes.toList()}');
-    _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
-    _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
+      final secretBox = await algorithm.encrypt(
+        data,
+        secretKey: _encryptionKey,
+        nonce: nonce,
+        aad: Uint8List(0),
+      );
 
 
-    // Write length prefix and data in one operation
-    final combinedData = Uint8List(2 + dataLength)
-    // Write length prefix (2 bytes)
-      ..[0] = dataLength >> 8
-      ..[1] = dataLength & 0xFF
-    // Write encrypted data
-      ..setAll(2, secretBox.cipherText)
-    // Write MAC
-      ..setAll(2 + secretBox.cipherText.length, secretBox.mac.bytes);
+      // Calculate total length of encrypted data + MAC
+      final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
+      
+      // CRITICAL: 2-byte length prefix can only handle messages up to 65535 bytes
+      // Messages larger than this will overflow and corrupt the stream!
+      if (dataLength > 65535) {
+        throw StateError(
+          'SecuredConnection: Message too large! Encrypted size $dataLength bytes exceeds '
+          '2-byte length prefix limit of 65535 bytes. Plaintext was ${data.length} bytes. '
+          'Fragment the message at a higher layer (Yamux should do this automatically).'
+        );
+      }
+      
+      _log.finer('SecuredConnection: Encrypted data length: ${secretBox.cipherText.length}');
+      _log.finer('SecuredConnection: MAC length: ${secretBox.mac.bytes.length}');
+      _log.finer('SecuredConnection: MAC: ${secretBox.mac.bytes.toList()}');
+      _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
+      _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
 
-    _log.finer('SecuredConnection: Writing ${data.length} bytes as ${dataLength} bytes encrypted+MAC');
-    _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
-    _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
-    _log.finer('SecuredConnection: First 4 bytes of encrypted: ${secretBox.cipherText.take(4).toList()}');
-    _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${combinedData.length}, Bytes: ${hex.encode(combinedData)}');
-    await _connection.write(combinedData);
+
+      // Write length prefix and data in one operation
+      final lengthByte0 = dataLength >> 8;
+      final lengthByte1 = dataLength & 0xFF;
+      _log.info('SecuredConnection: Writing length prefix: [$lengthByte0, $lengthByte1] = $dataLength bytes (plaintext was ${data.length})');
+      final combinedData = Uint8List(2 + dataLength)
+      // Write length prefix (2 bytes)
+        ..[0] = lengthByte0
+        ..[1] = lengthByte1
+      // Write encrypted data
+        ..setAll(2, secretBox.cipherText)
+      // Write MAC
+        ..setAll(2 + secretBox.cipherText.length, secretBox.mac.bytes);
+
+      _log.finer('SecuredConnection: Writing ${data.length} bytes as ${dataLength} bytes encrypted+MAC');
+      _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
+      _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
+      _log.finer('SecuredConnection: First 4 bytes of encrypted: ${secretBox.cipherText.take(4).toList()}');
+      _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${combinedData.length}, Bytes: ${hex.encode(combinedData)}');
+      await _connection.write(combinedData);
+    } finally {
+      // Always release the write lock, even if an exception occurs
+      _releaseWriteLock();
+    }
   }
 
   @override

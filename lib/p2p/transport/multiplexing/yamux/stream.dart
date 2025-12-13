@@ -287,7 +287,14 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         }
 
         final remaining = dataToWrite.length - offset;
-        final chunkSize = (remaining > _remoteReceiveWindow) ? _remoteReceiveWindow : remaining;
+        // Limit frame size to prevent SecuredConnection 2-byte length prefix overflow.
+        // With 16 bytes of encryption overhead (MAC), max plaintext per frame is ~65519.
+        // Use 60KB to leave headroom for overhead and ensure we stay under 65535 encrypted.
+        const maxFrameSize = 60 * 1024; // 60KB max per frame
+        var chunkSize = (remaining > _remoteReceiveWindow) ? _remoteReceiveWindow : remaining;
+        if (chunkSize > maxFrameSize) {
+          chunkSize = maxFrameSize;
+        }
         
         if (chunkSize == 0) {
           if (remaining > 0) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:typed_data';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:logging/logging.dart'; // Added for logging
@@ -66,6 +67,11 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   String get _logPrefix => "[$_instanceId][${_isClient ? "Client" : "Server"}]";
   int _lastPingId = 0;
   final _pendingStreams = <int, Completer<void>>{};
+  
+  // Write lock to serialize frame writes and prevent Noise encryption nonce desync
+  // This ensures encryption operations complete sequentially to maintain nonce ordering
+  final Queue<Completer<void>> _writeLockQueue = Queue<Completer<void>>();
+  bool _writeLockHeld = false;
 
   YamuxSession(this._connection, this._config, this._isClient, [this._peerScope])
       : _instanceId = _instanceCounter++, 
@@ -561,6 +567,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         return; // Suppress send if cleanup fully started
     }
 
+    // Acquire write lock to serialize frame writes and prevent Noise encryption nonce desync
+    final lockAcquireStart = DateTime.now();
+    await _acquireWriteLock();
+    final lockAcquireDuration = DateTime.now().difference(lockAcquireStart);
+    
+    _log.fine('$_logPrefix 🔒 ACQUIRED WRITE LOCK after ${lockAcquireDuration.inMicroseconds}μs for Type=${frame.type}, StreamID=${frame.streamId}, Length=${frame.length}');
+    
     try {
       _log.fine('$_logPrefix SEND: Type=${frame.type}, StreamID=${frame.streamId}, Flags=${frame.flags}, Length=${frame.length}');
       // Detailed logging for outgoing frames, especially Identify SYN
@@ -571,7 +584,11 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final bytes = frame.toBytes();
         _log.fine('$_logPrefix SENDING SYN (StreamID ${frame.streamId}): Type=${frame.type}, Flags=0x${frame.flags.toRadixString(16).padLeft(2, '0')}, Length=${frame.length}, Bytes: $bytes');
       }
+      
+      final writeStart = DateTime.now();
       await _connection.write(frame.toBytes());
+      final writeDuration = DateTime.now().difference(writeStart);
+      _log.fine('$_logPrefix ✅ WRITE COMPLETE in ${writeDuration.inMicroseconds}μs for Type=${frame.type}, StreamID=${frame.streamId}');
     } catch (e) {
       _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
       if (!_closed) { // If not already closing due to this error, initiate closure.
@@ -581,7 +598,54 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         // Or, if this sendFrame was called from _goAway, the finally block there will handle cleanup.
       }
       rethrow; // Rethrow to allow caller to handle (e.g., stream reset)
+    } finally {
+      // Release write lock
+      _releaseWriteLock();
+      _log.fine('$_logPrefix 🔓 RELEASED WRITE LOCK for Type=${frame.type}, StreamID=${frame.streamId}');
     }
+  }
+
+  /// Acquire write lock to serialize frame writes.
+  /// This prevents concurrent encryption operations which would cause
+  /// Noise encryption nonce desynchronization and MAC authentication errors.
+  /// 
+  /// The lock ensures that each frame:
+  /// 1. Gets its nonce assigned
+  /// 2. Completes encryption
+  /// 3. Is sent to the underlying connection
+  /// 4. THEN the next frame can start
+  /// 
+  /// Uses queue-first pattern to prevent race conditions where multiple callers
+  /// could pass the "lock available" check before any of them acquires it.
+  Future<void> _acquireWriteLock() async {
+    final completer = Completer<void>();
+    _writeLockQueue.add(completer);
+    _log.fine('$_logPrefix 🔒 QUEUED for write lock. Queue length: ${_writeLockQueue.length}, Lock held: $_writeLockHeld');
+    
+    // Try to grant lock immediately if available
+    _tryGrantWriteLock();
+    
+    // Wait for our turn
+    await completer.future;
+    _log.fine('$_logPrefix 🔒 GRANTED write lock. Queue length: ${_writeLockQueue.length}');
+  }
+
+  /// Attempts to grant the write lock to the next waiter if the lock is free.
+  /// This method is synchronous to ensure atomic check-and-grant.
+  void _tryGrantWriteLock() {
+    if (!_writeLockHeld && _writeLockQueue.isNotEmpty) {
+      _writeLockHeld = true;
+      final next = _writeLockQueue.removeFirst();
+      _log.fine('$_logPrefix 🔒 GRANTING write lock to next waiter. Remaining queue: ${_writeLockQueue.length}');
+      next.complete();
+    }
+  }
+
+  /// Release write lock, allowing the next queued write to proceed
+  void _releaseWriteLock() {
+    _writeLockHeld = false;
+    _log.fine('$_logPrefix 🔓 Released write lock. Queue length: ${_writeLockQueue.length}');
+    _tryGrantWriteLock();
   }
 
   Future<void> _goAway(YamuxCloseReason reason) async {

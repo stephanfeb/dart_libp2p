@@ -21,21 +21,20 @@ Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
 
   Future<void> readLoop() async {
     try {
-      while (true) { // Loop indefinitely, relying on read() to throw on close/EOF
+      while (true) {
         if (controller.isClosed) break;
-        // It's generally safer to let read() throw if the stream is closed.
-        // Checking p2pStream.isClosed here might lead to race conditions
-        // if the stream closes between the check and the read() call.
         print('[Client] Reading chunk from P2PStream...');
         final data = await p2pStream.read();
+        if (data.isEmpty) {
+          // EOF received - close the controller gracefully
+          print('[Client] Received EOF, closing stream controller');
+          break;
+        }
         print('[Client] Read ${data.length} bytes, adding to controller...');
-        // Assuming read() throws an exception (e.g., StateError or custom) when closed or EOF.
-        // If read() could return an empty list to signify EOF before closing, that would need handling.
-        // Based on typical stream patterns, an empty read on a still-open stream is unusual unless maxLength was 0.
         controller.add(data);
       }
     } catch (e, s) {
-      // If the controller is still open, an error occurred during reading (likely EOF or stream error).
+      // If the controller is still open, an error occurred during reading.
       print('[Client] Stream read error or closed: $e');
       if (!controller.isClosed) {
         controller.addError(e, s);

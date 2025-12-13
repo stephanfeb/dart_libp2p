@@ -101,9 +101,17 @@ class NoiseSecurity implements SecurityProtocol {
       final staticKey = await crypto.X25519().newKeyPair();
       final pattern = await NoiseXXPattern.create(true, staticKey);
 
-      await connection.write(await pattern.writeMessage(Uint8List(0))); // -> e
-      await pattern.readMessage(await connection.read(80)); // <- e, ee, s, es
-      await connection.write(await pattern.writeMessage(Uint8List(0))); // -> s, se
+      final msg1 = await pattern.writeMessage(Uint8List(0)); // -> e
+      _log.info('NoiseSecurity.secureOutbound: Writing msg1 (e): ${msg1.length} bytes');
+      await connection.write(msg1);
+      
+      final msg2Raw = await connection.read(80); // <- e, ee, s, es
+      _log.info('NoiseSecurity.secureOutbound: Read msg2 (e,ee,s,es): expected 80, got ${msg2Raw.length} bytes');
+      await pattern.readMessage(msg2Raw);
+      
+      final msg3 = await pattern.writeMessage(Uint8List(0)); // -> s, se
+      _log.info('NoiseSecurity.secureOutbound: Writing msg3 (s,se): ${msg3.length} bytes');
+      await connection.write(msg3);
 
       // Noise XX handshake complete, session keys derived.
       // Now, exchange libp2p handshake payload over the encrypted channel.
@@ -153,7 +161,11 @@ class NoiseSecurity implements SecurityProtocol {
       _log.finer('NoiseSecurity.secureOutbound: Libp2p handshake payload processed. Finalizing SecuredConnection with pattern keys:');
       _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
       _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
+      _log.finer('  - tempSecuredConn nonces: send=${tempSecuredConn.currentSendNonce}, recv=${tempSecuredConn.currentRecvNonce}');
       
+      // CRITICAL: Continue nonces from tempSecuredConn to prevent nonce reuse!
+      // The tempSecuredConn used nonces 0, 1, 2... during handshake payload exchange.
+      // The final SecuredConnection must continue from where tempSecuredConn left off.
       return SecuredConnection(
         connection,
         pattern.sendKey,
@@ -161,6 +173,8 @@ class NoiseSecurity implements SecurityProtocol {
         establishedRemotePeer: remotePeerId,
         establishedRemotePublicKey: remoteLibp2pPublicKey,
         securityProtocolId: _protocolString,
+        initialSendNonce: tempSecuredConn.currentSendNonce,
+        initialRecvNonce: tempSecuredConn.currentRecvNonce,
       );
     } catch (e) {
       await connection.close();
@@ -177,9 +191,17 @@ class NoiseSecurity implements SecurityProtocol {
       final staticKey = await crypto.X25519().newKeyPair();
       final pattern = await NoiseXXPattern.create(false, staticKey);
 
-      await pattern.readMessage(await connection.read(32)); // <- e
-      await connection.write(await pattern.writeMessage(Uint8List(0))); // -> e, ee, s, es
-      await pattern.readMessage(await connection.read(48)); // <- s, se
+      final msg1Raw = await connection.read(32); // <- e
+      _log.info('NoiseSecurity.secureInbound: Read msg1 (e): expected 32, got ${msg1Raw.length} bytes');
+      await pattern.readMessage(msg1Raw);
+      
+      final msg2 = await pattern.writeMessage(Uint8List(0)); // -> e, ee, s, es
+      _log.info('NoiseSecurity.secureInbound: Writing msg2 (e,ee,s,es): ${msg2.length} bytes');
+      await connection.write(msg2);
+      
+      final msg3Raw = await connection.read(48); // <- s, se
+      _log.info('NoiseSecurity.secureInbound: Read msg3 (s,se): expected 48, got ${msg3Raw.length} bytes');
+      await pattern.readMessage(msg3Raw);
 
       // Noise XX handshake complete. Exchange libp2p handshake payload.
       // ADDED LOGGING
@@ -226,7 +248,11 @@ class NoiseSecurity implements SecurityProtocol {
       _log.finer('NoiseSecurity.secureInbound: Libp2p handshake payload processed. Finalizing SecuredConnection with pattern keys:');
       _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
       _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
+      _log.finer('  - tempSecuredConn nonces: send=${tempSecuredConn.currentSendNonce}, recv=${tempSecuredConn.currentRecvNonce}');
 
+      // CRITICAL: Continue nonces from tempSecuredConn to prevent nonce reuse!
+      // The tempSecuredConn used nonces 0, 1, 2... during handshake payload exchange.
+      // The final SecuredConnection must continue from where tempSecuredConn left off.
       return SecuredConnection(
         connection,
         pattern.sendKey,
@@ -234,6 +260,8 @@ class NoiseSecurity implements SecurityProtocol {
         establishedRemotePeer: remotePeerId,
         establishedRemotePublicKey: remoteLibp2pPublicKey,
         securityProtocolId: _protocolString,
+        initialSendNonce: tempSecuredConn.currentSendNonce,
+        initialRecvNonce: tempSecuredConn.currentRecvNonce,
       );
     } catch (e) {
       await connection.close();

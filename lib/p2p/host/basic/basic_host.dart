@@ -1037,6 +1037,17 @@ class BasicHost implements Host {
       // the peer may have gone offline or be unreachable.
       final totalTime = DateTime.now().difference(startTime);
       _log.warning('⏱️ [DIAL-PEER-TIMEOUT] Identify timed out for ${p.toString()} after ${totalTime.inMilliseconds}ms: $e');
+      
+      // CRITICAL: Remove the stale connection to prevent persistent failure loops.
+      // Without this, subsequent newStream calls would reuse the dead connection
+      // and timeout again, creating a 30-second delay on every operation.
+      try {
+        _log.warning('🗑️ [DIAL-PEER-TIMEOUT] Removing stale connection to ${p.toString()}');
+        await _network.closePeer(p);
+      } catch (closeError) {
+        _log.warning('⚠️ [DIAL-PEER-TIMEOUT] Error closing stale connection: $closeError');
+      }
+      
       // Rethrow the typed exception so callers can handle it appropriately
       throw IdentifyTimeoutException(
         peerId: p,
@@ -1164,6 +1175,17 @@ class BasicHost implements Host {
       final totalTime = DateTime.now().difference(startTime);
       _log.warning('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
       await stream.reset();
+      
+      // CRITICAL: Remove the stale connection to prevent persistent failure loops.
+      // The identify timeout indicates the connection is dead - keeping it would
+      // cause repeated 30-second timeouts on subsequent operations.
+      try {
+        _log.warning('🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}');
+        await _network.closePeer(p);
+      } catch (closeError) {
+        _log.warning('⚠️ [newStream Phase 3] Error closing stale connection: $closeError');
+      }
+      
       rethrow;
     } on IdentifyException catch (e) {
       final totalTime = DateTime.now().difference(startTime);

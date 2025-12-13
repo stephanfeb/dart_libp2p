@@ -617,8 +617,905 @@ void main() {
       }, timeout: Timeout(Duration(seconds: 60)));
     });
 
+    group('FIN Handling: closeWrite() Half-Close Semantics', () {
+      test('should allow reading all data after sender calls closeWrite()', () async {
+        print('\n🧪 TEST FIN-1: closeWrite() should not break pending reads');
+        print('   Goal: Verify that closeWrite() allows receiver to read all buffered data');
+        
+        late UDXTransport clientTransport;
+        late UDXTransport serverTransport;
+        late Listener listener;
+        late TransportConn clientRawConn;
+        late TransportConn serverRawConn;
+        late YamuxSession clientSession;
+        late YamuxSession serverSession;
+        late YamuxStream clientStream;
+        late YamuxStream serverStream;
+
+        try {
+          // Setup UDX transports
+          final connManager = NullConnMgr();
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          // Setup listener
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+          print('   Server listening on: $actualListenAddr');
+
+          // Establish raw UDX connections
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Create Yamux sessions
+          final yamuxConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 1024 * 1024,
+            initialStreamWindowSize: 256 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+
+          clientSession = YamuxSession(clientRawConn, yamuxConfig, true);
+          serverSession = YamuxSession(serverRawConn, yamuxConfig, false);
+          await Future.delayed(Duration(milliseconds: 200));
+
+          // Setup stream handling
+          final serverStreamCompleter = Completer<YamuxStream>();
+          serverSession.setStreamHandler((stream) async {
+            serverStream = stream as YamuxStream;
+            if (!serverStreamCompleter.isCompleted) {
+              serverStreamCompleter.complete(serverStream);
+            }
+          });
+
+          // Open client stream
+          clientStream = await clientSession.openStream(core_context.Context()) as YamuxStream;
+          await serverStreamCompleter.future;
+          print('   ✅ Streams established');
+
+          // Test scenario: Write large data, then closeWrite(), then read
+          print('   📤 Writing 64KB of data...');
+          final testData = Uint8List(64 * 1024);
+          for (var i = 0; i < testData.length; i++) {
+            testData[i] = i % 256;
+          }
+          
+          // Write data in chunks (simulating real usage)
+          const chunkSize = 8192;
+          for (var i = 0; i < testData.length; i += chunkSize) {
+            final end = (i + chunkSize > testData.length) ? testData.length : i + chunkSize;
+            await clientStream.write(testData.sublist(i, end));
+          }
+          print('   ✅ Data written');
+
+          // Small delay to ensure data is in transit
+          await Future.delayed(Duration(milliseconds: 50));
+
+          // Call closeWrite() - this is the critical test
+          print('   🔒 Calling closeWrite() on sender stream...');
+          await clientStream.closeWrite();
+          print('   ✅ closeWrite() completed');
+
+          // Now read all data on the receiver side
+          print('   📥 Reading data after closeWrite()...');
+          final receivedData = <int>[];
+          var readAttempts = 0;
+          
+          while (receivedData.length < testData.length && readAttempts < 100) {
+            readAttempts++;
+            final chunk = await serverStream.read().timeout(Duration(seconds: 5));
+            
+            if (chunk.isEmpty) {
+              print('   📭 Received EOF after ${receivedData.length} bytes');
+              break;
+            }
+            
+            receivedData.addAll(chunk);
+            if (readAttempts % 5 == 0) {
+              print('   📈 Progress: ${receivedData.length}/${testData.length} bytes');
+            }
+          }
+
+          // Verify all data was received
+          print('   🔍 Verifying data integrity...');
+          expect(
+            receivedData.length, 
+            equals(testData.length),
+            reason: 'Should receive all ${testData.length} bytes, got ${receivedData.length}',
+          );
+          expect(
+            Uint8List.fromList(receivedData), 
+            equals(testData),
+            reason: 'Received data should match sent data',
+          );
+          
+          print('   ✅ FIN-1 test PASSED - closeWrite() allows complete data transfer');
+
+        } catch (e, stackTrace) {
+          print('   ❌ FIN-1 test FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          rethrow;
+        } finally {
+          print('   🧹 Cleaning up FIN-1 test...');
+          try {
+            if (clientStream != null && !clientStream.isClosed) {
+              await clientStream.close().timeout(Duration(seconds: 2));
+            }
+            if (serverStream != null && !serverStream.isClosed) {
+              await serverStream.close().timeout(Duration(seconds: 2));
+            }
+            if (clientSession != null && !clientSession.isClosed) {
+              await clientSession.close().timeout(Duration(seconds: 2));
+            }
+            if (serverSession != null && !serverSession.isClosed) {
+              await serverSession.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            await clientTransport.dispose();
+            await serverTransport.dispose();
+          } catch (e) {
+            print('   ⚠️ Error during FIN-1 cleanup: $e');
+          }
+        }
+      }, timeout: Timeout(Duration(seconds: 30)));
+
+      test('should return EOF (not error) when reading after FIN received', () async {
+        print('\n🧪 TEST FIN-2: Read after FIN should return EOF, not error');
+        print('   Goal: Verify that read() returns empty Uint8List after FIN, not StateError');
+        
+        late UDXTransport clientTransport;
+        late UDXTransport serverTransport;
+        late Listener listener;
+        late TransportConn clientRawConn;
+        late TransportConn serverRawConn;
+        late YamuxSession clientSession;
+        late YamuxSession serverSession;
+        late YamuxStream clientStream;
+        late YamuxStream serverStream;
+
+        try {
+          // Setup UDX transports
+          final connManager = NullConnMgr();
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          // Setup listener
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+
+          // Establish connections
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Create Yamux sessions
+          final yamuxConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 256 * 1024,
+            initialStreamWindowSize: 64 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+
+          clientSession = YamuxSession(clientRawConn, yamuxConfig, true);
+          serverSession = YamuxSession(serverRawConn, yamuxConfig, false);
+          await Future.delayed(Duration(milliseconds: 200));
+
+          // Setup stream handling
+          final serverStreamCompleter = Completer<YamuxStream>();
+          serverSession.setStreamHandler((stream) async {
+            serverStream = stream as YamuxStream;
+            if (!serverStreamCompleter.isCompleted) {
+              serverStreamCompleter.complete(serverStream);
+            }
+          });
+
+          // Open client stream
+          clientStream = await clientSession.openStream(core_context.Context()) as YamuxStream;
+          await serverStreamCompleter.future;
+          print('   ✅ Streams established');
+
+          // Write some data and then closeWrite
+          print('   📤 Writing small data packet...');
+          final testData = Uint8List.fromList([1, 2, 3, 4, 5]);
+          await clientStream.write(testData);
+          
+          // Call closeWrite
+          print('   🔒 Calling closeWrite()...');
+          await clientStream.closeWrite();
+          
+          // Small delay to ensure FIN is transmitted
+          await Future.delayed(Duration(milliseconds: 100));
+
+          // Read the data
+          print('   📥 Reading data...');
+          final receivedData = await serverStream.read().timeout(Duration(seconds: 5));
+          expect(receivedData, equals(testData), reason: 'First read should return the data');
+          print('   ✅ First read returned ${receivedData.length} bytes');
+
+          // Read again - should return EOF (empty), NOT throw an error
+          print('   📥 Reading again (expecting EOF)...');
+          try {
+            final eofData = await serverStream.read().timeout(Duration(seconds: 5));
+            expect(eofData.isEmpty, isTrue, reason: 'Second read after FIN should return empty (EOF)');
+            print('   ✅ Second read returned EOF (empty Uint8List) as expected');
+          } on StateError catch (e) {
+            fail('Read after FIN should return EOF, not throw StateError: $e');
+          }
+          
+          print('   ✅ FIN-2 test PASSED - Read returns EOF after FIN');
+
+        } catch (e, stackTrace) {
+          print('   ❌ FIN-2 test FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          rethrow;
+        } finally {
+          print('   🧹 Cleaning up FIN-2 test...');
+          try {
+            if (clientStream != null && !clientStream.isClosed) {
+              await clientStream.close().timeout(Duration(seconds: 2));
+            }
+            if (serverStream != null && !serverStream.isClosed) {
+              await serverStream.close().timeout(Duration(seconds: 2));
+            }
+            if (clientSession != null && !clientSession.isClosed) {
+              await clientSession.close().timeout(Duration(seconds: 2));
+            }
+            if (serverSession != null && !serverSession.isClosed) {
+              await serverSession.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            await clientTransport.dispose();
+            await serverTransport.dispose();
+          } catch (e) {
+            print('   ⚠️ Error during FIN-2 cleanup: $e');
+          }
+        }
+      }, timeout: Timeout(Duration(seconds: 30)));
+
+      test('should handle pending read when FIN arrives', () async {
+        print('\n🧪 TEST FIN-3: Pending read when FIN arrives');
+        print('   Goal: Verify that a read() blocked waiting for data handles FIN gracefully');
+        
+        late UDXTransport clientTransport;
+        late UDXTransport serverTransport;
+        late Listener listener;
+        late TransportConn clientRawConn;
+        late TransportConn serverRawConn;
+        late YamuxSession clientSession;
+        late YamuxSession serverSession;
+        late YamuxStream clientStream;
+        late YamuxStream serverStream;
+
+        try {
+          // Setup UDX transports
+          final connManager = NullConnMgr();
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          // Setup listener
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+
+          // Establish connections
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Create Yamux sessions
+          final yamuxConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 256 * 1024,
+            initialStreamWindowSize: 64 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+
+          clientSession = YamuxSession(clientRawConn, yamuxConfig, true);
+          serverSession = YamuxSession(serverRawConn, yamuxConfig, false);
+          await Future.delayed(Duration(milliseconds: 200));
+
+          // Setup stream handling
+          final serverStreamCompleter = Completer<YamuxStream>();
+          serverSession.setStreamHandler((stream) async {
+            serverStream = stream as YamuxStream;
+            if (!serverStreamCompleter.isCompleted) {
+              serverStreamCompleter.complete(serverStream);
+            }
+          });
+
+          // Open client stream
+          clientStream = await clientSession.openStream(core_context.Context()) as YamuxStream;
+          await serverStreamCompleter.future;
+          print('   ✅ Streams established');
+
+          // Start a read on the server side BEFORE any data is sent
+          // This creates a pending read that will be waiting when FIN arrives
+          print('   📥 Starting read() that will block waiting for data...');
+          final readFuture = serverStream.read().timeout(
+            Duration(seconds: 10),
+            onTimeout: () => throw TimeoutException('Read timed out'),
+          );
+
+          // Small delay to ensure read is blocking
+          await Future.delayed(Duration(milliseconds: 100));
+
+          // Now send data and closeWrite
+          print('   📤 Writing data while read is pending...');
+          final testData = Uint8List.fromList(List.generate(1000, (i) => i % 256));
+          await clientStream.write(testData);
+          
+          print('   🔒 Calling closeWrite()...');
+          await clientStream.closeWrite();
+
+          // The pending read should complete with the data, NOT error
+          print('   ⏳ Waiting for pending read to complete...');
+          try {
+            final receivedData = await readFuture;
+            print('   ✅ Pending read completed with ${receivedData.length} bytes');
+            expect(receivedData.isNotEmpty, isTrue, reason: 'Should receive data, not empty');
+            expect(receivedData, equals(testData), reason: 'Should receive the sent data');
+          } on StateError catch (e) {
+            fail('Pending read should complete with data, not throw StateError: $e');
+          }
+
+          print('   ✅ FIN-3 test PASSED - Pending reads handle FIN gracefully');
+
+        } catch (e, stackTrace) {
+          print('   ❌ FIN-3 test FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          rethrow;
+        } finally {
+          print('   🧹 Cleaning up FIN-3 test...');
+          try {
+            if (clientStream != null && !clientStream.isClosed) {
+              await clientStream.close().timeout(Duration(seconds: 2));
+            }
+            if (serverStream != null && !serverStream.isClosed) {
+              await serverStream.close().timeout(Duration(seconds: 2));
+            }
+            if (clientSession != null && !clientSession.isClosed) {
+              await clientSession.close().timeout(Duration(seconds: 2));
+            }
+            if (serverSession != null && !serverSession.isClosed) {
+              await serverSession.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            await clientTransport.dispose();
+            await serverTransport.dispose();
+          } catch (e) {
+            print('   ⚠️ Error during FIN-3 cleanup: $e');
+          }
+        }
+      }, timeout: Timeout(Duration(seconds: 30)));
+    });
+
+    group('Noise Encryption State: Multiple Sequential Messages', () {
+      test('should handle 100 sequential framed messages (1KB each) over Noise without MAC errors', () async {
+        print('\n🧪 TEST NOISE-1: Multiple Sequential Framed Messages Over Noise');
+        print('   Goal: Replicate Ricochet pattern - many small messages vs one large blob');
+        print('   Hypothesis: MAC errors occur when Noise encryption state desyncs during rapid sequential writes');
+        
+        late UDXTransport clientTransport;
+        late UDXTransport serverTransport;
+        late BasicUpgrader clientUpgrader;
+        late BasicUpgrader serverUpgrader;
+        late p2p_config.Config clientP2PConfig;
+        late p2p_config.Config serverP2PConfig;
+        late Listener listener;
+        late TransportConn clientRawConn;
+        late TransportConn serverRawConn;
+        late Conn clientUpgradedConn;
+        late Conn serverUpgradedConn;
+        late YamuxStream clientStream;
+        late YamuxStream serverStream;
+
+        try {
+          // Setup components
+          final resourceManager = NullResourceManager();
+          final connManager = NullConnMgr();
+
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          clientUpgrader = BasicUpgrader(resourceManager: resourceManager);
+          serverUpgrader = BasicUpgrader(resourceManager: resourceManager);
+
+          // Setup security protocols
+          final securityProtocolsClient = [await NoiseSecurity.create(clientKeyPair)];
+          final securityProtocolsServer = [await NoiseSecurity.create(serverKeyPair)];
+          
+          // Setup Yamux multiplexer
+          final yamuxMultiplexerConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 1024 * 1024,
+            initialStreamWindowSize: 256 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+          final muxerDefs = [_TestYamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
+
+          clientP2PConfig = p2p_config.Config()
+            ..peerKey = clientKeyPair
+            ..securityProtocols = securityProtocolsClient
+            ..muxers = muxerDefs;
+
+          serverP2PConfig = p2p_config.Config()
+            ..peerKey = serverKeyPair
+            ..securityProtocols = securityProtocolsServer
+            ..muxers = muxerDefs;
+
+          // Setup listener
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+          print('   Server listening on: $actualListenAddr');
+
+          // Establish raw UDX connections
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Upgrade connections with Noise + Yamux
+          print('   🔐 Upgrading connections with Noise + Yamux...');
+          final clientUpgradedFuture = clientUpgrader.upgradeOutbound(
+            connection: clientRawConn,
+            remotePeerId: serverPeerId,
+            config: clientP2PConfig,
+            remoteAddr: actualListenAddr,
+          );
+          final serverUpgradedFuture = serverUpgrader.upgradeInbound(
+            connection: serverRawConn,
+            config: serverP2PConfig,
+          );
+
+          final List<Conn> upgradedConns = await Future.wait([clientUpgradedFuture, serverUpgradedFuture]);
+          clientUpgradedConn = upgradedConns[0];
+          serverUpgradedConn = upgradedConns[1];
+          print('   ✅ Connections upgraded with Noise + Yamux');
+
+          // Setup stream handling
+          final serverAcceptStreamFuture = (serverUpgradedConn as core_mux_types.MuxedConn).acceptStream().then((stream) { 
+            serverStream = stream as YamuxStream;
+            return serverStream;
+          });
+
+          await Future.delayed(Duration(milliseconds: 100));
+
+          // Open client stream
+          clientStream = await (clientUpgradedConn as core_mux_types.MuxedConn).openStream(core_context.Context()) as YamuxStream;
+          
+          await serverAcceptStreamFuture;
+          expect(clientStream, isNotNull);
+          expect(serverStream, isNotNull);
+          print('   ✅ Yamux streams established over Noise');
+
+          // Test multiple sequential framed messages
+          print('   🚀 Starting test: 100 framed messages (1KB each)...');
+          const messageCount = 100;
+          const messageSize = 1024;
+          
+          // Server writes 100 framed messages rapidly
+          print('   📤 Server writing $messageCount framed messages...');
+          final writeCompleter = Completer<void>();
+          Future.microtask(() async {
+            try {
+              for (int i = 0; i < messageCount; i++) {
+                // Create test message
+                final messageData = Uint8List(messageSize);
+                for (var j = 0; j < messageSize; j++) {
+                  messageData[j] = (i + j) % 256;
+                }
+                
+                // Frame the message (length-prefix, like Ricochet does)
+                final lengthBytes = ByteData(4)..setUint32(0, messageData.length, Endian.big);
+                await serverStream.write(lengthBytes.buffer.asUint8List());
+                await serverStream.write(messageData);
+                
+                // NO DELAY - write rapidly like Ricochet does
+                
+                if ((i + 1) % 20 == 0) {
+                  print('   📤 Server wrote ${i + 1}/$messageCount messages');
+                }
+              }
+              print('   ✅ Server wrote all $messageCount framed messages');
+              writeCompleter.complete();
+            } catch (e, stackTrace) {
+              print('   ❌ Server write failed: $e');
+              print('   Stack trace: $stackTrace');
+              writeCompleter.completeError(e);
+            }
+          });
+          
+          // Client reads all 100 framed messages
+          print('   📥 Client reading framed messages...');
+          final receivedMessages = <Uint8List>[];
+          try {
+            for (int i = 0; i < messageCount; i++) {
+              // Read length prefix (4 bytes)
+              final lengthBytes = await _readExact(clientStream, 4);
+              final length = ByteData.view(lengthBytes.buffer).getUint32(0, Endian.big);
+              
+              // Read message body
+              final messageData = await _readExact(clientStream, length);
+              receivedMessages.add(messageData);
+              
+              if ((i + 1) % 20 == 0) {
+                print('   📥 Client received ${i + 1}/$messageCount messages');
+              }
+            }
+            
+            print('   ✅ Client received all $messageCount messages');
+          } catch (e, stackTrace) {
+            print('   ❌ Client read failed after ${receivedMessages.length} messages: $e');
+            print('   Stack trace: $stackTrace');
+            
+            // Check if it's a MAC error (the hypothesis we're testing)
+            final errorString = e.toString().toLowerCase();
+            if (errorString.contains('mac') || errorString.contains('authentication')) {
+              print('   🔍 HYPOTHESIS CONFIRMED: MAC/Authentication error during sequential messages!');
+              print('   🔍 This indicates Noise encryption state desynchronization');
+            }
+            
+            rethrow;
+          }
+          
+          // Wait for writes to complete
+          await writeCompleter.future.timeout(Duration(seconds: 30));
+          
+          // Verify all messages received
+          expect(receivedMessages.length, equals(messageCount),
+              reason: 'Should receive all $messageCount messages');
+          
+          // Verify message content integrity
+          for (int i = 0; i < messageCount; i++) {
+            final expected = Uint8List(messageSize);
+            for (var j = 0; j < messageSize; j++) {
+              expected[j] = (i + j) % 256;
+            }
+            expect(receivedMessages[i], equals(expected),
+                reason: 'Message $i content should match');
+          }
+          
+          print('   ✅ NOISE-1 test PASSED - No MAC errors with sequential messages');
+
+        } catch (e, stackTrace) {
+          print('   ❌ NOISE-1 test FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          
+          // Check if it's the MAC error we're investigating
+          final errorString = e.toString().toLowerCase();
+          if (errorString.contains('mac') || errorString.contains('authentication')) {
+            print('\n   🔍 CRITICAL FINDING: MAC authentication error detected!');
+            print('   🔍 This confirms the hypothesis: Noise encryption state desyncs during rapid sequential writes');
+            print('   🔍 Root cause is likely in Noise nonce/counter management during buffered writes');
+          }
+          
+          rethrow;
+        } finally {
+          // Cleanup
+          print('   🧹 Cleaning up NOISE-1 test...');
+          try {
+            if (clientStream != null && !clientStream.isClosed) {
+              await clientStream.close().timeout(Duration(seconds: 2));
+            }
+            if (serverStream != null && !serverStream.isClosed) {
+              await serverStream.close().timeout(Duration(seconds: 2));
+            }
+            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+              await clientUpgradedConn.close().timeout(Duration(seconds: 2));
+            }
+            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+              await serverUpgradedConn.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            await clientTransport.dispose();
+            await serverTransport.dispose();
+          } catch (e) {
+            print('   ⚠️ Error during NOISE-1 cleanup: $e');
+          }
+          print('   ✅ NOISE-1 cleanup complete');
+        }
+      }, timeout: Timeout(Duration(minutes: 2)));
+
+      test('should maintain Noise encryption state across rapid vs delayed writes', () async {
+        print('\n🧪 TEST NOISE-2: Rapid vs Delayed Writes Comparison');
+        print('   Goal: Compare behavior of writes with delays vs without delays');
+        print('   Hypothesis: Rapid writes without delays cause Noise state desync');
+        
+        late UDXTransport clientTransport;
+        late UDXTransport serverTransport;
+        late BasicUpgrader clientUpgrader;
+        late BasicUpgrader serverUpgrader;
+        late p2p_config.Config clientP2PConfig;
+        late p2p_config.Config serverP2PConfig;
+        late Listener listener;
+        late TransportConn clientRawConn;
+        late TransportConn serverRawConn;
+        late Conn clientUpgradedConn;
+        late Conn serverUpgradedConn;
+
+        try {
+          // Setup components (same as previous test)
+          final resourceManager = NullResourceManager();
+          final connManager = NullConnMgr();
+
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          clientUpgrader = BasicUpgrader(resourceManager: resourceManager);
+          serverUpgrader = BasicUpgrader(resourceManager: resourceManager);
+
+          final securityProtocolsClient = [await NoiseSecurity.create(clientKeyPair)];
+          final securityProtocolsServer = [await NoiseSecurity.create(serverKeyPair)];
+          
+          final yamuxMultiplexerConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 1024 * 1024,
+            initialStreamWindowSize: 256 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+          final muxerDefs = [_TestYamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
+
+          clientP2PConfig = p2p_config.Config()
+            ..peerKey = clientKeyPair
+            ..securityProtocols = securityProtocolsClient
+            ..muxers = muxerDefs;
+
+          serverP2PConfig = p2p_config.Config()
+            ..peerKey = serverKeyPair
+            ..securityProtocols = securityProtocolsServer
+            ..muxers = muxerDefs;
+
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+          print('   Server listening on: $actualListenAddr');
+
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          print('   🔐 Upgrading connections with Noise + Yamux...');
+          final clientUpgradedFuture = clientUpgrader.upgradeOutbound(
+            connection: clientRawConn,
+            remotePeerId: serverPeerId,
+            config: clientP2PConfig,
+            remoteAddr: actualListenAddr,
+          );
+          final serverUpgradedFuture = serverUpgrader.upgradeInbound(
+            connection: serverRawConn,
+            config: serverP2PConfig,
+          );
+
+          final List<Conn> upgradedConns = await Future.wait([clientUpgradedFuture, serverUpgradedFuture]);
+          clientUpgradedConn = upgradedConns[0];
+          serverUpgradedConn = upgradedConns[1];
+          print('   ✅ Connections upgraded with Noise + Yamux');
+
+          // Test data
+          final testData = Uint8List(1024);
+          for (var i = 0; i < testData.length; i++) {
+            testData[i] = i % 256;
+          }
+
+          // Scenario A: Sequential writes WITH delays (should work)
+          print('\n   🧪 Scenario A: 50 writes WITH 10ms delays between writes');
+          {
+            final serverAcceptStreamFuture = (serverUpgradedConn as core_mux_types.MuxedConn).acceptStream();
+            await Future.delayed(Duration(milliseconds: 50));
+            final clientStream = await (clientUpgradedConn as core_mux_types.MuxedConn).openStream(core_context.Context()) as YamuxStream;
+            final serverStream = await serverAcceptStreamFuture as YamuxStream;
+            
+            // Write with delays
+            Future.microtask(() async {
+              for (int i = 0; i < 50; i++) {
+                await serverStream.write(testData);
+                await Future.delayed(Duration(milliseconds: 10)); // Allow read to drain
+                
+                if ((i + 1) % 10 == 0) {
+                  print('   📤 Scenario A: Wrote ${i + 1}/50 messages');
+                }
+              }
+            });
+            
+            // Read all
+            int receivedCount = 0;
+            int totalBytes = 0;
+            try {
+              while (receivedCount < 50) {
+                final chunk = await clientStream.read().timeout(Duration(seconds: 30));
+                if (chunk.isEmpty) break;
+                totalBytes += chunk.length;
+                receivedCount = totalBytes ~/ testData.length;
+                
+                if (receivedCount % 10 == 0 && receivedCount > 0) {
+                  print('   📥 Scenario A: Received ~$receivedCount messages');
+                }
+              }
+              print('   ✅ Scenario A PASSED: Received ~$receivedCount messages (${totalBytes} bytes)');
+            } catch (e) {
+              print('   ❌ Scenario A FAILED: $e');
+              rethrow;
+            } finally {
+              await clientStream.close();
+              await serverStream.close();
+            }
+          }
+
+          // Small delay between scenarios
+          await Future.delayed(Duration(milliseconds: 500));
+
+          // Scenario B: Rapid sequential writes WITHOUT delays (may fail if Noise state issue)
+          print('\n   🧪 Scenario B: 50 writes WITHOUT delays (rapid fire)');
+          {
+            final serverAcceptStreamFuture = (serverUpgradedConn as core_mux_types.MuxedConn).acceptStream();
+            await Future.delayed(Duration(milliseconds: 50));
+            final clientStream = await (clientUpgradedConn as core_mux_types.MuxedConn).openStream(core_context.Context()) as YamuxStream;
+            final serverStream = await serverAcceptStreamFuture as YamuxStream;
+            
+            // Write rapidly without delays
+            Future.microtask(() async {
+              try {
+                for (int i = 0; i < 50; i++) {
+                  await serverStream.write(testData);
+                  // NO DELAY - this is the critical test
+                  
+                  if ((i + 1) % 10 == 0) {
+                    print('   📤 Scenario B: Wrote ${i + 1}/50 messages');
+                  }
+                }
+                print('   ✅ Scenario B: All writes completed');
+              } catch (e) {
+                print('   ❌ Scenario B: Write failed: $e');
+              }
+            });
+            
+            // Read all
+            int receivedCount = 0;
+            int totalBytes = 0;
+            try {
+              while (receivedCount < 50) {
+                final chunk = await clientStream.read().timeout(Duration(seconds: 30));
+                if (chunk.isEmpty) break;
+                totalBytes += chunk.length;
+                receivedCount = totalBytes ~/ testData.length;
+                
+                if (receivedCount % 10 == 0 && receivedCount > 0) {
+                  print('   📥 Scenario B: Received ~$receivedCount messages');
+                }
+              }
+              
+              if (receivedCount < 50) {
+                print('   ⚠️  Scenario B: Only received $receivedCount/50 messages (${totalBytes} bytes)');
+                print('   🔍 This suggests data loss or stream closure during rapid writes');
+              } else {
+                print('   ✅ Scenario B PASSED: Received all ~$receivedCount messages (${totalBytes} bytes)');
+              }
+              
+            } catch (e) {
+              print('   ❌ Scenario B FAILED after $receivedCount messages: $e');
+              
+              final errorString = e.toString().toLowerCase();
+              if (errorString.contains('mac') || errorString.contains('authentication')) {
+                print('   🔍 CRITICAL: MAC error in rapid writes but not delayed writes!');
+                print('   🔍 This confirms timing-dependent Noise encryption state issue');
+              }
+              
+              rethrow;
+            } finally {
+              await clientStream.close();
+              await serverStream.close();
+            }
+          }
+
+          print('\n   ✅ NOISE-2 test PASSED - Both scenarios completed');
+
+        } catch (e, stackTrace) {
+          print('   ❌ NOISE-2 test FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          rethrow;
+        } finally {
+          print('   🧹 Cleaning up NOISE-2 test...');
+          try {
+            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+              await clientUpgradedConn.close().timeout(Duration(seconds: 2));
+            }
+            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+              await serverUpgradedConn.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            await clientTransport.dispose();
+            await serverTransport.dispose();
+          } catch (e) {
+            print('   ⚠️ Error during NOISE-2 cleanup: $e');
+          }
+          print('   ✅ NOISE-2 cleanup complete');
+        }
+      }, timeout: Timeout(Duration(minutes: 2)));
+    });
 
   });
+}
+
+// Helper function to read exact number of bytes from a stream
+Future<Uint8List> _readExact(YamuxStream stream, int length) async {
+  final buffer = <int>[];
+  while (buffer.length < length) {
+    final chunk = await stream.read().timeout(Duration(seconds: 10));
+    if (chunk.isEmpty) {
+      throw StateError('Stream closed before reading $length bytes (got ${buffer.length})');
+    }
+    buffer.addAll(chunk);
+  }
+  
+  if (buffer.length > length) {
+    // Return exact length, keep the rest in the stream (though this shouldn't happen with framed messages)
+    return Uint8List.fromList(buffer.sublist(0, length));
+  }
+  
+  return Uint8List.fromList(buffer);
 }
 
 // Helper function to test large payload transfer over Yamux streams

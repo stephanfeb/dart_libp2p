@@ -192,6 +192,11 @@ class Entry {
   /// Completer for the identify wait operation
   Completer<void>? identifyWaitCompleter;
 
+  /// Whether identify has completed successfully for this connection.
+  /// When true, subsequent calls to identifyWait will return immediately
+  /// without re-running the identify protocol.
+  bool identifySucceeded = false;
+
   /// Push support status for the peer
   IdentifyPushSupport pushSupport = IdentifyPushSupport.unknown;
 
@@ -1441,6 +1446,14 @@ class IdentifyService implements IDService {
       var entry = _conns[conn];
 
       if (entry != null) {
+        // OPTIMIZATION: If identify already succeeded for this connection, return immediately.
+        // This prevents re-running identify on every newStream call, which would cause
+        // 30-second timeouts when the connection is stale.
+        if (entry.identifySucceeded) {
+          _log.fine(' [IDENTIFY-WAIT-ALREADY-SUCCEEDED] Peer $peerId already identified on this connection, skipping');
+          // completerToAwait remains null, so function will return immediately
+          return;
+        }
 
         if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
 
@@ -1527,6 +1540,10 @@ class IdentifyService implements IDService {
 
     _identifyConn(conn).then((_) {
       final duration = DateTime.now().difference(spawnStart);
+
+      // Mark identify as succeeded - subsequent calls to identifyWait will skip re-identification
+      entry.identifySucceeded = true;
+      _log.fine(' [SPAWN-IDENTIFY-SUCCESS] Identify succeeded for peer=$peerId, duration=${duration.inMilliseconds}ms');
 
       if (!entry.identifyWaitCompleter!.isCompleted) {
 

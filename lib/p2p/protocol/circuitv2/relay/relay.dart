@@ -474,6 +474,11 @@ Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
         if (controller.isClosed) break;
         print('[Relay] Reading chunk from P2PStream...');
         final data = await p2pStream.read();
+        if (data.isEmpty) {
+          // EOF received - close the controller gracefully
+          print('[Relay] Received EOF, closing stream controller');
+          break;
+        }
         print('[Relay] Read ${data.length} bytes, adding to controller...');
         controller.add(data);
       }

@@ -45,24 +45,19 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Constructor: udxStreamId=${udxStream.id}, direction=$_direction');
     _udxStreamDataSubscription = _udxStream.data.listen(
             (data) {
-          _logger.fine('[UDXP2PStreamAdapter ${id()}] _udxStream.data listener received ${data.length} bytes.');
-          if (_pendingReadCompleter != null && !_pendingReadCompleter!.isCompleted) {
-            _logger.fine('[UDXP2PStreamAdapter ${id()}] Completing pending read with ${data.length} bytes.');
-            _pendingReadCompleter!.complete(data);
-            _pendingReadCompleter = null; // Consume the completer
-          } else if (!_incomingDataController.isClosed) { // Fallback to controller/buffer if no pending read
-            _logger.fine('[UDXP2PStreamAdapter ${id()}] No pending read, adding ${data.length} bytes to _readBuffer (via _incomingDataController).');
-            // We'll add to _readBuffer directly now, _incomingDataController might be removed if not used by .stream getter
-            _readBuffer.add(data);
-            // If .stream getter is vital, can still add to controller too, or rethink .stream
-            if (!_incomingDataController.isClosed) _incomingDataController.add(data);
-
+          // CRITICAL: Check and null out the completer atomically to prevent
+          // race condition where UDX delivers multiple data events synchronously
+          // before we can set _pendingReadCompleter to null.
+          final completerToComplete = _pendingReadCompleter;
+          if (completerToComplete != null && !completerToComplete.isCompleted) {
+            // Immediately null out the completer to prevent double-completion
+            _pendingReadCompleter = null;
+            print('[UDX ${id()}] ✅ COMPLETING pending read with ${data.length}B');
+            completerToComplete.complete(data);
           } else {
-            _logger.fine('[UDXP2PStreamAdapter ${id()}] No pending read and _incomingDataController is closed. Data might be lost or handled by buffer.');
-            // If controller is closed, but stream isn't, buffer it.
-            if (!_isClosed) {
-              _readBuffer.add(data);
-            }
+            print('[UDX ${id()}] 📦 BUFFERING ${data.length}B');
+            _readBuffer.add(data);
+            if (!_incomingDataController.isClosed) _incomingDataController.add(data);
           }
           _parentConn.notifyActivity();
         },
@@ -131,44 +126,38 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
 
   @override
   Future<Uint8List> read([int? maxLength]) async {
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] read called. maxLength: $maxLength, isClosed: $_isClosed, buffer: ${_readBuffer.length}, pendingRead: ${_pendingReadCompleter != null}');
+    print('[UDX ${id()}] 📖 read($maxLength), buf=${_readBuffer.length}, bufSizes=${_readBuffer.map((c) => c.length).toList()}');
 
     if (_isClosed && _readBuffer.isEmpty) {
-      _logger.fine('[UDXP2PStreamAdapter ${id()}] Stream closed and buffer empty. Returning EOF.');
+      _logger.info('[UDXP2PStreamAdapter ${id()}] ⏹️ Stream closed and buffer empty. Returning EOF.');
       return Uint8List(0);
     }
 
     if (_readBuffer.isNotEmpty) {
       final currentChunk = _readBuffer.removeAt(0);
       if (maxLength == null || currentChunk.length <= maxLength) {
-        _logger.fine('[UDXP2PStreamAdapter ${id()}] Consumed ${currentChunk.length} bytes from buffer.');
+        print('[UDX ${id()}] ✅ RETURN FULL CHUNK: ${currentChunk.length}B, buf=${_readBuffer.length}');
         return currentChunk;
       } else {
         final toReturn = currentChunk.sublist(0, maxLength);
         final remainder = currentChunk.sublist(maxLength);
         _readBuffer.insert(0, remainder);
-        _logger.fine('[UDXP2PStreamAdapter ${id()}] Consumed $maxLength bytes from buffer, remainder ${remainder.length} put back.');
+        print('[UDX ${id()}] ✅ RETURN PARTIAL: $maxLength of ${currentChunk.length}B, remainder=${remainder.length}, buf=${_readBuffer.length}');
         return toReturn;
       }
     }
 
-    // Buffer is empty, and stream is not closed (or if closed, there might still be a pending completer from data that arrived just before close)
+    // Buffer is empty, need to wait for data from UDX
     if (_pendingReadCompleter != null) {
-      // This should ideally not happen if completers are managed strictly (i.e., only one pending read).
-      // However, if it does, it means a read was called while another was already pending.
-      _logger.fine('[UDXP2PStreamAdapter ${id()}] Warning: Another read was already pending. This new read will also wait.');
-      // Fall through to create a new completer, the old one will be orphaned or error.
-      // A better approach might be to queue read requests, but for now, let's keep it simpler.
+      _logger.warning('[UDXP2PStreamAdapter ${id()}] Warning: Another read was already pending. This should not happen.');
     }
 
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Buffer empty, creating _pendingReadCompleter.');
     _pendingReadCompleter = Completer<Uint8List>();
 
     try {
-      // Timeout should be longer than keepalive interval to allow pings to keep connection alive
-      // With keepalive at 10s, this 35s timeout allows ~3 keepalive cycles before timeout
       final newData = await _pendingReadCompleter!.future.timeout(
-          const Duration(seconds: 35), // 3.5x keepalive interval (10s * 3.5)
+          const Duration(seconds: 35),
           onTimeout: () {
             _logger.fine('[UDXP2PStreamAdapter ${id()}] Read timeout after 35 seconds on _pendingReadCompleter.');
             if (_pendingReadCompleter?.isCompleted == false) {
@@ -177,30 +166,25 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
             throw TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35));
           }
       );
-      // _pendingReadCompleter is set to null by the listener when it completes it.
-      // Or it should be nulled here if completed by timeout error path, though throw happens first.
 
-      _logger.fine('[UDXP2PStreamAdapter ${id()}] Received ${newData.length} bytes via _pendingReadCompleter.');
+      print('[UDX ${id()}] ✅ AWAIT COMPLETED with ${newData.length}B, maxLength=$maxLength');
 
+      // CRITICAL FIX: If we got more bytes than requested, only return maxLength
+      // and buffer the remainder. This prevents framing desync in higher layers.
       if (maxLength == null || newData.length <= maxLength) {
         return newData;
       } else {
         final toReturn = newData.sublist(0, maxLength);
         final remainder = newData.sublist(maxLength);
-        _readBuffer.add(remainder); // Buffer the remainder
-        _logger.fine('[UDXP2PStreamAdapter ${id()}] Consumed $maxLength bytes from completer, remainder ${remainder.length} buffered.');
+        _readBuffer.insert(0, remainder); // Put remainder BACK at front of buffer
+        print('[UDX ${id()}] ✅ PARTIAL: returning $maxLength, buffering remainder ${remainder.length}');
         return toReturn;
       }
     } catch (e) {
       _logger.fine('[UDXP2PStreamAdapter ${id()}] Error awaiting _pendingReadCompleter: $e');
-      // Ensure completer is nulled if it was this read's completer that errored
-      if (_pendingReadCompleter?.isCompleted == false) {
-        // If error is not from the completer itself (e.g. future cancelled), complete it with error.
-        // _pendingReadCompleter!.completeError(e); // This might cause issues if already completing.
-      }
-      _pendingReadCompleter = null; // Nullify on error too
-      if (_isClosed && _readBuffer.isEmpty) return Uint8List(0); // EOF if closed
-      rethrow; // Rethrow the error (e.g., TimeoutException)
+      _pendingReadCompleter = null;
+      if (_isClosed && _readBuffer.isEmpty) return Uint8List(0);
+      rethrow;
     }
   }
 
