@@ -637,10 +637,27 @@ class Swarm implements Network {
         }
       }
       
-      // Clean up stale connections
+      // Clean up stale connections (validate protected ones by testing if still usable)
       if (staleConns.isNotEmpty) {
-        _logger.warning('Swarm.dialPeer: Cleaning up ${staleConns.length} stale connection(s) for peer ${peerId.toString()}');
+        _logger.warning('Swarm.dialPeer: Processing ${staleConns.length} stale connection(s) for peer ${peerId.toString()}');
         for (final staleConn in staleConns) {
+          // For protected connections, validate by trying to create a test stream
+          if (_host?.connManager.isProtected(staleConn.remotePeer, '') ?? false) {
+            _logger.info('Swarm.dialPeer: Protected connection ${staleConn.id} appears stale, validating...');
+            try {
+              // Try to create a new stream - if connection is alive, this will succeed
+              final testStream = await staleConn.newStream(Context()).timeout(const Duration(seconds: 5));
+              // Connection is alive - close test stream and keep the connection
+              await testStream.reset();
+              _logger.info('Swarm.dialPeer: Protected connection ${staleConn.id} validated, keeping');
+              healthyConns.add(staleConn);  // Move back to healthy list
+              continue;  // Skip cleanup for this connection
+            } catch (e) {
+              _logger.warning('Swarm.dialPeer: Protected connection ${staleConn.id} failed validation: $e');
+              // Continue to cleanup
+            }
+          }
+          
           // Remove from connections map without calling full removeConnection to avoid deadlock
           final conns = _connections[peerIDStr] ?? [];
           conns.remove(staleConn);
@@ -1060,11 +1077,27 @@ class Swarm implements Network {
       }
     });
 
-    // Clean up stale connections
+    // Clean up stale connections (validate protected ones by testing if still usable)
     if (staleConnections.isNotEmpty) {
-      _logger.info('Swarm._cleanupStaleConnections: Cleaning up ${staleConnections.length} stale connections (${healthyConnections}/${totalConnections} healthy)');
+      _logger.info('Swarm._cleanupStaleConnections: Processing ${staleConnections.length} stale connections (${healthyConnections}/${totalConnections} healthy)');
       
       for (final staleConn in staleConnections) {
+        // For protected connections, validate by trying to create a test stream
+        if (_host?.connManager.isProtected(staleConn.remotePeer, '') ?? false) {
+          _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} appears stale, validating...');
+          try {
+            // Try to create a new stream - if connection is alive, this will succeed
+            final testStream = await staleConn.newStream(Context()).timeout(const Duration(seconds: 5));
+            // Connection is alive - close test stream and keep the connection
+            await testStream.reset();
+            _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} validated, keeping');
+            continue;  // Skip cleanup - connection is actually healthy
+          } catch (e) {
+            _logger.warning('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} failed validation: $e');
+            // Continue to cleanup
+          }
+        }
+        
         try {
           await removeConnection(staleConn);
           await staleConn.close();

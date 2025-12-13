@@ -35,6 +35,7 @@ import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'internal/backoff/backoff.dart';
 import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
+import 'package:dart_libp2p/p2p/transport/connection_manager.dart'; // For real ConnectionManager
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart'; // Added for PingService
@@ -148,7 +149,7 @@ class BasicHost implements Host {
     _mux = MultistreamMuxer(),
     _negtimeout = config.negotiationTimeout ?? defaultNegotiationTimeout,
     _addrsFactory = config.addrsFactory ?? defaultAddrsFactory,
-    _cmgr = config.connManager ?? NullConnMgr(),
+    _cmgr = config.connManager ?? ConnectionManager(),
     _eventBus = config.eventBus ?? BasicBus(),
     // Initialize _upgrader using the network's resourceManager
     // This assumes _network is already initialized and has its resourceManager.

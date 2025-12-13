@@ -323,9 +323,17 @@ class ConnectionManager implements ConnManager {
 
   // Helper method to check if a connection is protected
   bool isProtectedConnection(TransportConn conn) {
-    // If we have the peer ID for this connection, check if it's protected
-    // This is a simplified implementation
-    return false;
+    // Get peer ID from connection and check if it's protected
+    final peerId = conn.remotePeer;
+    final protections = _protections[peerId];
+    return protections != null && protections.isNotEmpty;
+  }
+
+  /// Check if a peer is protected (by PeerId directly)
+  /// Used by Swarm to check protection before closing connections
+  bool isPeerProtected(PeerId peerId) {
+    final protections = _protections[peerId];
+    return protections != null && protections.isNotEmpty;
   }
 
   @override
