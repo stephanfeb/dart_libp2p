@@ -31,33 +31,28 @@ class SecuredMockConnection implements TransportConn {
   final String _id;
   bool _closed = false;
   final writes = <Uint8List>[];
-  final int? _chunkSize; // If set, simulate chunked delivery like UDX
 
-  SecuredMockConnection(this._id, {int? chunkSize}) : _chunkSize = chunkSize;
+  SecuredMockConnection(this._id);
 
   /// Creates a pair of connected secured mock connections
-  /// 
-  /// If [chunkSize] is provided, data will be delivered in chunks of that size
-  /// to simulate UDP fragmentation behavior (e.g., UDX with ~1400 byte MTU)
   static (SecuredMockConnection, SecuredMockConnection) createPair({
     String id1 = 'secured1',
     String id2 = 'secured2',
-    int? chunkSize,
   }) {
-    final conn1 = SecuredMockConnection(id1, chunkSize: chunkSize);
-    final conn2 = SecuredMockConnection(id2, chunkSize: chunkSize);
+    final conn1 = SecuredMockConnection(id1);
+    final conn2 = SecuredMockConnection(id2);
 
     // Wire up bidirectional communication
-    // Data flows: conn2._outgoingData -> conn1._incomingData
-    // The read() method will consume from _incomingData and populate _buffer
     conn1._subscription = conn2._outgoingData.stream.listen((data) {
       if (!conn1.isClosed) {
+        conn1._buffer.addAll(data);
         conn1._incomingData.add(data);
       }
     });
 
     conn2._subscription = conn1._outgoingData.stream.listen((data) {
       if (!conn2.isClosed) {
+        conn2._buffer.addAll(data);
         conn2._incomingData.add(data);
       }
     });
@@ -154,29 +149,13 @@ class SecuredMockConnection implements TransportConn {
       }
 
       // Wait until we have enough data
-      final completer = Completer<void>();
-      late StreamSubscription<List<int>> sub;
-      
-      sub = _incomingData.stream.listen((data) {
+      while (_buffer.length < length) {
+        final data = await _incomingData.stream.first.timeout(
+          Duration(seconds: 5),
+          onTimeout: () => throw TimeoutException('Read timed out'),
+        );
         _buffer.addAll(data);
-        if (_buffer.length >= length && !completer.isCompleted) {
-          completer.complete();
-          sub.cancel();
-        }
-      }, onError: (e) {
-        if (!completer.isCompleted) {
-          completer.completeError(e);
-        }
-      });
-      
-      // Wait for enough data with timeout
-      await completer.future.timeout(
-        Duration(seconds: 5),
-        onTimeout: () {
-          sub.cancel();
-          throw TimeoutException('Read timed out waiting for $length bytes, got ${_buffer.length}');
-        },
-      );
+      }
 
       // Return exactly the requested number of bytes
       final result = Uint8List.fromList(_buffer.take(length).toList());
@@ -193,24 +172,7 @@ class SecuredMockConnection implements TransportConn {
       throw StateError('Connection is closed');
     }
     writes.add(data);
-    
-    // If chunkSize is set, simulate fragmented delivery (like UDX over UDP)
-    if (_chunkSize != null && data.length > _chunkSize!) {
-      // Send data in chunks with small delays to simulate network timing
-      for (var offset = 0; offset < data.length; offset += _chunkSize!) {
-        final end = (offset + _chunkSize! < data.length) ? offset + _chunkSize! : data.length;
-        final chunk = data.sublist(offset, end);
-        _outgoingData.add(chunk);
-        
-        // Small delay to simulate packet arrival timing jitter
-        if (end < data.length) {
-          await Future.delayed(Duration(microseconds: 100));
-        }
-      }
-    } else {
-      // Send as single chunk
-      _outgoingData.add(data);
-    }
+    _outgoingData.add(data);
   }
 
   /// For testing: get current buffer size

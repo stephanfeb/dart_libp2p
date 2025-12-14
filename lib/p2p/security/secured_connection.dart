@@ -126,7 +126,7 @@ class SecuredConnection implements TransportConn {
         int initialRecvNonce = 0,
       }) : _sendNonce = initialSendNonce, _recvNonce = initialRecvNonce {
     // ADDED LOGGING
-    _log.info('SecuredConnection Constructor: Peer ${establishedRemotePeer?.toString() ?? 'unknown'}, initialSendNonce=$initialSendNonce, initialRecvNonce=$initialRecvNonce');
+    _log.finer('SecuredConnection Constructor: Peer ${establishedRemotePeer?.toString() ?? 'unknown'}, initialSendNonce=$initialSendNonce, initialRecvNonce=$initialRecvNonce');
     _log.finer('  - _encryptionKey.hashCode: ${_encryptionKey.hashCode}');
     _encryptionKey.extractBytes().then((bytes) => _log.finer('  - _encryptionKey.bytes: $bytes'));
     _log.finer('  - _decryptionKey.hashCode: ${_decryptionKey.hashCode}');
@@ -354,21 +354,25 @@ class SecuredConnection implements TransportConn {
   Future<Uint8List> _readAndDecryptMessage() async {
     // This method now encapsulates reading one full encrypted message and decrypting it.
     // It handles partial reads from the underlying transport robustly.
-    _log.info('SecuredConnection: Reading length prefix (2 bytes)');
-    final lengthBytes = await _readFullMessage(2);
-    _log.info('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}]');
+    // Uses 4-byte big-endian length prefix to support messages up to ~4GB.
+    _log.finer('SecuredConnection: Reading length prefix (4 bytes)');
+    final lengthBytes = await _readFullMessage(4);
+    _log.finer('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}, ${lengthBytes[2]}, ${lengthBytes[3]}]');
     _log.finer('SecuredConnection: FROM_UNDERLYING_READ (Length Prefix) - Bytes: ${hex.encode(lengthBytes)}');
 
     if (lengthBytes.isEmpty) {
       _log.finer('SecuredConnection: EOF when reading length prefix.');
       return Uint8List(0);
     }
-    if (lengthBytes.length < 2) {
+    if (lengthBytes.length < 4) {
       _log.finer('SecuredConnection: Connection closed while reading length prefix, got ${lengthBytes.length} bytes.');
       throw StateError('Connection closed while reading length prefix');
     }
 
-    final dataLength = (lengthBytes[0] << 8) | lengthBytes[1];
+    final dataLength = (lengthBytes[0] << 24) | 
+                       (lengthBytes[1] << 16) | 
+                       (lengthBytes[2] << 8) | 
+                       lengthBytes[3];
     _log.finer('SecuredConnection: Got length prefix: $dataLength');
 
     if (dataLength == 0) return Uint8List(0); // Valid empty message
@@ -452,15 +456,8 @@ class SecuredConnection implements TransportConn {
       // Calculate total length of encrypted data + MAC
       final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
       
-      // CRITICAL: 2-byte length prefix can only handle messages up to 65535 bytes
-      // Messages larger than this will overflow and corrupt the stream!
-      if (dataLength > 65535) {
-        throw StateError(
-          'SecuredConnection: Message too large! Encrypted size $dataLength bytes exceeds '
-          '2-byte length prefix limit of 65535 bytes. Plaintext was ${data.length} bytes. '
-          'Fragment the message at a higher layer (Yamux should do this automatically).'
-        );
-      }
+      // 4-byte length prefix supports messages up to ~4GB (2^32 - 1 bytes)
+      // In practice, memory limits will kick in long before this
       
       _log.finer('SecuredConnection: Encrypted data length: ${secretBox.cipherText.length}');
       _log.finer('SecuredConnection: MAC length: ${secretBox.mac.bytes.length}');
@@ -469,18 +466,18 @@ class SecuredConnection implements TransportConn {
       _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
 
 
-      // Write length prefix and data in one operation
-      final lengthByte0 = dataLength >> 8;
-      final lengthByte1 = dataLength & 0xFF;
-      _log.info('SecuredConnection: Writing length prefix: [$lengthByte0, $lengthByte1] = $dataLength bytes (plaintext was ${data.length})');
-      final combinedData = Uint8List(2 + dataLength)
-      // Write length prefix (2 bytes)
-        ..[0] = lengthByte0
-        ..[1] = lengthByte1
+      // Write 4-byte big-endian length prefix and data in one operation
+      _log.finer('SecuredConnection: Writing length prefix: $dataLength bytes (plaintext was ${data.length})');
+      final combinedData = Uint8List(4 + dataLength)
+      // Write length prefix (4 bytes, big-endian)
+        ..[0] = (dataLength >> 24) & 0xFF
+        ..[1] = (dataLength >> 16) & 0xFF
+        ..[2] = (dataLength >> 8) & 0xFF
+        ..[3] = dataLength & 0xFF
       // Write encrypted data
-        ..setAll(2, secretBox.cipherText)
+        ..setAll(4, secretBox.cipherText)
       // Write MAC
-        ..setAll(2 + secretBox.cipherText.length, secretBox.mac.bytes);
+        ..setAll(4 + secretBox.cipherText.length, secretBox.mac.bytes);
 
       _log.finer('SecuredConnection: Writing ${data.length} bytes as ${dataLength} bytes encrypted+MAC');
       _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');

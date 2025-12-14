@@ -52,10 +52,10 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
           if (completerToComplete != null && !completerToComplete.isCompleted) {
             // Immediately null out the completer to prevent double-completion
             _pendingReadCompleter = null;
-            print('[UDX ${id()}] ✅ COMPLETING pending read with ${data.length}B');
+            // print('[UDX ${id()}] ✅ COMPLETING pending read with ${data.length}B');
             completerToComplete.complete(data);
           } else {
-            print('[UDX ${id()}] 📦 BUFFERING ${data.length}B');
+            // print('[UDX ${id()}] 📦 BUFFERING ${data.length}B');
             _readBuffer.add(data);
             if (!_incomingDataController.isClosed) _incomingDataController.add(data);
           }
@@ -126,7 +126,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
 
   @override
   Future<Uint8List> read([int? maxLength]) async {
-    print('[UDX ${id()}] 📖 read($maxLength), buf=${_readBuffer.length}, bufSizes=${_readBuffer.map((c) => c.length).toList()}');
+    // print('[UDX ${id()}] 📖 read($maxLength), buf=${_readBuffer.length}, bufSizes=${_readBuffer.map((c) => c.length).toList()}');
 
     if (_isClosed && _readBuffer.isEmpty) {
       _logger.info('[UDXP2PStreamAdapter ${id()}] ⏹️ Stream closed and buffer empty. Returning EOF.');
@@ -136,13 +136,13 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     if (_readBuffer.isNotEmpty) {
       final currentChunk = _readBuffer.removeAt(0);
       if (maxLength == null || currentChunk.length <= maxLength) {
-        print('[UDX ${id()}] ✅ RETURN FULL CHUNK: ${currentChunk.length}B, buf=${_readBuffer.length}');
+        // print('[UDX ${id()}] ✅ RETURN FULL CHUNK: ${currentChunk.length}B, buf=${_readBuffer.length}');
         return currentChunk;
       } else {
         final toReturn = currentChunk.sublist(0, maxLength);
         final remainder = currentChunk.sublist(maxLength);
         _readBuffer.insert(0, remainder);
-        print('[UDX ${id()}] ✅ RETURN PARTIAL: $maxLength of ${currentChunk.length}B, remainder=${remainder.length}, buf=${_readBuffer.length}');
+        // print('[UDX ${id()}] ✅ RETURN PARTIAL: $maxLength of ${currentChunk.length}B, remainder=${remainder.length}, buf=${_readBuffer.length}');
         return toReturn;
       }
     }
@@ -167,7 +167,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
           }
       );
 
-      print('[UDX ${id()}] ✅ AWAIT COMPLETED with ${newData.length}B, maxLength=$maxLength');
+      // print('[UDX ${id()}] ✅ AWAIT COMPLETED with ${newData.length}B, maxLength=$maxLength');
 
       // CRITICAL FIX: If we got more bytes than requested, only return maxLength
       // and buffer the remainder. This prevents framing desync in higher layers.
@@ -177,7 +177,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
         final toReturn = newData.sublist(0, maxLength);
         final remainder = newData.sublist(maxLength);
         _readBuffer.insert(0, remainder); // Put remainder BACK at front of buffer
-        print('[UDX ${id()}] ✅ PARTIAL: returning $maxLength, buffering remainder ${remainder.length}');
+        // print('[UDX ${id()}] ✅ PARTIAL: returning $maxLength, buffering remainder ${remainder.length}');
         return toReturn;
       }
     } catch (e) {
