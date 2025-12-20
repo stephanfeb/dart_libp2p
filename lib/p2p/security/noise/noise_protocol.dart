@@ -12,7 +12,7 @@ import '../../../core/peer/peer_id.dart';
 import '../secured_connection.dart';
 import '../security_protocol.dart';
 import 'xx_pattern.dart';
-import '../../../pb/noise/payload.pb.dart' as noise_pb; // Added
+import './pb/payload.pb.dart' as noise_pb; // Added
 import 'package:logging/logging.dart'; // Added for logging
 
 final _log = Logger('NoiseProtocol');
