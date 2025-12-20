@@ -188,7 +188,17 @@ class AmbientAutoNATv2 {
     }
     
     // Use host addresses, filtering for public addresses
-    return _host.addrs.where((addr) => addr.isPublic()).toList();
+    var addrs = _host.addrs.where((addr) => addr.isPublic());
+    
+    // If ipv4Only is set, filter out IPv6 addresses.
+    // This ensures relay reservations are created even if device has public IPv6,
+    // for compatibility with IPv4-only peers.
+    if (_config.ipv4Only) {
+      addrs = addrs.where((addr) => addr.ip6 == null);
+      _log.fine('ipv4Only mode: filtered to ${addrs.length} IPv4-only addresses for probing');
+    }
+    
+    return addrs.toList();
   }
   
   void _handleProbeResult(Result result) {

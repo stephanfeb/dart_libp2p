@@ -19,6 +19,7 @@ import 'package:meta/meta.dart';
 import '../../../../core/host/host.dart';
 import '../../../../core/network/stream.dart';
 import '../../../../core/network/context.dart';
+import '../../../../core/network/network.dart' show Connectedness;
 import '../../../../core/multiaddr.dart';
 import '../../../discovery/peer_info.dart';
 
@@ -169,6 +170,17 @@ class Relay {
     if (reservation == null || reservation.isBefore(DateTime.now())) {
       print('[Relay] NO_RESERVATION: ${dstInfo.peerId} does not have an active reservation');
       await _writeResponse(stream, Status.NO_RESERVATION);
+      return;
+    }
+
+    // Check if the destination peer is currently connected to us
+    // Having a reservation doesn't guarantee the connection is still alive.
+    // If the connection dropped (network change, app backgrounded, etc.), we should
+    // fail fast rather than trying to dial with stale addresses.
+    final connectedness = _host.network.connectedness(dstInfo.peerId);
+    if (connectedness != Connectedness.connected) {
+      print('[Relay] CONNECTION_FAILED: destination peer ${dstInfo.peerId.toBase58()} has reservation but is not connected (connectedness: $connectedness)');
+      await _writeResponse(stream, Status.CONNECTION_FAILED);
       return;
     }
 

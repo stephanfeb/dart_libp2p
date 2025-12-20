@@ -707,6 +707,25 @@ class Swarm implements Network {
           components[0].$1.code == Protocols.circuit.code) {
         return false;
       }
+      // Filter out circuit addresses that route through this peer (self)
+      // This prevents "Cannot dial self" errors when trying to relay through ourselves
+      for (int i = 0; i < components.length; i++) {
+        final (protocol, value) = components[i];
+        if (protocol.code == Protocols.circuit.code && i > 0) {
+          final (prevProtocol, prevValue) = components[i - 1];
+          if (prevProtocol.code == Protocols.p2p.code) {
+            try {
+              final relayPeerId = PeerId.fromString(prevValue);
+              if (relayPeerId == _localPeer) {
+                _logger.fine('Swarm.dialPeer: Filtering out circuit address that routes through self: $addr');
+                return false;
+              }
+            } catch (e) {
+              // Invalid peer ID in address, skip filtering
+            }
+          }
+        }
+      }
       return true;
     }).toList();
 

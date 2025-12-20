@@ -92,7 +92,9 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
     // 'host' is accessible here as 'this.host' from the CircuitV2Client instance
     print('[Client] _reserveStream started for relay: ${relayPeerId.toBase58()}');
     try {
-      final writer = StreamSinkFromP2PStream(stream); // Adapt P2PStream to Sink for writeDelimitedMessage
+      // Create a completer to track when the async write completes
+      final writeCompleter = Completer<void>();
+      final writer = StreamSinkFromP2PStream(stream, writeCompleter);
       final reader = DelimitedReader(_p2pStreamToDartStream(stream), 4096); // maxMessageSize, similar to Go
 
       // Create a reserve message
@@ -101,7 +103,12 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       // Write the message
       print('[Client] Sending RESERVE message...');
       writeDelimitedMessage(writer, requestMsg);
-      print('[Client] RESERVE message sent, waiting for response...');
+      
+      // CRITICAL: Wait for the write to complete before reading the response.
+      // Without this, there's a race condition where we try to read before
+      // the RESERVE message is fully transmitted, causing iOS to fail consistently.
+      await writeCompleter.future;
+      print('[Client] RESERVE message sent and flushed, waiting for response...');
 
       // Read the response
       print('[Client] Reading response message...');
@@ -193,24 +200,40 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
   }
 }
 
-/// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage
+/// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage.
+/// Tracks write completion via an optional Completer to ensure the async write
+/// finishes before the caller proceeds (e.g., before reading the response).
 class StreamSinkFromP2PStream implements Sink<List<int>> {
   final P2PStream _stream;
-  StreamSinkFromP2PStream(this._stream);
+  final Completer<void>? _writeCompleter;
+  
+  StreamSinkFromP2PStream(this._stream, [this._writeCompleter]);
 
   @override
   void add(List<int> data) {
-    _stream.write(Uint8List.fromList(data)); 
-    // Note: P2PStream.write is often async. If writeDelimitedMessage expects synchronous writes
-    // or needs flow control, this adapter might need to be more complex (e.g., using a StreamController).
-    // For now, assuming P2PStream.write handles buffering or is suitably async.
+    // P2PStream.write() is async, so we need to track completion
+    // But Sink.add() is synchronous, so we schedule it and track completion
+    _stream.write(Uint8List.fromList(data)).then((_) {
+      // Write completed successfully
+      if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+        _writeCompleter.complete();
+      }
+    }).catchError((error) {
+      // Write failed
+      if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+        _writeCompleter.completeError(error);
+      }
+    });
   }
 
   @override
   void close() {
     // Closing the sink doesn't necessarily close the underlying P2PStream here,
     // as the stream's lifecycle is managed by the reserve method.
-    // If DelimitedWriter needs to signal end-of-writes, this might need to do more.
+    // If no writes were made and completer exists, complete it
+    if (_writeCompleter != null && !_writeCompleter.isCompleted) {
+      _writeCompleter.complete();
+    }
   }
 }
 
