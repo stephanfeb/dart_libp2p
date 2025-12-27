@@ -1,6 +1,6 @@
 name: dart_libp2p
 description: A comprehensive Dart implementation of the libp2p networking stack with modular architecture, multiple transports (TCP/UDX), Noise security, and peer-to-peer capabilities.
-version: 0.5.3
+version: 0.5.4
 homepage: https://github.com/stephanfeb/dart_libp2p
 repository: https://github.com/stephanfeb/dart_libp2p
 documentation: https://github.com/stephanfeb/dart_libp2p/tree/main/docs

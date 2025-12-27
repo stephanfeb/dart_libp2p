@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show NetworkInterface, InternetAddressType; // Added for NetworkInterface
+import 'dart:io' show NetworkInterface, InternetAddressType, InternetAddress, RawDatagramSocket; // Added for NetworkInterface
 
 import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
@@ -54,6 +54,35 @@ final _log = Logger('basichost');
 
 /// Default negotiation timeout
 const Duration defaultNegotiationTimeout = Duration(seconds: 10);
+
+/// Outbound network capability types
+enum OutboundCapability { 
+  ipv4Only, 
+  ipv6Only, 
+  dualStack, 
+  relayOnly, 
+  unknown 
+}
+
+/// Information about local outbound connectivity capabilities
+class OutboundCapabilityInfo {
+  final bool hasIPv4;
+  final bool hasIPv6;
+  final DateTime detectedAt;
+  
+  OutboundCapabilityInfo({
+    required this.hasIPv4,
+    required this.hasIPv6,
+    required this.detectedAt,
+  });
+  
+  OutboundCapability get capability {
+    if (hasIPv4 && hasIPv6) return OutboundCapability.dualStack;
+    if (hasIPv4) return OutboundCapability.ipv4Only;
+    if (hasIPv6) return OutboundCapability.ipv6Only;
+    return OutboundCapability.relayOnly;
+  }
+}
 
 /// Default addresses factory function.
 /// Filters out loopback and unspecified addresses from the provided list.
@@ -125,6 +154,13 @@ class BasicHost implements Host {
   List<MultiAddr> _filteredInterfaceAddrs = [];
   List<MultiAddr> _allInterfaceAddrs = [];
   Timer? _addressMonitorTimer; // Added to store the timer
+  
+  // Outbound capability detection
+  OutboundCapabilityInfo _outboundCapability = OutboundCapabilityInfo(
+    hasIPv4: false,
+    hasIPv6: false,
+    detectedAt: DateTime.now(),
+  );
 
   /// Creates a new BasicHost with the given Network and Config.
   /// Use BasicHost.create() instead for proper async initialization.
@@ -665,7 +701,45 @@ class BasicHost implements Host {
         _log.fine('Local interface addresses updated. Filtered: ${_filteredInterfaceAddrs.length}, All: ${_allInterfaceAddrs.length}');
         _log.finer('Filtered interface addresses: $_filteredInterfaceAddrs');
       }
+      
+      // Derive outbound capability from discovered interfaces
+      final hasIPv4 = newFilteredInterfaceAddrs.any((a) => a.ip4 != null);
+      final hasIPv6 = newFilteredInterfaceAddrs.any((a) => a.ip6 != null);
+      
+      // Optional active IPv6 probe (only if interface exists)
+      bool canReachIPv6 = false;
+      if (hasIPv6) {
+        canReachIPv6 = await _probeIPv6Connectivity();
+      }
+      
+      // Update capability (refreshes with same cycle as interfaces)
+      final newCapability = OutboundCapabilityInfo(
+        hasIPv4: hasIPv4,
+        hasIPv6: hasIPv6 && canReachIPv6,
+        detectedAt: DateTime.now(),
+      );
+      
+      // Log capability changes
+      if (newCapability.capability != _outboundCapability.capability) {
+        _log.info('Outbound capability changed: ${_outboundCapability.capability} -> ${newCapability.capability}');
+      }
+      
+      _outboundCapability = newCapability;
     });
+  }
+  
+  /// Probe IPv6 connectivity by attempting to bind to IPv6 address
+  Future<bool> _probeIPv6Connectivity() async {
+    try {
+      // Quick UDP socket bind test to verify IPv6 is available
+      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv6, 0);
+      socket.close();
+      _log.fine('IPv6 connectivity probe succeeded');
+      return true;
+    } catch (e) {
+      _log.fine('IPv6 connectivity probe failed: $e');
+      return false;
+    }
   }
 
   void _newStreamHandler(P2PStream stream) async {
@@ -896,6 +970,9 @@ class BasicHost implements Host {
   PingService? get pingService => _pingService;
   RelayManager? get relayManager => _relayManager;
   AmbientAutoNATv2? get autoNATService => _autoNATService;
+  
+  /// Returns current outbound connectivity capability
+  OutboundCapabilityInfo get outboundCapability => _outboundCapability;
 
   /// Returns only public/observed addresses suitable for holepunching.
   /// This includes:

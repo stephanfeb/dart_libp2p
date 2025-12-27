@@ -6,6 +6,7 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' as multiaddr_protocol;
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/network.dart';
+import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/interfaces.dart';
@@ -170,5 +171,194 @@ class DialBackoff {
   /// Resets the backoff to the base delay
   void reset() {
     _currentDelay = _baseDelay;
+  }
+}
+
+/// Address with priority and timeout information for connection attempts
+class ScoredAddress {
+  final MultiAddr addr;
+  final AddressType type;
+  final int priority;           // Lower = higher priority
+  final Duration timeout;       // Type-specific timeout
+  
+  ScoredAddress({
+    required this.addr,
+    required this.type,
+    required this.priority,
+    required this.timeout,
+  });
+}
+
+/// Priority ranker that considers local network capabilities
+class CapabilityAwarePriorityRanker {
+  static const directTimeout = Duration(seconds: 5);
+  static const relayTimeout = Duration(seconds: 10);
+  
+  /// Rank addresses by priority based on local capabilities
+  List<ScoredAddress> rank(
+    List<MultiAddr> addresses,
+    OutboundCapabilityInfo capability,
+  ) {
+    final scored = <ScoredAddress>[];
+    
+    for (final addr in addresses) {
+      final type = addr.addressType;
+      final priority = _assignPriority(type, capability);
+      final timeout = _timeoutFor(type);
+      
+      scored.add(ScoredAddress(
+        addr: addr, 
+        type: type, 
+        priority: priority, 
+        timeout: timeout,
+      ));
+    }
+    
+    // Sort by priority (lower = higher priority)
+    scored.sort((a, b) => a.priority.compareTo(b.priority));
+    return scored;
+  }
+  
+  /// Assign priority based on address type and capability
+  int _assignPriority(AddressType type, OutboundCapabilityInfo capability) {
+    if (capability.capability == OutboundCapability.dualStack) {
+      // Dual-stack: prefer IPv6, then IPv4, then relay
+      return switch (type) {
+        AddressType.directIPv6Public => 1,  // Prefer IPv6 for dual-stack
+        AddressType.directIPv4Public => 2,
+        AddressType.directIPv4Private => 3,
+        AddressType.relaySpecific => 10,
+        AddressType.relayGeneric => 20,
+        _ => 100,
+      };
+    } else if (capability.capability == OutboundCapability.ipv4Only) {
+      // IPv4-only: prefer public IPv4, then private, then relay
+      return switch (type) {
+        AddressType.directIPv4Public => 1,
+        AddressType.directIPv4Private => 5,
+        AddressType.relaySpecific => 10,
+        AddressType.relayGeneric => 20,
+        _ => 100,
+      };
+    } else if (capability.capability == OutboundCapability.ipv6Only) {
+      // IPv6-only: prefer IPv6, then relay
+      return switch (type) {
+        AddressType.directIPv6Public => 1,
+        AddressType.relaySpecific => 10,
+        AddressType.relayGeneric => 20,
+        _ => 100,
+      };
+    } else {
+      // Relay-only or unknown: only try relays
+      return switch (type) {
+        AddressType.relaySpecific => 1,
+        AddressType.relayGeneric => 5,
+        _ => 100,
+      };
+    }
+  }
+  
+  /// Determine timeout based on address type
+  Duration _timeoutFor(AddressType type) {
+    return switch (type) {
+      AddressType.relaySpecific => relayTimeout,
+      AddressType.relayGeneric => relayTimeout,
+      _ => directTimeout,
+    };
+  }
+}
+
+/// Happy Eyeballs dialer with staggered connection attempts (RFC 8305)
+/// 
+/// Attempts connections in priority order with a stagger delay between each.
+/// First successful connection wins and cancels remaining attempts.
+class HappyEyeballsDialer {
+  final Logger _logger = Logger('HappyEyeballsDialer');
+  static const staggerDelay = Duration(milliseconds: 250);
+  
+  final PeerId _peerId;
+  final List<ScoredAddress> _addrs;
+  final DialFunc _dialFunc;
+  final Context _context;
+
+  HappyEyeballsDialer({
+    required PeerId peerId,
+    required List<ScoredAddress> addrs,
+    required DialFunc dialFunc,
+    required Context context,
+  }) : _peerId = peerId, 
+       _addrs = addrs, 
+       _dialFunc = dialFunc, 
+       _context = context;
+
+  /// Dial with Happy Eyeballs algorithm
+  /// 
+  /// Attempts connections in priority order, staggering each attempt by 250ms.
+  /// Returns the first successful connection and cancels remaining attempts.
+  Future<Conn> dial() async {
+    if (_addrs.isEmpty) throw Exception('No addresses to dial');
+
+    final completer = Completer<Conn>();
+    final errors = <String, Exception>{};
+    var pendingAttempts = _addrs.length;
+    var cancelled = false;
+
+    // Start staggered connection attempts
+    for (var i = 0; i < _addrs.length; i++) {
+      final scored = _addrs[i];
+      final delay = staggerDelay * i;
+
+      Future.delayed(delay, () async {
+        // Skip if already succeeded or cancelled
+        if (completer.isCompleted || cancelled) {
+          pendingAttempts--;
+          return;
+        }
+
+        _logger.fine('Attempting ${scored.addr} (priority ${scored.priority})');
+        
+        try {
+          final conn = await _dialFunc(_context, scored.addr, _peerId)
+              .timeout(scored.timeout);
+
+          if (!completer.isCompleted) {
+            cancelled = true;  // Signal other attempts to stop
+            completer.complete(conn);
+            _logger.fine('Connected via ${scored.addr}');
+          } else {
+            // Another attempt won, close this connection
+            try {
+              await conn.close();
+            } catch (e) {
+              _logger.fine('Error closing redundant connection: $e');
+            }
+          }
+        } catch (e) {
+          errors[scored.addr.toString()] = e is Exception ? e : Exception('$e');
+          pendingAttempts--;
+          
+          // If all attempts failed, complete with error
+          if (pendingAttempts == 0 && !completer.isCompleted) {
+            final errorMsg = errors.entries
+                .map((e) => '${e.key}: ${e.value}')
+                .join('; ');
+            completer.completeError(
+              Exception('All dial attempts failed: $errorMsg')
+            );
+          }
+        }
+      });
+    }
+
+    // Overall timeout: max individual timeout + total stagger time
+    final maxWait = _addrs.fold<Duration>(
+      Duration.zero,
+      (max, addr) => addr.timeout > max ? addr.timeout : max,
+    ) + (staggerDelay * _addrs.length);
+
+    return completer.future.timeout(maxWait, onTimeout: () {
+      cancelled = true;
+      throw Exception('Connection timed out after ${maxWait.inMilliseconds}ms');
+    });
   }
 }

@@ -28,6 +28,8 @@ import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm_conn.dart';
 import 'swarm_stream.dart';
 import 'swarm_dial.dart'; // For AddrDialer and DelayDialRanker
+import 'address_filter.dart'; // For AddressFilter
+import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // For OutboundCapabilityInfo
 
 /// Swarm is a Network implementation that manages connections to peers and
 /// handles streams over those connections.
@@ -691,8 +693,27 @@ class Swarm implements Network {
       throw Exception('No addresses found for peer: $peerId');
     }
 
-    // Filter out non-dialable addresses before attempting to connect.
-    final dialableAddrs = allAddrs.where((addr) {
+    // 1. Get outbound capability from host (uses existing _host reference)
+    OutboundCapabilityInfo capability;
+    if (_host is BasicHost) {
+      capability = (_host as BasicHost).outboundCapability;
+    } else {
+      // Fallback if host is not BasicHost (assume IPv4 only)
+      capability = OutboundCapabilityInfo(
+        hasIPv4: true, 
+        hasIPv6: false, 
+        detectedAt: DateTime.now()
+      );
+    }
+
+    // 2. Filter addresses by capability
+    var dialableAddrs = AddressFilter.filterReachable(allAddrs, capability);
+    
+    // 3. Deduplicate IPv6 addresses from same /64 prefix
+    dialableAddrs = AddressFilter.deduplicateIPv6(dialableAddrs);
+
+    // 4. Basic filtering (existing - remove 0.0.0.0, ::, bare circuit, self-routes)
+    dialableAddrs = dialableAddrs.where((addr) {
       final ip4Val = addr.valueForProtocol('ip4');
       if (ip4Val == '0.0.0.0') {
         return false;
@@ -734,21 +755,18 @@ class Swarm implements Network {
       throw Exception('No dialable addresses found for peer: $peerId');
     }
 
-    _logger.warning('Swarm.dialPeer: Found dialable addresses for peer $peerId: $dialableAddrs. Using parallel dialer...');
+    // 5. Rank by priority
+    final ranker = CapabilityAwarePriorityRanker();
+    final scoredAddrs = ranker.rank(dialableAddrs, capability);
+    
+    _logger.fine('Dialing $peerId with ${scoredAddrs.length} addresses '
+        '(capability: ${capability.capability})');
 
-    // Rank addresses (for logging order - direct before relay)
-    final ranker = DelayDialRanker();
-    final rankedAddrs = ranker(dialableAddrs);
-    final addrs = rankedAddrs.map((ad) => ad.addr).toList();
-
-    // Log ranked order
-    _logger.fine('Swarm.dialPeer: Ranked addresses (direct first, relay second): $addrs');
-
-    // Use AddrDialer for true parallel dialing
+    // 6. Dial with Happy Eyeballs staggering
     try {
-      final dialer = AddrDialer(
+      final dialer = HappyEyeballsDialer(
         peerId: peerId,
-        addrs: addrs,
+        addrs: scoredAddrs,
         dialFunc: (ctx, addr, pid) => _dialSingleAddr(addr, pid, ctx),
         context: context,
       );

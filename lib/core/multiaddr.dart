@@ -313,3 +313,77 @@ class MultiAddr {
   }
 
 }
+
+/// Address type classification for connection prioritization
+enum AddressType {
+  directIPv4Public,
+  directIPv4Private,
+  directIPv6Public,
+  directIPv6LinkLocal,
+  relaySpecific,   // Full circuit path with relay peer ID
+  relayGeneric,    // Bare /p2p-circuit
+}
+
+/// Extension for address classification and analysis
+extension MultiAddrClassification on MultiAddr {
+  /// Classifies the address type for prioritization
+  AddressType get addressType {
+    // Check for relay first
+    if (hasCircuit) {
+      // Check if it's a specific relay path or generic
+      final comps = components;
+      
+      // Look for p2p protocol before p2p-circuit (indicates specific relay)
+      var hasRelayPeerId = false;
+      var circuitIndex = -1;
+      
+      for (var i = 0; i < comps.length; i++) {
+        if (comps[i].$1.name == 'p2p-circuit') {
+          circuitIndex = i;
+          break;
+        }
+      }
+      
+      if (circuitIndex > 0) {
+        // Check if there's a p2p component before circuit
+        for (var i = 0; i < circuitIndex; i++) {
+          if (comps[i].$1.name == 'p2p') {
+            hasRelayPeerId = true;
+            break;
+          }
+        }
+      }
+      
+      return hasRelayPeerId ? AddressType.relaySpecific : AddressType.relayGeneric;
+    }
+    
+    // Check IP type by examining components directly
+    final comps = components;
+    for (final (protocol, value) in comps) {
+      if (protocol.name == 'ip6') {
+        // It's an IPv6 address
+        final addr = value.toLowerCase();
+        if (addr.startsWith('fe80:')) return AddressType.directIPv6LinkLocal;
+        return AddressType.directIPv6Public;
+      } else if (protocol.name == 'ip4') {
+        // It's an IPv4 address
+        return isPrivate() ? AddressType.directIPv4Private : AddressType.directIPv4Public;
+      }
+    }
+    
+    return AddressType.relayGeneric; // Fallback
+  }
+  
+  /// Extract /64 prefix for IPv6 deduplication
+  /// Returns null if not an IPv6 address
+  String? get ipv6Prefix64 {
+    final v6 = ip6;
+    if (v6 == null) return null;
+    
+    // Split by colon and take first 4 groups (64 bits)
+    final parts = v6.split(':');
+    if (parts.length < 4) return null;
+    
+    return parts.take(4).join(':');
+  }
+}
