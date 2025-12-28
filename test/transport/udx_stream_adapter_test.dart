@@ -105,7 +105,7 @@ void main() {
         () async => await readFuture,
         throwsA(isA<TimeoutException>()),
       );
-    }, timeout: const Timeout(Duration(seconds: 31))); // Test timeout needs to be longer than read timeout
+    }, timeout: const Timeout(Duration(seconds: 40))); // Test timeout needs to be longer than read timeout
 
     test('write() sends data to udx stream', () async {
       final testData = Uint8List.fromList([7, 8, 9]);

@@ -116,7 +116,7 @@ void main() {
 
         // Give time for cleanup to complete
         await Future.delayed(Duration(seconds: 5));
-      });
+      }, timeout: Timeout(Duration(seconds: 40)));
     });
 
     group('Data Transfer', () {

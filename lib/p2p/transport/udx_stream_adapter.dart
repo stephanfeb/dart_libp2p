@@ -148,8 +148,28 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     }
 
     // Buffer is empty, need to wait for data from UDX
-    if (_pendingReadCompleter != null) {
-      _logger.warning('[UDXP2PStreamAdapter ${id()}] Warning: Another read was already pending. This should not happen.');
+    // CRITICAL FIX: Handle concurrent reads properly to avoid race conditions
+    // If another read is already pending, wait for it to complete first,
+    // then re-check the buffer instead of overwriting the completer
+    if (_pendingReadCompleter != null && !_pendingReadCompleter!.isCompleted) {
+      _logger.warning('[UDXP2PStreamAdapter ${id()}] Another read already pending. Waiting for existing read to complete...');
+      try {
+        // Wait for the existing read to complete (it will populate the buffer)
+        await _pendingReadCompleter!.future.timeout(
+          const Duration(seconds: 35),
+          onTimeout: () {
+            throw TimeoutException('Timeout waiting for existing read on UDXP2PStreamAdapter', const Duration(seconds: 35));
+          },
+        );
+      } catch (e) {
+        // If the existing read failed, clear the completer and let this read try fresh
+        _logger.fine('[UDXP2PStreamAdapter ${id()}] Existing read failed: $e');
+        _pendingReadCompleter = null;
+      }
+      
+      // After existing read completes, recursively call read() to check buffer
+      // This handles the case where data arrived during the wait
+      return read(maxLength);
     }
 
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Buffer empty, creating _pendingReadCompleter.');
@@ -166,6 +186,9 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
             throw TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35));
           }
       );
+
+      // Clear the completer after successful read
+      _pendingReadCompleter = null;
 
       // print('[UDX ${id()}] ✅ AWAIT COMPLETED with ${newData.length}B, maxLength=$maxLength');
 

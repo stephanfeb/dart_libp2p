@@ -758,7 +758,7 @@ class Swarm implements Network {
     // 5. Rank by priority
     final ranker = CapabilityAwarePriorityRanker();
     final scoredAddrs = ranker.rank(dialableAddrs, capability);
-    
+
     _logger.fine('Dialing $peerId with ${scoredAddrs.length} addresses '
         '(capability: ${capability.capability})');
 
