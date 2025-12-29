@@ -17,6 +17,8 @@ import 'package:dart_libp2p/p2p/transport/listener.dart'; // For Listener interf
 import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart' as circuit_pb;
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart' as circuit_io;
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/prepended_stream.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/conn.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
 import 'package:dart_libp2p/utils/varint.dart'; // For encodeVarint
@@ -25,42 +27,6 @@ import 'package:logging/logging.dart';
 final _log = Logger('CircuitV2Client');
 
 const int maxCircuitMessageSize = 4096; // Max message size for circuit protocol messages
-
-// Helper to adapt P2PStream to a Dart Stream for DelimitedReader
-Stream<List<int>> _adaptP2PStreamToDartStream(P2PStream p2pStream) {
-  final controller = StreamController<List<int>>();
-  
-  Future<void> readLoop() async {
-    try {
-      while (true) { 
-        if (p2pStream.isClosed || controller.isClosed) { // Check before read
-             if (!controller.isClosed) await controller.close();
-             break;
-        }
-        final data = await p2pStream.read(); 
-        if (p2pStream.isClosed || controller.isClosed) { // Check after read
-             if (!controller.isClosed) await controller.close();
-             break;
-        }
-        if (data.isNotEmpty) {
-          controller.add(data);
-        } else if (p2pStream.isClosed) { // If read returns empty and stream is closed
-            if (!controller.isClosed) await controller.close();
-            break;
-        }
-      }
-    } catch (e,s) {
-      if (!controller.isClosed) {
-        controller.addError(e,s);
-        await controller.close();
-      }
-    }
-  }
-  
-  readLoop();
-  // Return as broadcast stream to allow multiple subscriptions by DelimitedReader
-  return controller.stream.asBroadcastStream();
-}
 
 /// CircuitV2Client implements the Circuit Relay v2 protocol as a Transport.
 /// It allows peers to establish connections through relay servers when direct
@@ -384,11 +350,18 @@ class CircuitV2Client implements Transport {
 
 
       // 5. Await a HopMessage response from the relay with type = STATUS.
+      // CRITICAL: Use manual reading to preserve any data that follows the STATUS message
       _log.info('[CircuitV2Client.dial] ⏳ Waiting for STATUS response from relay...');
-      final adaptedHopStreamForReader = _adaptP2PStreamToDartStream(hopStream);
-      final hopReader = circuit_io.DelimitedReader(adaptedHopStreamForReader, maxCircuitMessageSize);
+      final bufferedReader = BufferedP2PStreamReader(hopStream);
       
-      final statusMsg = await hopReader.readMsg(circuit_pb.HopMessage());
+      // Read length-delimited message manually (instead of using DelimitedReader)
+      final statusLength = await bufferedReader.readVarint();
+      if (statusLength > maxCircuitMessageSize) {
+        throw Exception('STATUS message too large: $statusLength bytes');
+      }
+      final statusBytes = await bufferedReader.readExact(statusLength);
+      final statusMsg = circuit_pb.HopMessage.fromBuffer(statusBytes);
+      
       _log.info('[CircuitV2Client.dial] 📨 Received HopMessage from relay: type=${statusMsg.type}, status=${statusMsg.status}');
 
       if (statusMsg.type != circuit_pb.HopMessage_Type.STATUS) {
@@ -404,9 +377,21 @@ class CircuitV2Client implements Transport {
       _log.info('[CircuitV2Client.dial] ✅ STATUS OK received, creating relayed connection');
 
       // 6. If status is OK, the stream `hopStream` is now connected to the destination peer.
+      // CRITICAL FIX: If relay sent application data immediately after STATUS, prepend it to the stream
+      // This prevents data loss that would make bidirectional relay one-sided
+      final remainingBytes = bufferedReader.remainingBuffer;
+      final P2PStream finalStream;
+      
+      if (remainingBytes.isNotEmpty) {
+        _log.info('[CircuitV2Client.dial] 🔧 [DATA-LOSS-FIX] Prepending ${remainingBytes.length} buffered bytes to stream');
+        finalStream = PrependedStream(hopStream, remainingBytes);
+      } else {
+        finalStream = hopStream;
+      }
+      
       // Wrap this stream in a RelayedConn object and return it.
       final relayedConn = RelayedConn(
-        stream: hopStream as P2PStream<Uint8List>, // Cast needed
+        stream: finalStream as P2PStream<Uint8List>, // Cast needed
         transport: this,
         localPeer: host.id,
         remotePeer: destId,

@@ -30,7 +30,9 @@ class AddressTTL {
 
   /// Used when we recently connected to a peer.
   /// It means that we are reasonably certain of the peer's address.
-  static const Duration recentlyConnectedAddrTTL = Duration(minutes: 15);
+  /// Increased to 4 hours to support persistent connections and prevent
+  /// premature address expiration for gossipsub mesh and DHT routing peers.
+  static const Duration recentlyConnectedAddrTTL = Duration(hours: 4);
 
   /// Used for our own external addresses observed by peers.
   /// Deprecated: observed addresses are maintained till we disconnect from the peer which provided it

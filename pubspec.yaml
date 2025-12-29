@@ -25,7 +25,8 @@ dependencies:
 
   base_x: ^2.0.0
 
-  dart_udx: ^0.3.0
+  dart_udx:
+    path: ../dart-udx
 
   dcid: ^1.0.0
 

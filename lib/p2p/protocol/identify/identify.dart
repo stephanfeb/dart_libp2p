@@ -1808,6 +1808,14 @@ class _NetNotifiee implements Notifiee {
         break;
     }
 
+    // Check if peer is protected (e.g., gossipsub mesh, DHT routing table, app services)
+    // Protected peers should not have their addresses downgraded
+    final isProtected = _ids.host.connManager.isProtected(peerId, '');
+    if (isProtected) {
+      _log.fine('Identify.Notifiee.disconnected: Peer $peerId is protected, preserving addresses at connectedAddrTTL');
+      return;
+    }
+
     final addrs = await _ids.host.peerStore.addrBook.addrs(peerId);
     _log.finer('Identify.Notifiee.disconnected: Found ${addrs.length} addresses for $peerId in peerstore.');
     var n = addrs.length;

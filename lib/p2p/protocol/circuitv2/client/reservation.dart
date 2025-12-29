@@ -13,47 +13,7 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart' as pb; // Alias for protobuf messages
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
-
-// Helper function to adapt P2PStream.read() to a Dart Stream
-Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
-  print('[Client] _p2pStreamToDartStream called');
-  final controller = StreamController<Uint8List>();
-
-  Future<void> readLoop() async {
-    try {
-      while (true) {
-        if (controller.isClosed) break;
-        print('[Client] Reading chunk from P2PStream...');
-        final data = await p2pStream.read();
-        if (data.isEmpty) {
-          // EOF received - close the controller gracefully
-          print('[Client] Received EOF, closing stream controller');
-          break;
-        }
-        print('[Client] Read ${data.length} bytes, adding to controller...');
-        controller.add(data);
-      }
-    } catch (e, s) {
-      // If the controller is still open, an error occurred during reading.
-      print('[Client] Stream read error or closed: $e');
-      if (!controller.isClosed) {
-        controller.addError(e, s);
-      }
-    } finally {
-      // Ensure the controller is closed when the loop exits.
-      if (!controller.isClosed) {
-        await controller.close();
-      }
-    }
-  }
-
-  controller.onListen = () {
-    readLoop();
-  };
-
-  // Return as broadcast stream to allow multiple await-for loops in DelimitedReader
-  return controller.stream.asBroadcastStream();
-}
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
 
 const Duration reserveTimeout = Duration(minutes: 1);
 
@@ -95,7 +55,7 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       // Create a completer to track when the async write completes
       final writeCompleter = Completer<void>();
       final writer = StreamSinkFromP2PStream(stream, writeCompleter);
-      final reader = DelimitedReader(_p2pStreamToDartStream(stream), 4096); // maxMessageSize, similar to Go
+      final bufferedReader = BufferedP2PStreamReader(stream);
 
       // Create a reserve message
       final requestMsg = pb.HopMessage()..type = pb.HopMessage_Type.RESERVE;
@@ -110,10 +70,23 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       await writeCompleter.future;
       print('[Client] RESERVE message sent and flushed, waiting for response...');
 
-      // Read the response
-      print('[Client] Reading response message...');
-      final responseMsg = await reader.readMsg(pb.HopMessage());
+      // Read the response using manual reading (instead of DelimitedReader)
+      print('[Client] Reading response message length...');
+      final responseLength = await bufferedReader.readVarint();
+      if (responseLength > 4096) {
+        throw Exception('RESERVE response message too large: $responseLength bytes');
+      }
+      print('[Client] Reading response message bytes ($responseLength bytes)...');
+      final responseBytes = await bufferedReader.readExact(responseLength);
+      final responseMsg = pb.HopMessage.fromBuffer(responseBytes);
+      
       print('[Client] Response received, type: ${responseMsg.type}, status: ${responseMsg.status}');
+      
+      // Log any remaining buffered data (should not happen for reservations)
+      final remainingBytes = bufferedReader.remainingBuffer;
+      if (remainingBytes.isNotEmpty) {
+        print('[Client] ⚠️ WARNING: Unexpected ${remainingBytes.length} buffered bytes after RESERVE response');
+      }
 
       if (responseMsg.type != pb.HopMessage_Type.STATUS) {
         print('[Client] ERROR: Unexpected response type: ${responseMsg.type}');

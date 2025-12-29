@@ -10,6 +10,8 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/relay/resources.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/prepended_stream.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/client.dart'; // For encodeVarint
@@ -53,36 +55,57 @@ class Relay {
   Future<void> _handleStream(P2PStream stream) async {
     try {
       // Read the length-delimited message (client sends with length prefix)
-      print('[Relay] Creating stream reader for incoming message');
-      final reader = DelimitedReader(_p2pStreamToDartStream(stream), 4096); // maxMessageSize
-      print('[Relay] Reading message...');
-      final pb = await reader.readMsg(HopMessage());
+      // CRITICAL: Use manual reading to preserve any data that follows the HopMessage
+      print('[Relay] Creating buffered reader for incoming message');
+      final bufferedReader = BufferedP2PStreamReader(stream);
+      
+      // Read length-delimited message manually (instead of using DelimitedReader)
+      print('[Relay] Reading message length...');
+      final messageLength = await bufferedReader.readVarint();
+      if (messageLength > 4096) {
+        throw Exception('HopMessage too large: $messageLength bytes');
+      }
+      print('[Relay] Reading message bytes ($messageLength bytes)...');
+      final messageBytes = await bufferedReader.readExact(messageLength);
+      final pb = HopMessage.fromBuffer(messageBytes);
+      
       print('[Relay] Message read successfully, type: ${pb.type}');
+      
+      // CRITICAL FIX: If client sent extra data with HopMessage, prepend it to the stream
+      final remainingBytes = bufferedReader.remainingBuffer;
+      final P2PStream finalStream;
+      
+      if (remainingBytes.isNotEmpty) {
+        print('[Relay] 🔧 [DATA-LOSS-FIX] Detected ${remainingBytes.length} buffered bytes after HopMessage');
+        finalStream = PrependedStream(stream, remainingBytes);
+      } else {
+        finalStream = stream;
+      }
 
       // Handle the message based on its type
       switch (pb.type) {
         case HopMessage_Type.RESERVE:
-          await _handleReserve(stream, pb);
+          await _handleReserve(finalStream, pb);
           break;
         case HopMessage_Type.CONNECT:
-          await _handleConnect(stream, pb);
+          await _handleConnect(finalStream, pb);
           break;
         default:
-          await _writeResponse(stream, Status.UNEXPECTED_MESSAGE);
+          await _writeResponse(finalStream, Status.UNEXPECTED_MESSAGE);
           try {
-            await stream.close();
+            await finalStream.close();
           } catch (closeError) {
             print('[Relay] Failed to close stream after unexpected message: $closeError');
           }
       }
-    } catch (e) {
-      await _writeResponse(stream, Status.MALFORMED_MESSAGE);
+    } catch (e, stackTrace) {
+      print('[Relay] Error handling stream: $e\n$stackTrace');
       try {
+        await _writeResponse(stream, Status.MALFORMED_MESSAGE);
         await stream.close();
       } catch (closeError) {
         print('[Relay] Failed to close stream after error: $closeError');
       }
-      print('Error handling stream: $e');
     }
   }
 
@@ -237,9 +260,18 @@ class Relay {
       print('[Relay] STOP message written successfully to destination peer: ${dstInfo.peerId.toBase58()}');
 
       // Read the response (destination sends with length prefix)
+      // CRITICAL: Use manual reading to preserve any data that follows the STOP message
       print('[Relay] Reading STOP response from destination peer: ${dstInfo.peerId.toBase58()}...');
-      final reader = DelimitedReader(_p2pStreamToDartStream(dstStream), 4096);
-      final pb = await reader.readMsg(StopMessage());
+      final bufferedReader = BufferedP2PStreamReader(dstStream);
+      
+      // Read length-delimited message manually (instead of using DelimitedReader)
+      final responseLength = await bufferedReader.readVarint();
+      if (responseLength > 4096) {
+        throw Exception('STOP message too large: $responseLength bytes');
+      }
+      final responseBytes = await bufferedReader.readExact(responseLength);
+      final pb = StopMessage.fromBuffer(responseBytes);
+      
       print('[Relay] STOP response received from destination peer: ${dstInfo.peerId.toBase58()}, status: ${pb.status}');
 
       // Check the status
@@ -247,6 +279,18 @@ class Relay {
         await _writeResponse(stream, Status.CONNECTION_FAILED);
         await dstStream.close();
         return;
+      }
+      
+      // CRITICAL FIX: Forward any buffered data that was read along with STOP message
+      // This prevents data loss when relay data immediately follows handshake
+      final remainingBytes = bufferedReader.remainingBuffer;
+      if (remainingBytes.isNotEmpty) {
+        print('[Relay] 🔧 [DATA-LOSS-FIX] Forwarding ${remainingBytes.length} buffered bytes to source peer');
+        try {
+          await stream.write(remainingBytes);
+        } catch (e) {
+          print('[Relay] Error forwarding buffered data to source: $e');
+        }
       }
 
       // Write the response to the source
@@ -472,46 +516,6 @@ class Relay {
 
   @visibleForTesting
   Map<String, int> get connectionsForTesting => Map.unmodifiable(_connections);
-}
-
-/// Helper function to adapt P2PStream.read() to a Dart Stream for DelimitedReader
-/// Uses a StreamController to allow multiple subscriptions via await-for loops
-Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
-  print('[Relay] _p2pStreamToDartStream called');
-  final controller = StreamController<Uint8List>();
-
-  Future<void> readLoop() async {
-    try {
-      while (true) {
-        if (controller.isClosed) break;
-        print('[Relay] Reading chunk from P2PStream...');
-        final data = await p2pStream.read();
-        if (data.isEmpty) {
-          // EOF received - close the controller gracefully
-          print('[Relay] Received EOF, closing stream controller');
-          break;
-        }
-        print('[Relay] Read ${data.length} bytes, adding to controller...');
-        controller.add(data);
-      }
-    } catch (e, s) {
-      // Stream closed or error
-      print('[Relay] Stream read error or closed: $e');
-      if (!controller.isClosed) {
-        controller.addError(e, s);
-      }
-    } finally {
-      if (!controller.isClosed) {
-        await controller.close();
-      }
-    }
-  }
-
-  // Start reading immediately
-  readLoop();
-
-  // Return as broadcast stream to allow multiple await-for loops in DelimitedReader
-  return controller.stream.asBroadcastStream();
 }
 
 /// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage

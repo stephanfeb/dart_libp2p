@@ -201,8 +201,10 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       throw StateError('Stream is closed for writing.');
     }
 
-    if (_state != YamuxStreamState.open) {
-      _log.warning('$_logPrefix YamuxStream.write: Called on non-open stream. State: $_state. Requested: $inputDataLength bytes.');
+    // Allow writes in both 'open' and 'closing' states
+    // 'closing' means remote sent FIN, but we can still write (half-close)
+    if (_state != YamuxStreamState.open && _state != YamuxStreamState.closing) {
+      _log.warning('$_logPrefix YamuxStream.write: Called on non-open/non-closing stream. State: $_state. Requested: $inputDataLength bytes.');
       throw YamuxStreamStateException(
         'Stream is not open for writing',
         currentState: _state.name,
@@ -273,7 +275,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       var offset = 0;
       final Uint8List dataToWrite = data is Uint8List ? data : Uint8List.fromList(data);
 
-      while (offset < dataToWrite.length && _state == YamuxStreamState.open) {
+      // Allow writes in both 'open' and 'closing' states (half-close support)
+      while (offset < dataToWrite.length && (_state == YamuxStreamState.open || _state == YamuxStreamState.closing)) {
         if (_remoteReceiveWindow == 0) {
           _log.fine('$_logPrefix Direct write: Send window is 0. Waiting for remote to update. Offset: $offset/${dataToWrite.length}');
           _sendWindowUpdateCompleter ??= Completer<void>();
@@ -281,7 +284,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
           _sendWindowUpdateCompleter = null;
         }
         
-        if (_state != YamuxStreamState.open) {
+        if (_state != YamuxStreamState.open && _state != YamuxStreamState.closing) {
           _log.warning('$_logPrefix Direct write: Stream state changed to $_state while waiting for window. Aborting write.');
           break;
         }
@@ -321,7 +324,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     } catch (e, st) {
       _log.severe('$_logPrefix Direct write: Error during write of ${data.length} bytes: $e\n$st');
-      if (_state == YamuxStreamState.open) {
+      if (_state == YamuxStreamState.open || _state == YamuxStreamState.closing) {
         await reset();
       }
       rethrow;
@@ -334,7 +337,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     _isProcessingWrites = true;
     
     try {
-      while (_writeQueue.isNotEmpty && _state == YamuxStreamState.open) {
+      // Allow processing writes in both 'open' and 'closing' states (half-close support)
+      while (_writeQueue.isNotEmpty && (_state == YamuxStreamState.open || _state == YamuxStreamState.closing)) {
         final queuedWrite = _writeQueue.removeFirst();
         final queueTime = DateTime.now().difference(queuedWrite.queuedAt);
         

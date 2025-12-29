@@ -28,6 +28,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
   final Direction _direction;
   String _protocol = '';
   bool _isClosed = false;
+  bool _isWriteClosed = false; // Track write-side closure separately  
   final StreamController<Uint8List> _incomingDataController = StreamController<Uint8List>.broadcast(); // Kept for .stream getter if used elsewhere
   final List<Uint8List> _readBuffer = [];
   Completer<Uint8List>? _pendingReadCompleter; // For direct signaling to a waiting read()
@@ -213,10 +214,14 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
 
   @override
   Future<void> write(List<int> data) async {
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] write called with ${data.length} bytes. isClosed: $_isClosed');
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] write called with ${data.length} bytes. isClosed: $_isClosed, isWriteClosed: $_isWriteClosed');
     if (_isClosed) {
       _logger.fine('[UDXP2PStreamAdapter ${id()}] Stream closed, throwing StateError on write.');
       throw StateError('Stream is closed');
+    }
+    if (_isWriteClosed) {
+      _logger.fine('[UDXP2PStreamAdapter ${id()}] Write side closed, throwing StateError on write.');
+      throw StateError('Write side of stream is closed');
     }
     await _udxStream.add(data is Uint8List ? data : Uint8List.fromList(data));
     _parentConn.notifyActivity();
@@ -224,9 +229,10 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
   }
 
   Future<void> _close() async {
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] _close called. Is already closed: $_isClosed');
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] _close called. Is already closed: $_isClosed, writeClose: $_isWriteClosed');
     if (_isClosed) return;
     _isClosed = true;
+    _isWriteClosed = true; // Mark write side as closed on full close
 
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Cancelling UDXStream subscriptions.');
     await _udxStreamDataSubscription?.cancel();
@@ -268,8 +274,19 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
 
   @override
   Future<void> closeWrite() async {
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] closeWrite() called, performing full stream close as dart-udx does not support half-closure.');
-    await _close();
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] closeWrite() called - delegating to UDX native half-close.');
+    
+    if (_isWriteClosed) {
+      _logger.fine('[UDXP2PStreamAdapter ${id()}] Write side already closed.');
+      return;
+    }
+    
+    _isWriteClosed = true;
+    
+    // Delegate to UDX's native half-close implementation
+    // This sends a FIN packet while allowing the read side to remain open
+    await _udxStream.closeWrite();
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] UDX native closeWrite() completed. Read side remains open for bidirectional relay.');
   }
 
   @override

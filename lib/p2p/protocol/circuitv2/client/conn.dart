@@ -76,6 +76,19 @@ class RelayedConn implements TransportConn {
     await _stream.close();
   }
 
+  /// Closes the write side of the relayed connection (half-close support)
+  /// This allows the remote peer to finish sending data while signaling
+  /// that we won't send any more data.
+  Future<void> closeWrite() async {
+    await _stream.closeWrite();
+  }
+
+  /// Closes the read side of the relayed connection (half-close support)
+  /// This signals that we won't read any more data from the remote peer.
+  Future<void> closeRead() async {
+    await _stream.closeRead();
+  }
+
   @override
   String get id => _stream.id();
 
