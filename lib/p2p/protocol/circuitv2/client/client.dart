@@ -23,6 +23,7 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/client/conn.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
 import 'package:dart_libp2p/utils/varint.dart'; // For encodeVarint
 import 'package:logging/logging.dart';
+import 'package:synchronized/synchronized.dart';
 
 final _log = Logger('CircuitV2Client');
 
@@ -51,6 +52,11 @@ class CircuitV2Client implements Transport {
   // For now, let's assume a single conceptual listener for incoming relayed connections.
   final List<MultiAddr> _listenAddrs = [];
   bool _isListening = false;
+
+  // Connection tracking for reuse
+  // Maps destination peer ID -> active RelayedConn
+  final Map<String, RelayedConn> _activeConnections = {};
+  final Lock _dialMutex = Lock();
 
 
   CircuitV2Client({
@@ -183,6 +189,16 @@ class CircuitV2Client implements Transport {
       final localCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${host.id.toString()}');
       final remoteCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${sourcePeerId.toString()}');
 
+      // Check if we already have a connection to this peer (with mutex)
+      final sourcePeerStr = sourcePeerId.toString();
+      await _dialMutex.synchronized(() async {
+        final existingConn = _activeConnections[sourcePeerStr];
+        if (existingConn != null && !existingConn.isClosed) {
+          _log.warning('[CircuitV2Client._handleStreamV2] Already have connection to $sourcePeerStr, will use existing');
+          // Note: We still accept this incoming connection and let the upper layers decide
+          // which connection to use. This matches go-libp2p behavior.
+        }
+      });
 
       final relayedConn = RelayedConn(
         stream: stream as P2PStream<Uint8List>, // Cast needed, ensure stream is Uint8List
@@ -191,8 +207,19 @@ class CircuitV2Client implements Transport {
         remotePeer: sourcePeerId,
         localMultiaddr: localCircuitMa, // This represents how we are reached
         remoteMultiaddr: remoteCircuitMa, // This represents how the remote is dialed
+        onClose: () {
+          // Remove from tracking map when connection closes
+          _activeConnections.remove(sourcePeerStr);
+          _log.fine('[CircuitV2Client] Removed closed incoming connection from tracking map: $sourcePeerStr');
+        },
         // isInitiator: false, // This is an incoming connection
       );
+
+      // Track the incoming connection
+      await _dialMutex.synchronized(() async {
+        _activeConnections[sourcePeerStr] = relayedConn;
+        _log.info('[CircuitV2Client._handleStreamV2] 📝 Stored incoming connection in tracking map for $sourcePeerStr');
+      });
 
       _log.fine('Accepted incoming relayed connection from ${sourcePeerId.toString()} via ${stream.conn.remotePeer.toString()}');
       _incomingConnController.add(relayedConn);
@@ -232,6 +259,7 @@ class CircuitV2Client implements Transport {
   Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
     _log.info('[CircuitV2Client.dial] 🔌 Starting circuit dial to $addr');
     print('🔌 [CircuitV2Client.dial] CALLED with address: $addr');
+    
     // 1. Parse the /p2p-circuit address.
     final addrComponents = addr.components; // Use the components getter
 
@@ -281,14 +309,44 @@ class CircuitV2Client implements Transport {
       throw ArgumentError('Invalid circuit address format after /p2p-circuit: $addr');
     }
 
+    // 2. Check for existing connection (with mutex to prevent race conditions)
+    return await _dialMutex.synchronized(() async {
+      final destPeerStr = destId.toString();
+      
+      // Check if we already have an active connection to this destination
+      final existingConn = _activeConnections[destPeerStr];
+      if (existingConn != null && !existingConn.isClosed) {
+        _log.info('[CircuitV2Client.dial] ♻️ Reusing existing connection to $destPeerStr');
+        print('♻️ [CircuitV2Client.dial] Reusing existing connection to $destPeerStr');
+        return existingConn;
+      }
+      
+      // Remove closed connection from map if present
+      if (existingConn != null && existingConn.isClosed) {
+        _activeConnections.remove(destPeerStr);
+        _log.fine('[CircuitV2Client.dial] Removed closed connection from tracking map');
+      }
+      
+      // Create new connection
+      final newConn = await _createNewRelayedConnection(addr, destId, relayId, connectToRelayAsDest);
+      
+      // Store in tracking map
+      _activeConnections[destPeerStr] = newConn;
+      _log.info('[CircuitV2Client.dial] 📝 Stored new connection in tracking map for $destPeerStr');
+      
+      return newConn;
+    });
+  }
 
+  /// Creates a new relayed connection (extracted from dial() for clarity)
+  Future<RelayedConn> _createNewRelayedConnection(
+    MultiAddr addr,
+    PeerId destId,
+    PeerId relayId,
+    bool connectToRelayAsDest,
+  ) async {
+    _log.info('[CircuitV2Client._createNewRelayedConnection] 🆕 Creating new connection to $destId via relay $relayId');
 
-    // 2. Connect to the relay peer if not already connected.
-    // The host should handle this when opening a new stream.
-    // We might need to add the relay's address to the peerstore if we know it,
-    // but typically the caller of dial should have done this or the host can discover it.
-
-    // 3. Open a new stream to the relay using CircuitV2Protocol.protoIDv2Hop.
     // 3. Open a new stream to the relay using CircuitV2Protocol.protoIDv2Hop.
     // Host.newStream requires a Context. Creating a default one for now.
     // TODO: Consider if a more specific context is needed.
@@ -390,6 +448,7 @@ class CircuitV2Client implements Transport {
       }
       
       // Wrap this stream in a RelayedConn object and return it.
+      final destPeerStr = destId.toString();
       final relayedConn = RelayedConn(
         stream: finalStream as P2PStream<Uint8List>, // Cast needed
         transport: this,
@@ -397,6 +456,11 @@ class CircuitV2Client implements Transport {
         remotePeer: destId,
         localMultiaddr: addr, // The address we dialed
         remoteMultiaddr: addr, // Keep the full circuit address including /p2p-circuit
+        onClose: () {
+          // Remove from tracking map when connection closes
+          _activeConnections.remove(destPeerStr);
+          _log.fine('[CircuitV2Client] Removed closed connection from tracking map: $destPeerStr');
+        },
         // isInitiator: true, // This is derived from stream.stat().direction in RelayedConn
       );
       _log.info('[CircuitV2Client.dial] 🎉 Successfully dialed ${destId.toString()} via relay ${relayId.toString()}');

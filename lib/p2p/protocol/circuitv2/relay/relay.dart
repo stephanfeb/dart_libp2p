@@ -506,6 +506,13 @@ class Relay {
   }
 
   @visibleForTesting
+  void addConnectionForTesting(String srcPeer, String dstPeer) {
+    final connKey = '$srcPeer-$dstPeer';
+    final currentCount = _connections[connKey] ?? 0;
+    _connections[connKey] = currentCount + 1;
+  }
+
+  @visibleForTesting
   int getConnectionCount(String srcPeer, String dstPeer) {
     final connKey = '$srcPeer-$dstPeer';
     return _connections[connKey] ?? 0;

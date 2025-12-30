@@ -51,6 +51,7 @@ class RelayedConn implements TransportConn {
   final MultiAddr _localMultiaddr;
   final MultiAddr _remoteMultiaddr; // Multiaddr of the remote peer, potentially a circuit addr
   final _RelayedConnStats _connStats;
+  final void Function()? _onClose; // Callback for cleanup when connection closes
   // final bool _isInitiator; // Captured by _stream.stat().direction
 
   RelayedConn({
@@ -60,6 +61,7 @@ class RelayedConn implements TransportConn {
     required PeerId remotePeer,
     required MultiAddr localMultiaddr,
     required MultiAddr remoteMultiaddr,
+    void Function()? onClose,
     // required bool isInitiator, // isInitiator can be derived from stream.stat().direction
   })  : _stream = stream,
         _transport = transport,
@@ -67,6 +69,7 @@ class RelayedConn implements TransportConn {
         _remotePeer = remotePeer,
         _localMultiaddr = localMultiaddr,
         _remoteMultiaddr = remoteMultiaddr,
+        _onClose = onClose,
         // _isInitiator = isInitiator,
         _connStats = _RelayedConnStats(stream.stat());
 
@@ -74,6 +77,8 @@ class RelayedConn implements TransportConn {
   @override
   Future<void> close() async {
     await _stream.close();
+    // Notify the transport to remove this connection from tracking
+    _onClose?.call();
   }
 
   /// Closes the write side of the relayed connection (half-close support)
