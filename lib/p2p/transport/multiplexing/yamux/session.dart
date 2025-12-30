@@ -95,20 +95,23 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   void _startKeepalive() {
     if (_config.keepAliveInterval == Duration.zero) {
+      _log.warning('$_logPrefix [YAMUX-KEEPALIVE] Keepalive DISABLED (interval is zero), conn: ${_connection.id}');
       return;
     }
+    _log.warning('$_logPrefix [YAMUX-KEEPALIVE] Keepalive STARTED with interval: ${_config.keepAliveInterval.inSeconds}s, conn: ${_connection.id}');
     _keepaliveTimer = Timer.periodic(_config.keepAliveInterval, (_) => _sendPing());
   }
 
   Future<void> _sendPing() async {
     if (_closed) return;
     final pingId = ++_lastPingId;
-    _log.finer('$_logPrefix Sending PING frame, id: $pingId');
+    _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Sending PING frame, id: $pingId, conn: ${_connection.id}');
     try {
       final frame = YamuxFrame.ping(false, pingId);
       await _sendFrame(frame);
+      _log.warning('$_logPrefix ✅ [YAMUX-KEEPALIVE] PING frame sent successfully, id: $pingId');
     } catch (e) {
-      _log.warning('$_logPrefix Error sending PING: $e. Session may be unhealthy.');
+      _log.warning('$_logPrefix ❌ [YAMUX-KEEPALIVE] Error sending PING: $e. Session may be unhealthy.');
       // Consider closing session if ping fails repeatedly, but for now just log.
     }
   }
@@ -536,12 +539,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   Future<void> _handlePing(YamuxFrame frame) async {
     final opaqueValue = frame.length; 
     if (frame.flags & YamuxFlags.ack != 0) { 
-      _log.finer('$_logPrefix Received PONG (PING ACK), opaque: $opaqueValue');
+      _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PONG (PING ACK), opaque: $opaqueValue, conn: ${_connection.id}');
       return;
     }
-    _log.finer('$_logPrefix Received PING request, opaque: $opaqueValue. Sending PONG.');
+    _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PING request, opaque: $opaqueValue, conn: ${_connection.id}. Sending PONG.');
     final response = YamuxFrame.ping(true, opaqueValue); 
     await _sendFrame(response);
+    _log.warning('$_logPrefix ✅ [YAMUX-KEEPALIVE] PONG sent successfully, opaque: $opaqueValue');
   }
 
   Future<void> _handleGoAway(YamuxFrame frame) async {
@@ -914,7 +918,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     _log.fine('$_logPrefix _cleanupWithoutFrames: Starting cleanup. _closed=true, _cleanupStarted=true.');
 
     _keepaliveTimer?.cancel();
-    _log.finer('$_logPrefix _cleanupWithoutFrames: Keepalive timer cancelled.');
+    _log.warning('$_logPrefix [YAMUX-KEEPALIVE] Keepalive timer CANCELLED during cleanup, conn: ${_connection.id}');
 
     // Fail any pending outgoing streams
     _pendingStreams.forEach((id, completer) {
