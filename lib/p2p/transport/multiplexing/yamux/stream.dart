@@ -498,6 +498,15 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // Handle special states with empty queue
     if (_state == YamuxStreamState.closing) {
       _log.finer('$_logPrefix read() on remotely closed stream with empty queue. No more data will arrive.');
+      
+      // FIX: Now that we've consumed all data (queue empty) and received remote FIN (closing state),
+      // if we've also sent our FIN (_localFinSent), it's safe to fully cleanup.
+      // This ensures cleanup only happens after all data is consumed, not prematurely in closeWrite().
+      if (_localFinSent) {
+        _log.fine('$_logPrefix Both FINs sent and all data consumed. Now safe to cleanup.');
+        await _cleanup();
+      }
+      
       return Uint8List(0); // Return EOF instead of throwing
     }
 
@@ -800,22 +809,23 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     // Handle FIN flag for stream closure
     if (frame.flags & YamuxFlags.fin != 0) {
-      bool stateChangedToClosing = false;
       if (_state == YamuxStreamState.open) {
         _state = YamuxStreamState.closing;
-        stateChangedToClosing = true;
         _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] Received FIN, transitioning to closing state');
 
+        // FIX: Complete pending read with EOF (empty data) instead of error.
+        // This allows graceful handling of stream closure and proper relay forwarding.
+        // The reader will get EOF and can finish processing.
         if (frame.data.isEmpty && _readCompleter != null && !_readCompleter!.isCompleted) {
-          _readCompleter!.completeError(StateError('Stream closed by remote.'));
+          _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] Completing pending read with EOF');
+          _readCompleter!.complete(Uint8List(0));
         }
       }
-      // If we have already sent a FIN (_localFinSent is true) and now we've received a FIN (state is closing),
-      // then both sides are done. Clean up.
-      if (_localFinSent && (_state == YamuxStreamState.closing || stateChangedToClosing)) {
-        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-BIDIRECTIONAL-CLOSE] Both sides sent FIN, cleaning up');
-        await _cleanup();
-      }
+      // FIX: Do NOT cleanup here even if both FINs have been sent.
+      // The incoming queue may still have data that needs to be consumed.
+      // Cleanup will happen when read() returns EOF and detects both FINs + empty queue.
+      // This prevents data loss in bidirectional relay scenarios.
+      _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] FIN received. localFinSent=$_localFinSent, queueSize=${_incomingQueue.length}');
     }
   }
 
@@ -947,14 +957,17 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _localFinSent = true;
       _log.fine('$_logPrefix closeWrite() sent FIN and set _localFinSent=true. Current stream state: $_state.');
 
-      // If remote also sent FIN (_state == YamuxStreamState.closing), then both sides are done writing.
-      // The stream can now be fully cleaned up.
-      if (_state == YamuxStreamState.closing) {
-        _log.fine('$_logPrefix closeWrite() called, _localFinSent=true, and stream was already in closing state (remote FIN received). Cleaning up.');
-        await _cleanup();
-      } else {
-        _log.fine('$_logPrefix closeWrite() sent FIN. Stream remains in state: $_state for potential reads or remote FIN.');
-      }
+      // FIX: Do NOT call _cleanup() here even if both FINs have been sent.
+      // Both FINs sent only means "writing is done on both sides" - reading should
+      // continue until all buffered data is consumed. Premature cleanup here was
+      // causing bidirectional relay connections to become unidirectional because
+      // the incoming queue would be cleared before the relay could forward all data.
+      // 
+      // The stream will be properly cleaned up when:
+      // 1. read() returns EOF (empty data) after both FINs, OR
+      // 2. close() is explicitly called, OR
+      // 3. reset() is called due to an error
+      _log.fine('$_logPrefix closeWrite() completed. Stream remains readable in state: $_state.');
     } catch (e) {
       _log.severe('$_logPrefix Error sending FIN frame during closeWrite(): $e. Resetting stream.');
       await reset(); // Escalate to reset on send error

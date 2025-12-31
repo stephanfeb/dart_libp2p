@@ -342,6 +342,10 @@ class Relay {
   ) {
     final connKey = '${srcPeer}-${dstPeer}';
     var cleanupDone = false;
+    
+    // Shared flag to track if either direction has encountered a fatal error
+    // and requested termination of the relay
+    var relayTerminated = false;
 
     // Idempotent cleanup function
     // Note: We do NOT close streams here - each direction closes its own write side via closeWrite()
@@ -366,10 +370,11 @@ class Relay {
     Future<void> relaySourceToDest() async {
       try {
         int bytesRelayed = 0;
-        while (true) {
+        while (!relayTerminated) {
           final data = await srcStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to destination via closeWrite
+            print('[Relay] EOF from source after relaying $bytesRelayed bytes total');
             await dstStream.closeWrite().catchError((e) {
               print('[Relay] Error closing write on destination: $e');
             });
@@ -380,12 +385,15 @@ class Relay {
         }
       } catch (e) {
         print('[Relay] Error relaying data from source to destination: $e');
-        // Reset both streams on error (like go-libp2p)
-        await srcStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting source stream: $resetErr');
-        });
-        await dstStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting destination stream: $resetErr');
+        // FIX: Only reset the streams involved in this direction's error
+        // Don't immediately reset the other direction - let it complete gracefully
+        // if possible. Only set the termination flag to signal the other direction
+        // to stop after its current operation completes.
+        relayTerminated = true;
+        
+        // Close our write side to signal EOF to the destination
+        await dstStream.closeWrite().catchError((closeErr) {
+          print('[Relay] Error closing write on destination after src->dst error: $closeErr');
         });
       } finally {
         cleanup();
@@ -396,7 +404,7 @@ class Relay {
     Future<void> relayDestToSource() async {
       try {
         int bytesRelayed = 0;
-        while (true) {
+        while (!relayTerminated) {
           final data = await dstStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to source via closeWrite
@@ -411,12 +419,15 @@ class Relay {
         }
       } catch (e) {
         print('[Relay] Error relaying data from destination to source: $e');
-        // Reset both streams on error (like go-libp2p)
-        await dstStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting destination stream: $resetErr');
-        });
-        await srcStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting source stream: $resetErr');
+        // FIX: Only reset the streams involved in this direction's error
+        // Don't immediately reset the other direction - let it complete gracefully
+        // if possible. Only set the termination flag to signal the other direction
+        // to stop after its current operation completes.
+        relayTerminated = true;
+        
+        // Close our write side to signal EOF to the source
+        await srcStream.closeWrite().catchError((closeErr) {
+          print('[Relay] Error closing write on source after dst->src error: $closeErr');
         });
       } finally {
         cleanup();

@@ -222,10 +222,12 @@ class CircuitV2Client implements Transport {
       });
 
       _log.fine('Accepted incoming relayed connection from ${sourcePeerId.toString()} via ${stream.conn.remotePeer.toString()}');
-      _incomingConnController.add(relayedConn);
 
-      // Send back a STOP response with STATUS OK to the relay
-      // The relay is waiting for this response to confirm we're ready to accept the connection
+      // CRITICAL: Send STOP response BEFORE adding to controller!
+      // The stream must be clean and ready for application data (Noise handshake)
+      // before the Swarm picks it up for upgrade. If we add to controller first,
+      // the Swarm starts reading from the stream while we're still writing the
+      // STOP response, causing race conditions and handshake failures.
       print('🎯 [CircuitV2Client._handleStreamV2] Sending STOP response with status OK...');
       final stopResponse = circuit_pb.StopMessage()
         ..type = circuit_pb.StopMessage_Type.STATUS
@@ -239,13 +241,11 @@ class CircuitV2Client implements Transport {
       print('🎯 [CircuitV2Client._handleStreamV2] STOP response sent successfully');
       
       _log.fine('Sent STOP response with status OK to relay ${stream.conn.remotePeer.toString()}');
+
+      // NOW it's safe to add to the controller - the STOP protocol handshake is complete
+      // and the stream is ready for the Noise+Yamux upgrade that the Swarm will perform.
+      _incomingConnController.add(relayedConn);
       
-      // IMPORTANT: The stream is now owned by the RelayedConn for application data.
-      // We must NOT return from this handler, as that would allow the stream to be
-      // garbage collected or have its protocol handlers removed.
-      // Instead, the stream will be managed by the RelayedConn which was added to
-      // _incomingConnController above. The handler can now return, and the stream
-      // will be kept alive by the RelayedConn.
       print('🎯 [CircuitV2Client._handleStreamV2] Handler complete, stream now managed by RelayedConn');
 
     } catch (e, s) {
@@ -309,33 +309,12 @@ class CircuitV2Client implements Transport {
       throw ArgumentError('Invalid circuit address format after /p2p-circuit: $addr');
     }
 
-    // 2. Check for existing connection (with mutex to prevent race conditions)
-    return await _dialMutex.synchronized(() async {
-      final destPeerStr = destId.toString();
-      
-      // Check if we already have an active connection to this destination
-      final existingConn = _activeConnections[destPeerStr];
-      if (existingConn != null && !existingConn.isClosed) {
-        _log.info('[CircuitV2Client.dial] ♻️ Reusing existing connection to $destPeerStr');
-        print('♻️ [CircuitV2Client.dial] Reusing existing connection to $destPeerStr');
-        return existingConn;
-      }
-      
-      // Remove closed connection from map if present
-      if (existingConn != null && existingConn.isClosed) {
-        _activeConnections.remove(destPeerStr);
-        _log.fine('[CircuitV2Client.dial] Removed closed connection from tracking map');
-      }
-      
-      // Create new connection
-      final newConn = await _createNewRelayedConnection(addr, destId, relayId, connectToRelayAsDest);
-      
-      // Store in tracking map
-      _activeConnections[destPeerStr] = newConn;
-      _log.info('[CircuitV2Client.dial] 📝 Stored new connection in tracking map for $destPeerStr');
-      
-      return newConn;
-    });
+    // 2. Create new relayed connection
+    // NOTE: We do NOT cache connections here. The Swarm handles connection caching
+    // at a higher level after upgrade completes. Caching unupgraded connections here
+    // causes race conditions when multiple parallel dials return the same connection
+    // and both try to upgrade it concurrently.
+    return await _createNewRelayedConnection(addr, destId, relayId, connectToRelayAsDest);
   }
 
   /// Creates a new relayed connection (extracted from dial() for clarity)
@@ -448,7 +427,8 @@ class CircuitV2Client implements Transport {
       }
       
       // Wrap this stream in a RelayedConn object and return it.
-      final destPeerStr = destId.toString();
+      // NOTE: We don't track outbound connections here - the Swarm handles this
+      // after upgrade completes, preventing race conditions with parallel dials.
       final relayedConn = RelayedConn(
         stream: finalStream as P2PStream<Uint8List>, // Cast needed
         transport: this,
@@ -456,12 +436,7 @@ class CircuitV2Client implements Transport {
         remotePeer: destId,
         localMultiaddr: addr, // The address we dialed
         remoteMultiaddr: addr, // Keep the full circuit address including /p2p-circuit
-        onClose: () {
-          // Remove from tracking map when connection closes
-          _activeConnections.remove(destPeerStr);
-          _log.fine('[CircuitV2Client] Removed closed connection from tracking map: $destPeerStr');
-        },
-        // isInitiator: true, // This is derived from stream.stat().direction in RelayedConn
+        // No onClose callback needed for outbound - Swarm manages connection lifecycle
       );
       _log.info('[CircuitV2Client.dial] 🎉 Successfully dialed ${destId.toString()} via relay ${relayId.toString()}');
       print('🎉 [CircuitV2Client.dial] SUCCESS! Returning RelayedConn for ${destId.toString()}');
