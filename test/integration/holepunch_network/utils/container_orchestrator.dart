@@ -30,11 +30,12 @@ class ContainerOrchestrator {
     // Clean up any leftover containers and networks first
     await _cleanup();
     
-    // Build images first
-    await _runDockerCompose(['build']);
+    // Build images first (with --no-cache to ensure all script changes are applied)
+    print('🔨 Building images with --no-cache to ensure latest changes are applied...');
+    await _runDockerCompose(['build', '--no-cache']);
     
-    // Start services with orphan removal
-    await _runDockerCompose(['up', '-d', '--remove-orphans']);
+    // Start services with orphan removal and force recreate
+    await _runDockerCompose(['up', '-d', '--remove-orphans', '--force-recreate']);
     
     // Wait for services to be healthy
     await _waitForServices();
@@ -163,8 +164,12 @@ class ContainerOrchestrator {
     Map<String, dynamic>? body,
     Duration? timeout,
   }) async {
-    // Default timeout for holepunch operations, shorter for others
-    timeout ??= (path == '/holepunch' ? Duration(seconds: 45) : Duration(seconds: 10));
+    // Increased timeout for health checks and holepunch operations
+    timeout ??= (path == '/holepunch' 
+      ? Duration(seconds: 45) 
+      : path == '/status'
+        ? Duration(seconds: 20) // Longer timeout for status checks during startup
+        : Duration(seconds: 10));
     
     try {
       return await _performHttpRequest(containerName, path, method, body).timeout(timeout);
@@ -220,10 +225,20 @@ class ContainerOrchestrator {
   }
 
   Future<String> _runDockerCompose(List<String> args) async {
+    final env = _buildEnvironment();
+    
+    // Debug: Print environment variables being passed
+    if (environment.isNotEmpty) {
+      print('🔧 Docker Compose environment variables:');
+      environment.forEach((key, value) {
+        print('   $key=$value');
+      });
+    }
+    
     final result = await Process.run(
       'docker-compose',
       ['-f', composeFile, ...args],
-      environment: _buildEnvironment(),
+      environment: env,
     );
     
     if (result.exitCode != 0) {
@@ -241,8 +256,12 @@ class ContainerOrchestrator {
     print('⏳ Waiting for services to be ready...');
     
     final timeout = DateTime.now().add(startupTimeout);
+    int attemptCount = 0;
     
     while (DateTime.now().isBefore(timeout)) {
+      attemptCount++;
+      print('⏳ Health check attempt $attemptCount...');
+      
       final statuses = await getStatus();
       final unhealthyServices = statuses.values
           .where((status) => status.state != 'running')
@@ -250,14 +269,18 @@ class ContainerOrchestrator {
       
       if (unhealthyServices.isEmpty) {
         // All services are running, now check control APIs
+        print('✅ All containers running, checking control APIs...');
         final controlChecks = await _checkControlAPIs();
         if (controlChecks) {
           print('✅ All services are healthy');
           return;
+        } else {
+          print('⏳ Control APIs not ready yet, waiting...');
         }
+      } else {
+        print('⏳ Waiting for ${unhealthyServices.length} services to start...');
       }
       
-      print('⏳ Waiting for ${unhealthyServices.length} services...');
       await Future.delayed(Duration(seconds: 5));
     }
     
@@ -265,7 +288,7 @@ class ContainerOrchestrator {
   }
 
   Future<bool> _checkControlAPIs() async {
-    final peerServices = ['peer-a', 'peer-b', 'relay-server'];
+    final peerServices = ['relay-server', 'peer-a', 'peer-b']; // Check relay first as peers depend on it
     
     for (final service in peerServices) {
       try {
@@ -275,6 +298,8 @@ class ContainerOrchestrator {
         print('⏳ $service control API not ready: $e');
         return false;
       }
+      // Small delay between checks to avoid overwhelming the system
+      await Future.delayed(Duration(milliseconds: 500));
     }
     
     return true;

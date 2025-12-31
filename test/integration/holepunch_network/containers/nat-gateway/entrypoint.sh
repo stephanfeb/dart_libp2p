@@ -48,6 +48,14 @@ fi
 if [ "${DEBUG_MODE}" != "true" ]; then
     echo "Final iptables NAT rules:"
     iptables -t nat -L -n -v
+    
+    echo ""
+    echo "Final iptables FILTER rules (FORWARD chain):"
+    iptables -L FORWARD -n -v --line-numbers
+    
+    echo ""
+    echo "Full filter table:"
+    iptables -L -n -v
 fi
 
 echo "✅ NAT Gateway ready - keeping container alive..."
