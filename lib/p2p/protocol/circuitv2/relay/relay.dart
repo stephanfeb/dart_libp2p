@@ -21,7 +21,6 @@ import 'package:meta/meta.dart';
 import '../../../../core/host/host.dart';
 import '../../../../core/network/stream.dart';
 import '../../../../core/network/context.dart';
-import '../../../../core/network/network.dart' show Connectedness;
 import '../../../../core/multiaddr.dart';
 import '../../../discovery/peer_info.dart';
 
@@ -175,6 +174,13 @@ class Relay {
     // The SOURCE peer is the one who opened this HOP stream (the peer dialing)
     final srcPeerId = stream.conn.remotePeer;
     
+    // Check rate limiting for HOP requests from this peer
+    if (!_resources.canMakeHopRequest(srcPeerId)) {
+      print('[Relay] RESOURCE_LIMIT_EXCEEDED: ${srcPeerId.toBase58()} exceeded HOP request rate limit');
+      await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
+      return;
+    }
+    
     // The DESTINATION peer is in msg.peer (the peer being dialed)
     if (!msg.hasPeer()) {
       await _writeResponse(stream, Status.MALFORMED_MESSAGE);
@@ -196,16 +202,13 @@ class Relay {
       return;
     }
 
-    // Check if the destination peer is currently connected to us
-    // Having a reservation doesn't guarantee the connection is still alive.
-    // If the connection dropped (network change, app backgrounded, etc.), we should
-    // fail fast rather than trying to dial with stale addresses.
-    final connectedness = _host.network.connectedness(dstInfo.peerId);
-    if (connectedness != Connectedness.connected) {
-      print('[Relay] CONNECTION_FAILED: destination peer ${dstInfo.peerId.toBase58()} has reservation but is not connected (connectedness: $connectedness)');
-      await _writeResponse(stream, Status.CONNECTION_FAILED);
-      return;
-    }
+    // Note: We do NOT pre-check connectedness here anymore. Even if a peer
+    // appears "notConnected", it might be in the middle of connecting/upgrading.
+    // The actual STOP stream creation below will naturally fail if the peer
+    // is truly unreachable, giving a more accurate error. This prevents race
+    // conditions where we reject valid relay requests just because the
+    // destination is still completing its connection handshake.
+    // Having a reservation is sufficient proof that the peer intends to be reachable.
 
     // Check if we have resources for a new connection
     if (!_resources.canConnect(srcPeerId, dstInfo.peerId)) {
@@ -346,6 +349,12 @@ class Relay {
     // Shared flag to track if either direction has encountered a fatal error
     // and requested termination of the relay
     var relayTerminated = false;
+    
+    // Bandwidth and duration tracking
+    int totalBytesRelayed = 0;
+    final maxBytes = _resources.connectionData;
+    final startTime = DateTime.now();
+    final maxDuration = Duration(seconds: _resources.connectionDuration);
 
     // Idempotent cleanup function
     // Note: We do NOT close streams here - each direction closes its own write side via closeWrite()
@@ -371,6 +380,27 @@ class Relay {
       try {
         int bytesRelayed = 0;
         while (!relayTerminated) {
+          // Check resource limits before reading more data
+          if (totalBytesRelayed >= maxBytes) {
+            print('[Relay] Bandwidth limit reached for $connKey ($totalBytesRelayed bytes)');
+            relayTerminated = true;
+            // Signal graceful termination
+            await dstStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on destination after bandwidth limit: $e');
+            });
+            break;
+          }
+          
+          if (DateTime.now().difference(startTime) > maxDuration) {
+            print('[Relay] Duration limit reached for $connKey');
+            relayTerminated = true;
+            // Signal graceful termination
+            await dstStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on destination after duration limit: $e');
+            });
+            break;
+          }
+          
           final data = await srcStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to destination via closeWrite
@@ -381,6 +411,7 @@ class Relay {
             break;
           }
           bytesRelayed += data.length;
+          totalBytesRelayed += data.length;
           await dstStream.write(data);
         }
       } catch (e) {
@@ -405,6 +436,27 @@ class Relay {
       try {
         int bytesRelayed = 0;
         while (!relayTerminated) {
+          // Check resource limits before reading more data
+          if (totalBytesRelayed >= maxBytes) {
+            print('[Relay] Bandwidth limit reached for $connKey ($totalBytesRelayed bytes)');
+            relayTerminated = true;
+            // Signal graceful termination
+            await srcStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on source after bandwidth limit: $e');
+            });
+            break;
+          }
+          
+          if (DateTime.now().difference(startTime) > maxDuration) {
+            print('[Relay] Duration limit reached for $connKey');
+            relayTerminated = true;
+            // Signal graceful termination
+            await srcStream.closeWrite().catchError((e) {
+              print('[Relay] Error closing write on source after duration limit: $e');
+            });
+            break;
+          }
+          
           final data = await dstStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to source via closeWrite
@@ -415,6 +467,7 @@ class Relay {
             break;
           }
           bytesRelayed += data.length;
+          totalBytesRelayed += data.length;
           await srcStream.write(data);
         }
       } catch (e) {
@@ -462,6 +515,41 @@ class Relay {
     startRelay().catchError((e) {
       print('[Relay] Unexpected error in relay coordination: $e');
     });
+  }
+
+  /// Gracefully terminates a relay connection
+  /// Signals EOF to both ends before closing streams
+  Future<void> _terminateRelay(P2PStream srcStream, P2PStream dstStream, String reason) async {
+    print('[Relay] Gracefully terminating relay: $reason');
+    
+    try {
+      // Signal EOF to both ends gracefully via closeWrite
+      await Future.wait([
+        srcStream.closeWrite().catchError((e) {
+          print('[Relay] Error closing write on source during termination: $e');
+        }),
+        dstStream.closeWrite().catchError((e) {
+          print('[Relay] Error closing write on destination during termination: $e');
+        }),
+      ]);
+      
+      // Give a brief moment for EOF to propagate
+      await Future.delayed(Duration(milliseconds: 100));
+      
+      // Now fully close both streams
+      await Future.wait([
+        srcStream.close().catchError((e) {
+          print('[Relay] Error closing source stream during termination: $e');
+        }),
+        dstStream.close().catchError((e) {
+          print('[Relay] Error closing destination stream during termination: $e');
+        }),
+      ]);
+      
+      print('[Relay] Graceful termination completed');
+    } catch (e) {
+      print('[Relay] Error during graceful termination: $e');
+    }
   }
 
   /// Writes a response with the given status.

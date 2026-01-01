@@ -37,7 +37,7 @@ class TestNotifiee implements Notifiee {
   final Function(Network, Conn)? connectedCallback;
   TestNotifiee({this.connectedCallback});
   @override
-  Future<void> connected(Network network, Conn conn) async => connectedCallback?.call(network, conn);
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async => connectedCallback?.call(network, conn);
   @override
   Future<void> disconnected(Network network, Conn conn) async {}
   @override

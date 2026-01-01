@@ -1754,7 +1754,7 @@ class _NetNotifiee implements Notifiee {
   _NetNotifiee(this._ids);
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     final peerId = conn.remotePeer;
     _log.fine('Identify.Notifiee.connected: Connection established with $peerId. Conn ID: ${conn.id}, Direction: ${conn.stat.stats.direction}');
     await _ids._connsMutex.synchronized(() async {

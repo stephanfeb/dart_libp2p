@@ -29,6 +29,9 @@ final _log = Logger('CircuitV2Client');
 
 const int maxCircuitMessageSize = 4096; // Max message size for circuit protocol messages
 
+/// Callback invoked when a relay path fails
+typedef RelayPathFailedCallback = void Function(PeerId remotePeer, String reason);
+
 /// CircuitV2Client implements the Circuit Relay v2 protocol as a Transport.
 /// It allows peers to establish connections through relay servers when direct
 /// connections are not possible (e.g., due to NATs or firewalls).
@@ -57,6 +60,9 @@ class CircuitV2Client implements Transport {
   // Maps destination peer ID -> active RelayedConn
   final Map<String, RelayedConn> _activeConnections = {};
   final Lock _dialMutex = Lock();
+  
+  // Callback for relay path failures
+  RelayPathFailedCallback? onRelayPathFailed;
 
 
   CircuitV2Client({
@@ -170,10 +176,8 @@ class CircuitV2Client implements Transport {
       }
 
       final sourcePeerId = p2p_peer.PeerId.fromBytes(Uint8List.fromList(msg.peer.id)); // Ensure Uint8List
-      // TODO: Add source peer to peerstore with its addresses from msg.peer.addrs
-      // This might require converting List<Uint8List> to List<Multiaddr>
-      // host.peerstore().addAddrs(sourcePeerId, sourcePeerAddrs, ttl);
-
+      final sourcePeerShort = sourcePeerId.toBase58().substring(0, 8);
+      
       // The stream 'stream' is now the connection from the source peer, relayed via 'stream.conn.remotePeer'
       // We need to create a RelayedConn that represents this.
       // The local peer is our host's peer ID.
@@ -188,6 +192,21 @@ class CircuitV2Client implements Transport {
       // Ensure Multiaddr.fromString is available or use appropriate constructor
       final localCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${host.id.toString()}');
       final remoteCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${sourcePeerId.toString()}');
+      
+      // CRITICAL: Store the relay circuit address in the peerstore so we can dial back to this peer
+      // Without this, the peerstore has no address for the incoming peer, and any attempt
+      // to dial/ping them will fail with "No addresses found in peerstore"
+      try {
+        await host.peerStore.addrBook.addAddrs(
+          sourcePeerId, 
+          [remoteCircuitMa], 
+          AddressTTL.connectedAddrTTL,
+        );
+        _log.info('[CircuitV2Client._handleStreamV2] 📝 Stored relay circuit address for $sourcePeerShort: $remoteCircuitMa');
+        print('🎯 [CircuitV2Client._handleStreamV2] Stored relay address for $sourcePeerShort: $remoteCircuitMa');
+      } catch (e) {
+        _log.warning('[CircuitV2Client._handleStreamV2] Failed to store relay address for $sourcePeerShort: $e');
+      }
 
       // Check if we already have a connection to this peer (with mutex)
       final sourcePeerStr = sourcePeerId.toString();
@@ -427,8 +446,7 @@ class CircuitV2Client implements Transport {
       }
       
       // Wrap this stream in a RelayedConn object and return it.
-      // NOTE: We don't track outbound connections here - the Swarm handles this
-      // after upgrade completes, preventing race conditions with parallel dials.
+      final destPeerStr = destId.toString();
       final relayedConn = RelayedConn(
         stream: finalStream as P2PStream<Uint8List>, // Cast needed
         transport: this,
@@ -436,8 +454,18 @@ class CircuitV2Client implements Transport {
         remotePeer: destId,
         localMultiaddr: addr, // The address we dialed
         remoteMultiaddr: addr, // Keep the full circuit address including /p2p-circuit
-        // No onClose callback needed for outbound - Swarm manages connection lifecycle
+        onClose: () {
+          // Track outbound connections too for proper cleanup
+          _activeConnections.remove(destPeerStr);
+          _log.fine('[CircuitV2Client] Removed closed outbound connection from tracking map: $destPeerStr');
+        },
       );
+      
+      // Track the outbound connection
+      await _dialMutex.synchronized(() async {
+        _activeConnections[destPeerStr] = relayedConn;
+        _log.info('[CircuitV2Client.dial] 📝 Stored outbound connection in tracking map for $destPeerStr');
+      });
       _log.info('[CircuitV2Client.dial] 🎉 Successfully dialed ${destId.toString()} via relay ${relayId.toString()}');
       print('🎉 [CircuitV2Client.dial] SUCCESS! Returning RelayedConn for ${destId.toString()}');
       print('   Local peer: ${relayedConn.localPeer}');

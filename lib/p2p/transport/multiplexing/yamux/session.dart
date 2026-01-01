@@ -15,6 +15,7 @@ import '../../../../core/network/rcmgr.dart'; // Explicit import for PeerScope
 import '../../../../core/network/context.dart'; // Explicit import for Context
 import 'frame.dart';
 import 'stream.dart';
+import 'metrics_observer.dart';
 
 // Added logger instance
 final _log = Logger('YamuxSession');
@@ -54,7 +55,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   final TransportConn _connection;
   final MultiplexerConfig _config;
   final bool _isClient;
-  PeerScope? _peerScope; 
+  PeerScope? _peerScope;
+  final YamuxMetricsObserver? metricsObserver; 
 
   final _streams = <int, YamuxStream>{};
   int _nextStreamId;
@@ -68,15 +70,20 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   int _lastPingId = 0;
   final _pendingStreams = <int, Completer<void>>{};
   
+  // Ping-pong timeout detection
+  final Map<int, DateTime> _pendingPings = {};
+  static const Duration _pingTimeout = Duration(seconds: 30);
+  static const int _pingTimeoutThreshold = 5; // Close after this many timeouts
+  
   // Write lock to serialize frame writes and prevent Noise encryption nonce desync
   // This ensures encryption operations complete sequentially to maintain nonce ordering
   final Queue<Completer<void>> _writeLockQueue = Queue<Completer<void>>();
   bool _writeLockHeld = false;
 
-  YamuxSession(this._connection, this._config, this._isClient, [this._peerScope])
+  YamuxSession(this._connection, this._config, this._isClient, [this._peerScope, this.metricsObserver])
       : _instanceId = _instanceCounter++, 
         _nextStreamId = _isClient ? 1 : 2 {
-    _log.fine('$_logPrefix Constructor. IsClient: $_isClient');
+    _log.fine('$_logPrefix Constructor. IsClient: $_isClient, MetricsObserver: ${metricsObserver != null}');
     _init();
   }
 
@@ -104,15 +111,39 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   Future<void> _sendPing() async {
     if (_closed) return;
+    
+    // Check for timed-out pings
+    final now = DateTime.now();
+    final timedOut = _pendingPings.entries
+        .where((e) => now.difference(e.value) > _pingTimeout)
+        .toList();
+    
+    if (timedOut.isNotEmpty) {
+      _log.warning('$_logPrefix ⚠️  [YAMUX-KEEPALIVE] ${timedOut.length} ping(s) timed out (${_pingTimeout.inSeconds}s) - connection may be degraded');
+      
+      // After threshold timeouts, close the session as unhealthy
+      // This is lenient for mobile connections with intermittent connectivity
+      if (timedOut.length >= _pingTimeoutThreshold) {
+        _log.severe('$_logPrefix ❌ [YAMUX-KEEPALIVE] Multiple ping timeouts (${timedOut.length}) - closing unhealthy session');
+        await close();
+        return;
+      }
+    }
+    
     final pingId = ++_lastPingId;
-    _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Sending PING frame, id: $pingId, conn: ${_connection.id}');
+    _pendingPings[pingId] = now;
+    
+    _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Sending PING frame, id: $pingId, conn: ${_connection.id}, pending: ${_pendingPings.length}');
     try {
       final frame = YamuxFrame.ping(false, pingId);
       await _sendFrame(frame);
       _log.warning('$_logPrefix ✅ [YAMUX-KEEPALIVE] PING frame sent successfully, id: $pingId');
+      
+      // Notify metrics observer
+      metricsObserver?.onPingSent(remotePeer, pingId, now);
     } catch (e) {
       _log.warning('$_logPrefix ❌ [YAMUX-KEEPALIVE] Error sending PING: $e. Session may be unhealthy.');
-      // Consider closing session if ping fails repeatedly, but for now just log.
+      _pendingPings.remove(pingId);
     }
   }
 
@@ -518,6 +549,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       await stream.open(); 
       _log.fine('$_logPrefix _handleNewStream: Local YamuxStream ID ${frame.streamId} opened.'); // Elevated log level
+      
+      // Notify metrics observer of incoming stream opened
+      metricsObserver?.onStreamOpened(remotePeer, frame.streamId, stream.protocol());
+      
       _log.fine('$_logPrefix _handleNewStream: Adding fully initialized stream ID ${frame.streamId} to _incomingStreamsController.'); // Elevated log level
       _incomingStreamsController.add(stream);
 
@@ -537,15 +572,33 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   Future<void> _handlePing(YamuxFrame frame) async {
-    final opaqueValue = frame.length; 
-    if (frame.flags & YamuxFlags.ack != 0) { 
-      _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PONG (PING ACK), opaque: $opaqueValue, conn: ${_connection.id}');
+    // Extract opaque value from frame.data (8-byte big-endian integer), NOT frame.length
+    // frame.length is just the data size (8), not the ping ID itself
+    int opaqueValue = 0;
+    if (frame.data.length >= 8) {
+      final byteData = ByteData.view(frame.data.buffer, frame.data.offsetInBytes, 8);
+      opaqueValue = byteData.getUint64(0, Endian.big);
+    }
+    
+    if (frame.flags & YamuxFlags.ack != 0) {
+      // PONG received - clear from pending pings
+      final removed = _pendingPings.remove(opaqueValue);
+      if (removed != null) {
+        final receivedTime = DateTime.now();
+        final rtt = receivedTime.difference(removed);
+        _log.fine('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PONG for ping $opaqueValue, RTT: ${rtt.inMilliseconds}ms, remaining pending: ${_pendingPings.length}');
+        
+        // Notify metrics observer
+        metricsObserver?.onPongReceived(remotePeer, opaqueValue, removed, receivedTime, rtt);
+      } else {
+        _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received unexpected PONG for ping $opaqueValue (not in pending map, keys: ${_pendingPings.keys.toList()})');
+      }
       return;
     }
-    _log.warning('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PING request, opaque: $opaqueValue, conn: ${_connection.id}. Sending PONG.');
+    _log.fine('$_logPrefix 🏓 [YAMUX-KEEPALIVE] Received PING request, opaque: $opaqueValue, conn: ${_connection.id}. Sending PONG.');
     final response = YamuxFrame.ping(true, opaqueValue); 
     await _sendFrame(response);
-    _log.warning('$_logPrefix ✅ [YAMUX-KEEPALIVE] PONG sent successfully, opaque: $opaqueValue');
+    _log.fine('$_logPrefix ✅ [YAMUX-KEEPALIVE] PONG sent successfully, opaque: $opaqueValue');
   }
 
   Future<void> _handleGoAway(YamuxFrame frame) async {
@@ -768,6 +821,9 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     final streamId = _nextStreamId;
     _nextStreamId += 2;
     
+    // Notify metrics observer of stream open start
+    metricsObserver?.onStreamOpenStart(remotePeer, streamId);
+    
     // YAMUX PROTOCOL COMPLIANCE: Validate stream ID assignment follows Yamux specification
     // Client should only create odd-numbered streams (1, 3, 5, ...)
     // Server should only create even-numbered streams (2, 4, 6, ...)
@@ -824,6 +880,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       _log.finer('$_logPrefix openStream: Calling stream.open() for ID $streamId.');
       await stream.open();
       _log.fine('$_logPrefix openStream: Outgoing YamuxStream ID $streamId opened locally.'); // Elevated log level
+      
+      // Notify metrics observer of successful stream open
+      metricsObserver?.onStreamOpened(remotePeer, streamId, stream.protocol());
+      
       return stream;
     } catch (e) {
       _log.severe('$_logPrefix openStream: FAILED to open new stream ID $streamId: $e'); // More specific message

@@ -330,7 +330,7 @@ class _NetNotifiee implements Notifiee {
   _NetNotifiee(this._hp);
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     // Hole punch if it's an inbound proxy connection.
     // If we already have a direct connection with the remote peer, this will be a no-op.
     if (conn.stat.stats.direction == Direction.inbound && isRelayAddress(conn.remoteMultiaddr)) {
