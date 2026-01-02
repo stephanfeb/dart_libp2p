@@ -20,6 +20,9 @@ message HopMessage {
   optional Limit limit = 4;
 
   optional Status status = 5;
+  
+  // Diagnostic session ID for cross-node correlation (extension)
+  optional bytes diagnostic_session_id = 6;
 }
 
 message StopMessage {
@@ -36,6 +39,9 @@ message StopMessage {
   optional Limit limit = 3;
 
   optional Status status = 4;
+  
+  // Diagnostic session ID for cross-node correlation (extension)
+  optional bytes diagnostic_session_id = 5;
 }
 
 message Peer {

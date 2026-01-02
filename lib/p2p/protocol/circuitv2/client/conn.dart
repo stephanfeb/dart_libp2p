@@ -7,6 +7,7 @@ import 'package:dart_libp2p/core/host/host.dart'; // Needed for CircuitV2Client.
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/common.dart'; // For ScopeStat, ResourceScopeSpan if needed by ConnScope
 import 'package:dart_libp2p/core/network/conn.dart';
+import 'package:dart_libp2p/core/network/connection_context.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
@@ -53,6 +54,12 @@ class RelayedConn implements TransportConn {
   final _RelayedConnStats _connStats;
   final void Function()? _onClose; // Callback for cleanup when connection closes
   // final bool _isInitiator; // Captured by _stream.stat().direction
+  
+  /// Diagnostic session ID for cross-node correlation
+  final String? diagnosticSessionId;
+
+  /// Connection context for event correlation across layers
+  ConnectionContext? _context;
 
   RelayedConn({
     required P2PStream<Uint8List> stream,
@@ -62,6 +69,10 @@ class RelayedConn implements TransportConn {
     required MultiAddr localMultiaddr,
     required MultiAddr remoteMultiaddr,
     void Function()? onClose,
+    this.diagnosticSessionId,
+    String? outerConnectionId,
+    String? relayPeerId,
+    int? hopStreamId,
     // required bool isInitiator, // isInitiator can be derived from stream.stat().direction
   })  : _stream = stream,
         _transport = transport,
@@ -71,7 +82,18 @@ class RelayedConn implements TransportConn {
         _remoteMultiaddr = remoteMultiaddr,
         _onClose = onClose,
         // _isInitiator = isInitiator,
-        _connStats = _RelayedConnStats(stream.stat());
+        _connStats = _RelayedConnStats(stream.stat()) {
+    // Generate connection context for relay inner connection
+    if (outerConnectionId != null && relayPeerId != null) {
+      _context = ConnectionContext.relayInner(
+        remotePeerId: remotePeer.toBase58(),
+        outerConnectionId: outerConnectionId,
+        relayPeerId: relayPeerId,
+        sessionId: diagnosticSessionId,
+        hopStreamId: hopStreamId,
+      );
+    }
+  }
 
   // == Conn Methods ==
   @override
@@ -133,6 +155,9 @@ class RelayedConn implements TransportConn {
 
   @override
   ConnScope get scope => _stream.conn.scope;
+
+  /// Gets the connection context for event correlation
+  ConnectionContext? get context => _context;
 
   @override
   Future<P2PStream<dynamic>> newStream(Context context) {

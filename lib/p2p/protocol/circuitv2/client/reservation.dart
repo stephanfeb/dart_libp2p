@@ -35,17 +35,50 @@ class ReservationError implements Exception {
 extension ReservationExtension on CircuitV2Client { // Changed from Client to CircuitV2Client
   /// Reserves a slot on a relay.
   Future<Reservation> reserve(PeerId relayPeerId) async {
-    // Open a stream to the relay using Hop protocol
-    // 'this.host' or simply 'host' refers to the host field of CircuitV2Client
-    final stream = await host.newStream(relayPeerId, [CircuitV2Protocol.protoIDv2Hop], Context());
+    // Notify metrics observer that reservation is starting
+    final reservationStartTime = DateTime.now();
+    metricsObserver?.onReservationRequested(relayPeerId, reservationStartTime);
+    
+    try {
+      // Open a stream to the relay using Hop protocol
+      // 'this.host' or simply 'host' refers to the host field of CircuitV2Client
+      final stream = await host.newStream(relayPeerId, [CircuitV2Protocol.protoIDv2Hop], Context());
 
-    // Set deadline for the entire operation, including stream opening, write, and read.
-    // Dart's newStream doesn't have a per-operation deadline like Go's s.SetDeadline.
-    // We'll rely on the timeout for the Future.
-    return _reserveStream(stream, relayPeerId).timeout(reserveTimeout, onTimeout: () {
-      stream.close(); // Ensure stream is closed on timeout
-      throw ReservationError(status: pb.Status.CONNECTION_FAILED, reason: 'reservation timed out');
-    });
+      // Set deadline for the entire operation, including stream opening, write, and read.
+      // Dart's newStream doesn't have a per-operation deadline like Go's s.SetDeadline.
+      // We'll rely on the timeout for the Future.
+      final reservation = await _reserveStream(stream, relayPeerId).timeout(reserveTimeout, onTimeout: () {
+        stream.close(); // Ensure stream is closed on timeout
+        throw ReservationError(status: pb.Status.CONNECTION_FAILED, reason: 'reservation timed out');
+      });
+      
+      // Notify metrics observer of successful reservation
+      final reservationCompleteTime = DateTime.now();
+      final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
+      metricsObserver?.onReservationCompleted(
+        relayPeerId,
+        reservationStartTime,
+        reservationCompleteTime,
+        reservationDuration,
+        true,
+        null,
+      );
+      
+      return reservation;
+    } catch (e) {
+      // Notify metrics observer of failed reservation
+      final reservationCompleteTime = DateTime.now();
+      final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
+      metricsObserver?.onReservationCompleted(
+        relayPeerId,
+        reservationStartTime,
+        reservationCompleteTime,
+        reservationDuration,
+        false,
+        e.toString(),
+      );
+      rethrow;
+    }
   }
 
   Future<Reservation> _reserveStream(P2PStream stream, PeerId relayPeerId) async {

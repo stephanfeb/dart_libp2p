@@ -61,7 +61,9 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   final _streams = <int, YamuxStream>{};
   int _nextStreamId;
   Future<void> Function(P2PStream stream)? _streamHandler;
-  final _incomingStreamsController = StreamController<P2PStream>.broadcast();
+  // Changed from broadcast to single-subscription to prevent race condition
+  // where acceptStream() misses events if SYN arrives before .first listener attaches
+  final _incomingStreamsController = StreamController<P2PStream>();
   bool _closed = false;
   bool _cleanupStarted = false; 
   final _initCompleter = Completer<void>();
@@ -339,6 +341,14 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       final bool connIsClosed = _connection.isClosed; // Capture current state
       if (!_closed && !connIsClosed) {
         _log.severe('$_logPrefix Error in _readFrames loop (session and conn not marked closed): $e', st);
+        
+        // Notify metrics observer of session error
+        try {
+          metricsObserver?.onSessionError(remotePeer, e.toString(), st);
+        } catch (observerError) {
+          _log.warning('$_logPrefix Error notifying metrics observer: $observerError');
+        }
+        
         await _goAway(YamuxCloseReason.internalError);
       } else if (!_closed && connIsClosed) {
         _log.fine('$_logPrefix _readFrames: Underlying connection found closed, error during read: $e', st);
@@ -538,6 +548,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       initialWindowSize: initialWindow, 
       sendFrame: _sendFrame,
       parentConn: this, // Added parentConn
+      remotePeer: remotePeer, // For metrics reporting
+      metricsObserver: metricsObserver, // For metrics reporting
       logPrefix: "$_logPrefix StreamID=${frame.streamId}",
     );
 
@@ -852,6 +864,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       initialWindowSize: _config.initialStreamWindowSize, 
       sendFrame: _sendFrame,
       parentConn: this, // Added parentConn
+      remotePeer: remotePeer, // For metrics reporting
+      metricsObserver: metricsObserver, // For metrics reporting
       logPrefix: "$_logPrefix StreamID=$streamId",
     );
 

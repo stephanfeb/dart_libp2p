@@ -38,6 +38,7 @@ import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
 import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/client/metrics_observer.dart';
 
 final Logger _logger = Logger('Config');
 
@@ -105,6 +106,9 @@ class Config {
   
   // Relay server configuration
   List<String> relayServers = []; // List of relay multiaddr strings to auto-connect
+  
+  // Relay metrics observer (for instrumentation)
+  RelayMetricsObserver? relayMetricsObserver;
 
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
@@ -502,6 +506,11 @@ class Libp2p {
   
   static Option relayServers(List<String> servers) {
     return (config) => config.withRelayServers(servers);
+  }
+
+  /// Sets the relay metrics observer for tracking relay client operations
+  static Option relayMetricsObserver(RelayMetricsObserver observer) {
+    return (config) => config.relayMetricsObserver = observer;
   }
 
   // AutoNATv2 specific options

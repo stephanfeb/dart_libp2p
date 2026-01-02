@@ -44,6 +44,13 @@ class UDXTransport implements Transport {
   final Set<UDXSessionConn> _activeDialerConns = {};
   // static int _nextDialStreamIdPairBase = 1; // Removed static counter
 
+  /// Optional metrics observer for UDX transport events
+  UdxMetricsObserver? metricsObserver;
+  
+  /// Callback when a connection is established with a peer.
+  /// Provides the local connection ID and peer ID for metrics tracking.
+  void Function(ConnectionId localCid, PeerId peerId)? onConnectionEstablished;
+
   @visibleForTesting
   ConnManager get connectionManager => _connManager;
 
@@ -108,7 +115,7 @@ class UDXTransport implements Transport {
 
       // Create multiplexer with exception handling
       multiplexer = await UDXExceptionHandler.handleUDXOperation(
-        () async => UDXMultiplexer(rawSocket!),
+        () async => UDXMultiplexer(rawSocket!, metricsObserver: metricsObserver),
         'UDXMultiplexer.create',
       );
       _logger.fine('[UDXTransport._performDial] UDXMultiplexer created');
@@ -152,18 +159,54 @@ class UDXTransport implements Transport {
       // Phase 1.2: UDX Socket Health Monitoring - Handshake timing
       _logger.fine('[UDXTransport._performDial] Handshake start for $host:$port');
       final handshakeStart = DateTime.now();
-      await UDXExceptionHandler.handleUDXOperation(
-        () => UDXExceptionUtils.withTimeout(
-          udpSocket!.handshakeComplete,
-          effectiveTimeout,
+      
+      try {
+        await UDXExceptionHandler.handleUDXOperation(
+          () => UDXExceptionUtils.withTimeout(
+            udpSocket!.handshakeComplete,
+            effectiveTimeout,
+            'UDPSocket.handshakeComplete($host:$port)',
+          ),
           'UDPSocket.handshakeComplete($host:$port)',
-        ),
-        'UDPSocket.handshakeComplete($host:$port)',
-      );
-      final handshakeDuration = DateTime.now().difference(handshakeStart);
-      _logger.fine('[UDXTransport._performDial] Handshake completed for $host:$port, duration: ${handshakeDuration.inMilliseconds}ms');
+        );
+        final handshakeDuration = DateTime.now().difference(handshakeStart);
+        _logger.fine('[UDXTransport._performDial] Handshake completed for $host:$port, duration: ${handshakeDuration.inMilliseconds}ms');
+      } catch (e) {
+        final handshakeError = e.toString();
+        final handshakeDuration = DateTime.now().difference(handshakeStart);
+        _logger.warning('[UDXTransport._performDial] Handshake failed for $host:$port after ${handshakeDuration.inMilliseconds}ms: $e');
+        
+        // Notify metrics observer of handshake failure
+        if (metricsObserver != null && udpSocket != null) {
+          try {
+            metricsObserver!.onHandshakeComplete(
+              udpSocket!.cids.localCid,
+              handshakeDuration,
+              false,
+              handshakeError,
+            );
+          } catch (observerError) {
+            _logger.warning('[UDXTransport._performDial] Error notifying metrics observer of handshake failure: $observerError');
+          }
+        }
+        
+        rethrow;
+      }
 
-      final localMa = MultiAddr('/ip4/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      // Register connection-to-peer mapping for metrics tracking
+      final peerIdStr = addr.valueForProtocol('p2p');
+      if (peerIdStr != null && onConnectionEstablished != null) {
+        try {
+          final peerId = PeerId.fromString(peerIdStr);
+          onConnectionEstablished!(udpSocket!.cids.localCid, peerId);
+          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket!.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
+        } catch (e) {
+          _logger.warning('[UDXTransport._performDial] Failed to register connection-peer mapping: $e');
+        }
+      }
+
+      final localProtocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final localMa = MultiAddr('/$localProtocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       final remoteMa = addr;
 
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
@@ -214,7 +257,6 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport.listen] Creating RawDatagramSocket for $host:$port');
       
       // Create raw UDP socket and bind it
-      final isIPv6 = UDX.getAddressFamily(host) == 6;
       final bindAddress = host == '0.0.0.0' ? InternetAddress.anyIPv4 :
                          host == '::' ? InternetAddress.anyIPv6 :
                          InternetAddress(host);
@@ -223,10 +265,11 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport.listen] RawDatagramSocket bound to: ${rawSocket.address.address}:${rawSocket.port}');
 
       // Create multiplexer
-      multiplexer = UDXMultiplexer(rawSocket);
+      multiplexer = UDXMultiplexer(rawSocket, metricsObserver: metricsObserver);
       _logger.fine('[UDXTransport.listen] UDXMultiplexer created');
 
-      final boundMa = MultiAddr('/ip4/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      final protocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       _logger.fine('[UDXTransport.listen] Creating UDXListener for $boundMa');
       final listener = UDXListener(
         listeningSocket: multiplexer,

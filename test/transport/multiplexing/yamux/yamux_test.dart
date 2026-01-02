@@ -265,6 +265,196 @@ void main() {
       }
     });
 
+    test('should allow opening multiple sequential streams after closing previous ones', () async {
+      print('\n=== Sequential Stream Reuse Test ===');
+      print('Goal: Verify that a Yamux session can open new streams after closing old ones');
+      
+      // Track all created streams for cleanup
+      final clientStreams = <P2PStream>[];
+      final serverStreams = <P2PStream>[];
+      
+      try {
+        const numSequentialStreams = 3;
+        
+        for (var i = 0; i < numSequentialStreams; i++) {
+          print('\n--- Opening stream pair ${i + 1}/$numSequentialStreams ---');
+          
+          // Set up stream handler for this iteration
+          final streamReceived = Completer<P2PStream>();
+          session2.setStreamHandler((stream) async {
+            print('Server received stream with ID: ${(stream as YamuxStream).id()}');
+            if (!streamReceived.isCompleted) {
+              streamReceived.complete(stream);
+            }
+          });
+          
+          // Open a new stream
+          print('Client opening stream...');
+          final clientStream = await withTimeout(
+            session1.openStream(core_context.Context()),
+            'client stream $i creation',
+          ) as P2PStream<Uint8List>;
+          clientStreams.add(clientStream);
+          print('Client opened stream: ${(clientStream as YamuxStream).id()}');
+          
+          // Server accepts the stream
+          print('Server accepting stream...');
+          final serverStream = await withTimeout(
+            streamReceived.future,
+            'server stream $i acceptance',
+          );
+          serverStreams.add(serverStream);
+          print('Server accepted stream: ${(serverStream as YamuxStream).id()}');
+          
+          // Test basic communication on this stream
+          print('Testing communication on stream pair $i...');
+          final testData = Uint8List.fromList([i, i + 1, i + 2]);
+          await withTimeout(clientStream.write(testData), 'client write $i');
+          final received = await withTimeout(serverStream.read(), 'server read $i');
+          expect(received, equals(testData), reason: 'Data mismatch on stream $i');
+          print('✅ Stream pair $i communication successful');
+          
+          // Close both streams cleanly before opening the next pair
+          print('Closing stream pair $i...');
+          await withTimeout(clientStream.close(), 'client stream $i close');
+          await withTimeout(serverStream.close(), 'server stream $i close');
+          print('✅ Stream pair $i closed');
+          
+          // Give the session time to clean up the closed streams
+          if (i < numSequentialStreams - 1) {
+            print('Waiting for session cleanup before next stream...');
+            await Future.delayed(Duration(milliseconds: 500));
+            
+            // Verify session is still healthy
+            expect(session1.isClosed, isFalse, reason: 'Client session should still be open after closing stream $i');
+            expect(session2.isClosed, isFalse, reason: 'Server session should still be open after closing stream $i');
+            print('✅ Sessions verified healthy');
+          }
+        }
+        
+        print('\n✅ Sequential stream reuse test PASSED - All $numSequentialStreams stream pairs opened successfully');
+        
+      } catch (e, stackTrace) {
+        print('\n❌ Sequential stream reuse test FAILED: $e');
+        print('Stack trace: $stackTrace');
+        print('\nDiagnostic Info:');
+        print('- Total client streams created: ${clientStreams.length}');
+        print('- Total server streams created: ${serverStreams.length}');
+        print('- Client session closed: ${session1.isClosed}');
+        print('- Server session closed: ${session2.isClosed}');
+        rethrow;
+      } finally {
+        // Cleanup: close any streams that might still be open
+        print('\nCleaning up remaining streams...');
+        for (var i = 0; i < clientStreams.length; i++) {
+          try {
+            if (!clientStreams[i].isClosed) {
+              await clientStreams[i].close().timeout(Duration(seconds: 2));
+            }
+          } catch (e) {
+            print('Error closing client stream $i: $e');
+          }
+        }
+        for (var i = 0; i < serverStreams.length; i++) {
+          try {
+            if (!serverStreams[i].isClosed) {
+              await serverStreams[i].close().timeout(Duration(seconds: 2));
+            }
+          } catch (e) {
+            print('Error closing server stream $i: $e');
+          }
+        }
+        print('Cleanup complete');
+      }
+    }, timeout: Timeout(Duration(seconds: 60)));
+
+    test('should not lose stream events with concurrent acceptStream calls', () async {
+      print('\n=== Broadcast Stream Race Condition Test ===');
+      print('Goal: Verify that acceptStream() does not miss stream events due to broadcast stream timing');
+      
+      // This test exposes a race condition where:
+      // 1. acceptStream() is called and starts listening to the broadcast stream
+      // 2. openStream() sends SYN
+      // 3. Server receives SYN and adds the stream to _incomingStreamsController
+      // 4. But if the .first listener from acceptStream() isn't fully attached yet,
+      //    the event gets lost in a broadcast stream
+      
+      try {
+        const numIterations = 5;
+        
+        for (var i = 0; i < numIterations; i++) {
+          print('\n--- Iteration ${i + 1}/$numIterations ---');
+          
+          // Start acceptStream FIRST (this is the critical timing)
+          print('Server starting acceptStream...');
+          final acceptFuture = session2.acceptStream().timeout(
+            Duration(seconds: 5),
+            onTimeout: () {
+              print('❌ acceptStream() TIMED OUT - stream event was lost!');
+              throw TimeoutException('acceptStream timed out - likely missed stream event from broadcast');
+            },
+          );
+          
+          // Very short delay to simulate real-world timing where accept is "waiting"
+          await Future.delayed(Duration(milliseconds: 10));
+          
+          // Now open the stream (sends SYN, server processes it, adds to controller)
+          print('Client opening stream...');
+          final openFuture = session1.openStream(core_context.Context()).timeout(
+            Duration(seconds: 5),
+            onTimeout: () => throw TimeoutException('openStream timed out'),
+          );
+          
+          // Both should complete
+          print('Waiting for both acceptStream and openStream to complete...');
+          final results = await Future.wait([
+            openFuture,
+            acceptFuture,
+          ]).timeout(
+            Duration(seconds: 6),
+            onTimeout: () {
+              print('❌ RACE CONDITION DETECTED:');
+              print('   acceptStream() is stuck waiting because the broadcast stream');
+              print('   lost the event when the stream was added to the controller');
+              throw TimeoutException('Race condition: acceptStream missed stream event');
+            },
+          );
+          
+          final clientStream = results[0] as YamuxStream;
+          final serverStream = results[1] as YamuxStream;
+          
+          print('✅ Both streams obtained: client=${clientStream.id()}, server=${serverStream.id()}');
+          expect(clientStream.id(), equals(serverStream.id()));
+          
+          // Quick communication test
+          final testData = Uint8List.fromList([i]);
+          await clientStream.write(testData);
+          final received = await serverStream.read().timeout(Duration(seconds: 2));
+          expect(received, equals(testData));
+          
+          // Clean up
+          await clientStream.close();
+          await serverStream.close();
+          
+          // Small delay before next iteration
+          await Future.delayed(Duration(milliseconds: 100));
+          
+          print('✅ Iteration ${i + 1} completed successfully');
+        }
+        
+        print('\n✅ Broadcast stream race condition test PASSED - All $numIterations iterations succeeded');
+        
+      } catch (e, stackTrace) {
+        print('\n❌ Broadcast stream race condition test FAILED: $e');
+        print('Stack trace: $stackTrace');
+        print('\nThis failure indicates that the broadcast StreamController in YamuxSession');
+        print('is losing stream events when acceptStream() is called concurrently with');
+        print('openStream(). The fix is to use a single-subscription StreamController');
+        print('or implement proper queueing for incoming streams.');
+        rethrow;
+      }
+    }, timeout: Timeout(Duration(seconds: 60)));
+
     test('handles flow control', () async {
       print('\n=== Flow Control Test ===');
       

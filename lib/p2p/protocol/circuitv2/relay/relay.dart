@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
@@ -23,6 +24,7 @@ import '../../../../core/network/stream.dart';
 import '../../../../core/network/context.dart';
 import '../../../../core/multiaddr.dart';
 import '../../../discovery/peer_info.dart';
+import 'relay_metrics_observer.dart';
 
 /// Relay implements the relay service for the p2p-circuit/v2 protocol.
 class Relay {
@@ -30,8 +32,12 @@ class Relay {
   final Resources _resources;
   final Map<String, DateTime> _reservations = {};
   final Map<String, int> _connections = {};
+  final Map<String, String?> _sessionIds = {}; // Store session IDs for active connections
   Timer? _gcTimer;
   bool _closed = false;
+  
+  /// Optional metrics observer for tracking relay server operations
+  RelayServerMetricsObserver? metricsObserver;
 
   /// Creates a new relay service.
   Relay(this._host, this._resources);
@@ -114,9 +120,13 @@ class Relay {
     final peerId = stream.conn.remotePeer;
     print('[Relay] Handling RESERVE from peer: ${peerId.toBase58()}');
     
+    metricsObserver?.onReservationRequested(peerId);
+    
     // Check if we have resources for a new reservation
     if (!_resources.canReserve(peerId)) {
       print('[Relay] Resource limit exceeded for peer: ${peerId.toBase58()}');
+      metricsObserver?.onReservationDenied(peerId, 'resource_limit_exceeded');
+      metricsObserver?.onResourceLimitExceeded(peerId, 'reservation');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -125,6 +135,8 @@ class Relay {
     final expire = DateTime.now().add(Duration(seconds: _resources.reservationTtl));
     _reservations[peerId.toString()] = expire;
     print('[Relay] Reservation created for peer: ${peerId.toBase58()}, expires: $expire');
+    
+    metricsObserver?.onReservationGranted(peerId, expire);
 
     // Create a reservation voucher
     final voucher = ReservationVoucherData(
@@ -174,9 +186,15 @@ class Relay {
     // The SOURCE peer is the one who opened this HOP stream (the peer dialing)
     final srcPeerId = stream.conn.remotePeer;
     
+    // Extract diagnostic session ID if present
+    final sessionId = msg.hasDiagnosticSessionId()
+        ? utf8.decode(msg.diagnosticSessionId)
+        : null;
+    
     // Check rate limiting for HOP requests from this peer
     if (!_resources.canMakeHopRequest(srcPeerId)) {
       print('[Relay] RESOURCE_LIMIT_EXCEEDED: ${srcPeerId.toBase58()} exceeded HOP request rate limit');
+      metricsObserver?.onResourceLimitExceeded(srcPeerId, 'hop_request_rate');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -192,12 +210,15 @@ class Relay {
       await _writeResponse(stream, Status.MALFORMED_MESSAGE);
       return;
     }
+    
+    metricsObserver?.onRelayConnectRequested(srcPeerId, dstInfo.peerId, sessionId: sessionId);
 
     // Check if the DESTINATION peer has a reservation
     // (the peer being dialed TO needs the reservation, not the one dialing FROM)
     final reservation = _reservations[dstInfo.peerId.toString()];
     if (reservation == null || reservation.isBefore(DateTime.now())) {
       print('[Relay] NO_RESERVATION: ${dstInfo.peerId} does not have an active reservation');
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'no_reservation', sessionId: sessionId);
       await _writeResponse(stream, Status.NO_RESERVATION);
       return;
     }
@@ -212,6 +233,8 @@ class Relay {
 
     // Check if we have resources for a new connection
     if (!_resources.canConnect(srcPeerId, dstInfo.peerId)) {
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'resource_limit_exceeded', sessionId: sessionId);
+      metricsObserver?.onResourceLimitExceeded(srcPeerId, 'connection');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -242,6 +265,11 @@ class Relay {
       final stopMsg = StopMessage()
         ..type = StopMessage_Type.CONNECT
         ..peer = peerInfoToPeerV2(PeerInfo(peerId: srcPeerId, addrs: <MultiAddr>[].toSet()));
+      
+      // Forward session ID to destination if present
+      if (sessionId != null) {
+        stopMsg.diagnosticSessionId = utf8.encode(sessionId);
+      }
       print('[Relay] STOP message created, type: ${stopMsg.type}');
 
       // Write the message with length prefix (required for DelimitedReader on the receiving end)
@@ -279,10 +307,13 @@ class Relay {
 
       // Check the status
       if (pb.status != Status.OK) {
+        metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'stop_handshake_failed');
         await _writeResponse(stream, Status.CONNECTION_FAILED);
         await dstStream.close();
         return;
       }
+      
+      metricsObserver?.onRelayConnectEstablished(srcPeerId, dstInfo.peerId, sessionId: sessionId);
       
       // CRITICAL FIX: Forward any buffered data that was read along with STOP message
       // This prevents data loss when relay data immediately follows handshake
@@ -311,6 +342,10 @@ class Relay {
       final connKey = '${srcPeerId}-${dstInfo.peerId}';
       final currentCount = _connections[connKey] ?? 0;
       _connections[connKey] = currentCount + 1;
+      
+      // Store session ID for this connection
+      _sessionIds[connKey] = sessionId;
+      
       print('[Relay] Active relay connections for ${srcPeerId.toBase58()} -> ${dstInfo.peerId.toBase58()}: ${currentCount + 1}');
       if (currentCount > 0) {
         print('[Relay] ⚠️  WARNING: Multiple concurrent relay connections detected!');
@@ -319,6 +354,7 @@ class Relay {
       // Relay data between the peers
       _relayData(stream, dstStream, srcPeerId, dstInfo.peerId);
     } catch (e) {
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'connection_error: $e', sessionId: sessionId);
       await _writeResponse(stream, Status.CONNECTION_FAILED);
       print('Failed to connect to destination peer: $e');
     }
@@ -344,6 +380,7 @@ class Relay {
     PeerId dstPeer,
   ) {
     final connKey = '${srcPeer}-${dstPeer}';
+    final sessionId = _sessionIds[connKey]; // Retrieve session ID for this connection
     var cleanupDone = false;
     
     // Shared flag to track if either direction has encountered a fatal error
@@ -355,6 +392,9 @@ class Relay {
     final maxBytes = _resources.connectionData;
     final startTime = DateTime.now();
     final maxDuration = Duration(seconds: _resources.connectionDuration);
+    
+    // Track initial connection establishment for metrics
+    final relayStartTime = DateTime.now();
 
     // Idempotent cleanup function
     // Note: We do NOT close streams here - each direction closes its own write side via closeWrite()
@@ -368,9 +408,14 @@ class Relay {
       final count = _connections[connKey] ?? 0;
       if (count <= 1) {
         _connections.remove(connKey);
+        _sessionIds.remove(connKey); // Clean up session ID
       } else {
         _connections[connKey] = count - 1;
       }
+      
+      // Notify metrics observer
+      final duration = DateTime.now().difference(relayStartTime);
+      metricsObserver?.onRelayConnectionClosed(srcPeer, dstPeer, duration, totalBytesRelayed, sessionId: sessionId);
       
       print('[Relay] Cleanup completed for ${srcPeer.toBase58()} -> ${dstPeer.toBase58()}');
     }
@@ -412,6 +457,7 @@ class Relay {
           }
           bytesRelayed += data.length;
           totalBytesRelayed += data.length;
+          metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await dstStream.write(data);
         }
       } catch (e) {
@@ -468,6 +514,7 @@ class Relay {
           }
           bytesRelayed += data.length;
           totalBytesRelayed += data.length;
+          metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await srcStream.write(data);
         }
       } catch (e) {
@@ -589,6 +636,14 @@ class Relay {
     }
     for (final key in expired) {
       _reservations.remove(key);
+      // Notify metrics observer of expiration
+      try {
+        final peerId = PeerId.decode(key);
+        metricsObserver?.onReservationExpired(peerId);
+      } catch (e) {
+        // If we can't parse the peer ID, skip metrics notification
+        print('[Relay] Failed to parse peer ID for expired reservation: $key');
+      }
     }
   }
 

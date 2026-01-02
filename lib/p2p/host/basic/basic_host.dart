@@ -397,6 +397,7 @@ class BasicHost implements Host {
         host: this,
         upgrader: _upgrader,
         connManager: _cmgr,
+        metricsObserver: _config.relayMetricsObserver,
       );
       
       // Start the CircuitV2Client to register STOP protocol handler

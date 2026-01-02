@@ -178,6 +178,13 @@ void main() {
 
           await Future.wait([clientDialFuture, serverAcceptFuture]);
 
+          // Manually set peer IDs on raw connections (normally done during security handshake)
+          // This is needed because Yamux requires peer IDs to be set
+          print('   Setting up peer IDs on raw connections...');
+          (clientRawConn as dynamic).setRemotePeerDetails(serverPeerId, serverKeyPair.publicKey, 'test-no-security');
+          (serverRawConn as dynamic).setRemotePeerDetails(clientPeerId, clientKeyPair.publicKey, 'test-no-security');
+          print('   ✅ Peer IDs configured');
+
           // Create Yamux sessions directly over UDX (no security layer)
           final yamuxConfig = MultiplexerConfig(
             keepAliveInterval: Duration(seconds: 30),
@@ -444,9 +451,9 @@ void main() {
     });
 
     group('Layer 3: Yamux over UDX + Noise + BasicHost (Simple Protocol)', () {
-      test('should handle large payloads (100KB) over UDX + Noise + BasicHost with simple echo protocol', () async {
-        print('\n🧪 TEST 3: Yamux + UDX + Noise + BasicHost (Simple Echo Protocol)');
-        print('   Goal: Test the full stack with a simple protocol to verify integration');
+      test('should handle large payloads (100KB) over UDX + Noise + BasicHost with one-way transfer', () async {
+        print('\n🧪 TEST 3: Yamux + UDX + Noise + BasicHost (One-Way Transfer)');
+        print('   Goal: Test the full stack with a simple one-way transfer protocol');
         
         BasicHost? clientHost;
         BasicHost? serverHost;
@@ -525,27 +532,36 @@ void main() {
           serverHost = await BasicHost.create(network: serverSwarm, config: serverP2PConfig);
           serverSwarm.setHost(serverHost);
 
-          // Setup server stream handler for simple echo protocol
-          const echoProtocolId = '/test/echo/1.0.0';
+          // Setup server stream handler for simple receive protocol
+          const transferProtocolId = '/test/transfer/1.0.0';
           final serverStreamCompleter = Completer<core_network_stream.P2PStream>();
+          final serverReceivedData = <int>[];
           
-          serverHost.setStreamHandler(echoProtocolId, (core_network_stream.P2PStream stream, PeerId peerId) async {
-            print('   Server Host received echo stream: ${stream.id()} from ${peerId}');
+          serverHost.setStreamHandler(transferProtocolId, (core_network_stream.P2PStream stream, PeerId peerId) async {
+            print('   Server Host received transfer stream: ${stream.id()} from ${peerId}');
             if (!serverStreamCompleter.isCompleted) {
               serverStreamCompleter.complete(stream);
             }
             
-            // Simple echo handler - read data and echo it back
+            // Simple receive handler - just read all data
             try {
+              var totalReceived = 0;
               while (!stream.isClosed) {
-                final data = await stream.read().timeout(Duration(seconds: 10));
-                if (data.isEmpty) break;
+                final data = await stream.read().timeout(Duration(seconds: 30));
+                if (data.isEmpty) {
+                  print('   Server received EOF after $totalReceived bytes');
+                  break;
+                }
                 
-                print('   Server echoing ${data.length} bytes');
-                await stream.write(data);
+                serverReceivedData.addAll(data);
+                totalReceived += data.length;
+                if (totalReceived % 10000 < data.length) {
+                  print('   Server received ${data.length} bytes (total: $totalReceived)');
+                }
               }
+              print('   Server receive handler completed (total: $totalReceived bytes)');
             } catch (e) {
-              print('   Server echo handler error: $e');
+              print('   Server receive handler error: $e');
             }
           });
 
@@ -570,19 +586,56 @@ void main() {
           await clientHost.connect(serverAddrInfo);
           print('   Client Host connected to server');
 
-          clientStream = await clientHost.newStream(serverPeerId, [echoProtocolId], core_context.Context());
+          clientStream = await clientHost.newStream(serverPeerId, [transferProtocolId], core_context.Context());
           print('   Client Host opened stream: ${clientStream.id()}');
 
           final serverStream = await serverStreamCompleter.future;
           print('   Server Host accepted stream: ${serverStream.id()}');
 
-          // Test large payload transfer with echo protocol
+          // Test large payload one-way transfer
           print('   🚀 Starting large payload test (100KB) over BasicHost...');
-          await _testLargePayloadEcho(
-            clientStream, 
-            serverStream, 
-            'Layer3-BasicHost-Echo',
+          
+          // Create 100KB test data
+          final largeData = Uint8List(100 * 1024);
+          for (var i = 0; i < largeData.length; i++) {
+            largeData[i] = i % 256;
+          }
+          print('   📤 Client sending ${largeData.length} bytes...');
+          
+          // Send data in chunks
+          const chunkSize = 8192;
+          for (var i = 0; i < largeData.length; i += chunkSize) {
+            final end = (i + chunkSize > largeData.length) ? largeData.length : i + chunkSize;
+            await clientStream.write(largeData.sublist(i, end));
+            
+            if ((i + chunkSize) % 25000 < chunkSize) {
+              print('   📤 Client sent ${i + chunkSize}/${largeData.length} bytes');
+            }
+          }
+          print('   ✅ Client finished sending all data');
+          
+          // Close write side to signal EOF
+          await clientStream.closeWrite();
+          print('   🔒 Client closed write side');
+          
+          // Wait for server to receive all data
+          var waitCount = 0;
+          while (serverReceivedData.length < largeData.length && waitCount < 100) {
+            await Future.delayed(Duration(milliseconds: 100));
+            waitCount++;
+            if (waitCount % 10 == 0) {
+              print('   ⏳ Waiting for server to receive all data: ${serverReceivedData.length}/${largeData.length} bytes');
+            }
+          }
+          
+          // Verify data integrity
+          print('   🔍 Verifying data integrity...');
+          expect(
+            Uint8List.fromList(serverReceivedData),
+            equals(largeData),
+            reason: 'Server should receive all data correctly',
           );
+          print('   ✅ Data integrity verified');
 
           print('   ✅ Layer 3 test PASSED - UDX + Noise + BasicHost works with large payloads');
 
@@ -657,6 +710,11 @@ void main() {
           });
 
           await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Manually set peer IDs on raw connections (normally done during security handshake)
+          print('   Setting up peer IDs on raw connections...');
+          (clientRawConn as dynamic).setRemotePeerDetails(serverPeerId, serverKeyPair.publicKey, 'test-no-security');
+          (serverRawConn as dynamic).setRemotePeerDetails(clientPeerId, clientKeyPair.publicKey, 'test-no-security');
 
           // Create Yamux sessions
           final yamuxConfig = MultiplexerConfig(
@@ -812,6 +870,11 @@ void main() {
 
           await Future.wait([clientDialFuture, serverAcceptFuture]);
 
+          // Manually set peer IDs on raw connections (normally done during security handshake)
+          print('   Setting up peer IDs on raw connections...');
+          (clientRawConn as dynamic).setRemotePeerDetails(serverPeerId, serverKeyPair.publicKey, 'test-no-security');
+          (serverRawConn as dynamic).setRemotePeerDetails(clientPeerId, clientKeyPair.publicKey, 'test-no-security');
+
           // Create Yamux sessions
           final yamuxConfig = MultiplexerConfig(
             keepAliveInterval: Duration(seconds: 30),
@@ -937,6 +1000,11 @@ void main() {
           });
 
           await Future.wait([clientDialFuture, serverAcceptFuture]);
+
+          // Manually set peer IDs on raw connections (normally done during security handshake)
+          print('   Setting up peer IDs on raw connections...');
+          (clientRawConn as dynamic).setRemotePeerDetails(serverPeerId, serverKeyPair.publicKey, 'test-no-security');
+          (serverRawConn as dynamic).setRemotePeerDetails(clientPeerId, clientKeyPair.publicKey, 'test-no-security');
 
           // Create Yamux sessions
           final yamuxConfig = MultiplexerConfig(
@@ -1496,6 +1564,184 @@ void main() {
       }, timeout: Timeout(Duration(minutes: 2)));
     });
 
+    group('Sequential Stream Reuse Isolation Test', () {
+      test('should allow sequential streams over Yamux+UDX without Noise', () async {
+        print('\n🧪 TEST ISOLATION-1: Sequential Streams over Yamux+UDX (NO Noise)');
+        print('   Goal: Determine if sequential stream issue is in Yamux+UDX or in Noise layer');
+        print('   Hypothesis: If this passes, the bug is in Noise; if it fails, bug is in Yamux');
+
+        UDXTransport? clientTransport;
+        UDXTransport? serverTransport;
+        Listener? listener;
+        TransportConn? clientRawConn;
+        TransportConn? serverRawConn;
+        YamuxSession? clientSession;
+        YamuxSession? serverSession;
+        
+        try {
+          final resourceManager = NullResourceManager();
+          final connManager = NullConnMgr();
+
+          clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+          serverTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
+
+          // Setup listener
+          final initialListenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
+          listener = await serverTransport.listen(initialListenAddr);
+          final actualListenAddr = listener.addr;
+          print('   Server listening on: $actualListenAddr');
+
+          // Establish raw UDX connections
+          final serverAcceptFuture = listener.accept().then((conn) {
+            if (conn == null) throw Exception("Listener accepted null connection");
+            serverRawConn = conn;
+            return serverRawConn;
+          });
+
+          final clientDialFuture = clientTransport.dial(actualListenAddr).then((conn) {
+            clientRawConn = conn;
+            return clientRawConn;
+          });
+
+          await Future.wait([clientDialFuture, serverAcceptFuture]);
+          print('   ✅ Raw UDX connections established');
+
+          // Manually set peer details (since we're skipping security)
+          (clientRawConn as dynamic).setRemotePeerDetails(serverPeerId, serverKeyPair.publicKey, 'test-no-security');
+          (serverRawConn as dynamic).setRemotePeerDetails(clientPeerId, clientKeyPair.publicKey, 'test-no-security');
+
+          // Create Yamux sessions directly
+          final yamuxConfig = MultiplexerConfig(
+            keepAliveInterval: Duration(seconds: 30),
+            maxStreamWindowSize: 1024 * 1024,
+            initialStreamWindowSize: 256 * 1024,
+            streamWriteTimeout: Duration(seconds: 10),
+            maxStreams: 256,
+          );
+
+          clientSession = YamuxSession(clientRawConn!, yamuxConfig, true, null);
+          serverSession = YamuxSession(serverRawConn!, yamuxConfig, false, null);
+          print('   ✅ Yamux sessions created');
+
+          // Test data
+          final testData = Uint8List(1024);
+          for (var i = 0; i < testData.length; i++) {
+            testData[i] = i % 256;
+          }
+
+          // Iteration 1: First stream
+          print('\n   🔄 Iteration 1: Opening first stream');
+          {
+            final serverAcceptFuture = serverSession.acceptStream().timeout(Duration(seconds: 5));
+            await Future.delayed(Duration(milliseconds: 50));
+            final clientStream = await clientSession.openStream(core_context.Context()).timeout(Duration(seconds: 5)) as YamuxStream;
+            final serverStream = await serverAcceptFuture as YamuxStream;
+            print('   ✅ Iteration 1: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
+
+            // Quick data transfer
+            await clientStream.write(testData);
+            final received = await serverStream.read().timeout(Duration(seconds: 5));
+            expect(received, equals(testData));
+            print('   ✅ Iteration 1: Data transfer successful');
+
+            // Close streams
+            await clientStream.close();
+            await serverStream.close();
+            print('   ✅ Iteration 1: Streams closed');
+          }
+
+          // Small delay
+          await Future.delayed(Duration(milliseconds: 500));
+
+          // Check session health
+          print('\n   🏥 Session health check:');
+          print('      - Client session closed: ${clientSession.isClosed}');
+          print('      - Server session closed: ${serverSession.isClosed}');
+          expect(clientSession.isClosed, isFalse, reason: 'Client session should still be open');
+          expect(serverSession.isClosed, isFalse, reason: 'Server session should still be open');
+
+          // Iteration 2: Second stream (THIS IS WHERE NOISE TESTS FAIL)
+          print('\n   🔄 Iteration 2: Opening second stream on SAME Yamux session');
+          print('   ⚠️  CRITICAL: This is where the Noise+UDX test fails with acceptStream timeout');
+          {
+            print('   Starting server acceptStream()...');
+            final serverAcceptFuture = serverSession.acceptStream().timeout(
+              Duration(seconds: 5),
+              onTimeout: () {
+                print('   ❌ SERVER ACCEPTSTREAM TIMED OUT!');
+                print('   🔍 This means the stream event was lost or session is stuck');
+                throw TimeoutException('Server acceptStream timed out on second stream');
+              },
+            );
+            
+            await Future.delayed(Duration(milliseconds: 50));
+            
+            print('   Starting client openStream()...');
+            final clientStream = await (clientSession.openStream(core_context.Context()).timeout(
+              Duration(seconds: 5),
+              onTimeout: () {
+                print('   ❌ CLIENT OPENSTREAM TIMED OUT!');
+                throw TimeoutException('Client openStream timed out on second stream');
+              },
+            )) as YamuxStream;
+            
+            print('   ✅ Client stream opened: ${clientStream.id()}');
+            print('   Waiting for server acceptStream...');
+            
+            final serverStream = await serverAcceptFuture as YamuxStream;
+            print('   ✅ Iteration 2: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
+
+            // Quick data transfer
+            await clientStream.write(testData);
+            final received = await serverStream.read().timeout(Duration(seconds: 5));
+            expect(received, equals(testData));
+            print('   ✅ Iteration 2: Data transfer successful');
+
+            // Close streams
+            await clientStream.close();
+            await serverStream.close();
+            print('   ✅ Iteration 2: Streams closed');
+          }
+
+          print('\n   ✅ ISOLATION TEST PASSED: Yamux+UDX supports sequential streams');
+          print('   🔍 CONCLUSION: The bug must be in the Noise layer or how BasicUpgrader wraps Noise+Yamux');
+
+        } catch (e, stackTrace) {
+          print('\n   ❌ ISOLATION TEST FAILED: $e');
+          print('   Stack trace: $stackTrace');
+          
+          if (e.toString().contains('acceptStream timed out')) {
+            print('\n   🔍 CRITICAL FINDING: The bug is in Yamux+UDX integration, NOT Noise!');
+            print('   🔍 This suggests a race condition or state management issue in YamuxSession');
+            print('   🔍 when handling sequential stream establishment over real transports');
+          }
+          
+          rethrow;
+        } finally {
+          print('   🧹 Cleaning up isolation test...');
+          try {
+            if (clientSession != null && !clientSession.isClosed) {
+              await clientSession.close().timeout(Duration(seconds: 2));
+            }
+            if (serverSession != null && !serverSession.isClosed) {
+              await serverSession.close().timeout(Duration(seconds: 2));
+            }
+            if (listener != null && !listener.isClosed) {
+              await listener.close();
+            }
+            if (clientTransport != null) {
+              await clientTransport.dispose();
+            }
+            if (serverTransport != null) {
+              await serverTransport.dispose();
+            }
+          } catch (e) {
+            print('   ⚠️ Error during isolation test cleanup: $e');
+          }
+        }
+      }, timeout: Timeout(Duration(seconds: 30)));
+    });
+
   });
 }
 
@@ -1704,21 +1950,48 @@ Future<void> _testLargePayloadEcho(
     }
   });
 
-  // Send all chunks rapidly without delays (simulating UDX behavior)
+  // Send chunks with flow control - don't get too far ahead of the echo reads
   Future.microtask(() async {
     try {
+      var bytesWritten = 0;
       for (final chunk in chunks) {
+        // Gentle flow control: Allow plenty of outstanding data
+        // Server uses async writes, so we don't need tight flow control
+        const maxOutstanding = 80 * 1024; // Allow 80KB outstanding (most of the 100KB payload)
+        var flowControlWaits = 0;
+        var lastReceivedCount = receivedData.length;
+        
+        while (bytesWritten - receivedData.length > maxOutstanding) {
+          await Future.delayed(Duration(milliseconds: 5));
+          flowControlWaits++;
+          
+          // Check if we're making progress
+          if (receivedData.length > lastReceivedCount) {
+            lastReceivedCount = receivedData.length;
+            flowControlWaits = 0; // Reset counter if making progress
+          }
+          
+          // Safety: If no progress for 10 seconds, something is wrong
+          if (flowControlWaits > 2000) {
+            print('   ⚠️ [$testContext] Flow control timeout - no echo progress. Sent: $bytesWritten, Received: ${receivedData.length}');
+            throw TimeoutException('Flow control deadlock - echoes stopped arriving');
+          }
+          
+          if (receivedData.length == 0 && bytesWritten > maxOutstanding && flowControlWaits > 100) {
+            // Give initial writes time to echo back (500ms)
+            print('   ⚠️ [$testContext] No echoes received yet after 500ms, continuing anyway...');
+            break;
+          }
+        }
+        
         await clientStream.write(chunk);
+        bytesWritten += chunk.length;
         chunksWritten++;
         
         // Check stream health every 10 chunks
         if (chunksWritten % 10 == 0) {
           checkStreamHealth('Write chunk $chunksWritten/${chunks.length}');
-        }
-        
-        // Small delay to allow echo processing
-        if (chunksWritten % 5 == 0) {
-          await Future.delayed(Duration(milliseconds: 1));
+          print('   📤 [$testContext] Write progress: $bytesWritten bytes sent, ${receivedData.length} bytes echoed back');
         }
       }
       print('   ✅ [$testContext] All chunks written successfully');

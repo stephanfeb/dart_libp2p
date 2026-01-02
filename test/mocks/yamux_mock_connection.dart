@@ -4,11 +4,16 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
+import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'base_mock_connection.dart';
 
 /// Mock connection specialized for Yamux multiplexing tests
 /// Handles frame boundaries and bidirectional communication
 class YamuxMockConnection extends BaseMockConnection implements TransportConn {
+  // Peer IDs for the connection
+  final PeerId _localPeer;
+  final PeerId _remotePeer;
+  
   // Stream controllers for bidirectional communication
   final _incomingData = StreamController<List<int>>.broadcast();
   final _outgoingData = StreamController<List<int>>.broadcast();
@@ -26,10 +31,20 @@ class YamuxMockConnection extends BaseMockConnection implements TransportConn {
   bool autoRespondToSyn;
   bool autoRespondToPing;
 
-  YamuxMockConnection(super.id, {
+  YamuxMockConnection(
+    super.id, {
+    required PeerId localPeer,
+    required PeerId remotePeer,
     this.autoRespondToSyn = true,
     this.autoRespondToPing = true,
-  });
+  }) : _localPeer = localPeer,
+       _remotePeer = remotePeer;
+  
+  @override
+  PeerId get localPeer => _localPeer;
+  
+  @override
+  PeerId get remotePeer => _remotePeer;
 
   /// Creates a pair of connected Yamux mock connections
   static (YamuxMockConnection, YamuxMockConnection) createPair({
@@ -39,12 +54,28 @@ class YamuxMockConnection extends BaseMockConnection implements TransportConn {
     bool autoRespondToSyn = true,
     bool autoRespondToPing = true,
   }) {
-    final conn1 = YamuxMockConnection(id1, 
+    // Generate simple peer IDs for testing
+    final peer1 = PeerId.fromBytes(Uint8List.fromList(
+      List.generate(34, (i) => (i % 250) + 1)..[0]=0x12..[1]=0x20
+    ));
+    final peer2 = PeerId.fromBytes(Uint8List.fromList(
+      List.generate(34, (i) => (i % 250) + 2)..[0]=0x12..[1]=0x20
+    ));
+    
+    final conn1 = YamuxMockConnection(
+      id1, 
+      localPeer: peer1,
+      remotePeer: peer2,
       autoRespondToSyn: autoRespondToSyn, 
-      autoRespondToPing: autoRespondToPing);
-    final conn2 = YamuxMockConnection(id2, 
+      autoRespondToPing: autoRespondToPing,
+    );
+    final conn2 = YamuxMockConnection(
+      id2,
+      localPeer: peer2,
+      remotePeer: peer1,
       autoRespondToSyn: autoRespondToSyn, 
-      autoRespondToPing: autoRespondToPing);
+      autoRespondToPing: autoRespondToPing,
+    );
 
     if (enableFrameLogging) {
       conn1.frameLogger = (id, frame) => print('$id sending frame: type=${frame.type}, flags=${frame.flags}, streamId=${frame.streamId}, length=${frame.length}');

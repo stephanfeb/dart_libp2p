@@ -378,6 +378,11 @@ class Swarm implements Network {
           swarm: this,
           managementScope: connManagementScope,
         );
+        
+        // Set connection context if available from upgraded connection
+        if (upgradedConn is UpgradedConnectionImpl && upgradedConn.context != null) {
+          swarmConn.setContext(upgradedConn.context!);
+        }
 
         // Use upgradedConn.remotePeer for the map key
         final String remotePeerIdStr = upgradedConn.remotePeer.toString();
@@ -823,6 +828,11 @@ class Swarm implements Network {
         swarm: this,
         managementScope: connManagementScope,
       );
+      
+      // Set connection context if available from upgraded connection
+      if (conn is UpgradedConnectionImpl && conn.context != null) {
+        swarmConn.setContext(conn.context!);
+      }
       
       // Add to connections map
       await _connLock.synchronized(() {

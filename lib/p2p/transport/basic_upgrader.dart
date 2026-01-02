@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data'; // Added for Uint8List
 
 import '../../core/multiaddr.dart';
+import '../../core/network/connection_context.dart';
 import '../../core/network/transport_conn.dart';
 import '../../core/network/conn.dart';
 // core_peer_id.dart is usually aliased or PeerId is directly from core/peer_id.dart
@@ -25,6 +26,7 @@ import '../../core/network/context.dart'; // For Context
 import '../../core/crypto/keys.dart'; // For PublicKey
 // Corrected path for multiaddr protocol constants
 import '../../p2p/multiaddr/protocol.dart' as multiaddr_protocol;
+import '../protocol/circuitv2/client/conn.dart' show RelayedConn;
 
 
 // --- Helper: NegotiationStreamWrapper ---
@@ -117,6 +119,9 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
   final ProtocolID _negotiatedMuxerProto;
   final PeerId _localPeerId;
   final PeerId _remotePeerId;
+  
+  /// Connection context for event correlation
+  final ConnectionContext? _context;
 
   UpgradedConnectionImpl({
     required core_mux.MuxedConn muxedConn,
@@ -125,12 +130,14 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
     required ProtocolID negotiatedMuxerProto,
     required PeerId localPeerId,
     required PeerId remotePeerId,
+    ConnectionContext? context,
   })  : _muxedConn = muxedConn,
         _securedConn = securedConn,
         _negotiatedSecurityProto = negotiatedSecurityProto,
         _negotiatedMuxerProto = negotiatedMuxerProto,
         _localPeerId = localPeerId,
-        _remotePeerId = remotePeerId;
+        _remotePeerId = remotePeerId,
+        _context = context;
 
   @override
   Future<void> close() => _muxedConn.close();
@@ -183,6 +190,9 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
 
   @override
   ConnScope get scope => _securedConn.scope;
+
+  /// Gets the connection context for event correlation
+  ConnectionContext? get context => _context;
 
   // Attempting to make the method static to see if it resolves the persistent linter error.
   static String _extractTransportProtocol(MultiAddr addr) {
@@ -250,6 +260,19 @@ class BasicUpgrader implements Upgrader {
     required MultiAddr remoteAddr,
   }) async {
     try {
+      // Extract or generate connection context
+      ConnectionContext? connContext;
+      if (connection is RelayedConn) {
+        // For relay connections, use the existing context from RelayedConn
+        connContext = connection.context;
+      } else {
+        // For direct connections, generate a new context
+        connContext = ConnectionContext.direct(
+          remotePeerId: remotePeerId.toBase58(),
+          transportConnectionId: connection.id,
+        );
+      }
+      
       final mssForSecurity = MultistreamMuxer();
       final securityProtoIDs = config.securityProtocols.map((s) => s.protocolId).toList();
       final negotiationSecStream = NegotiationStreamWrapper(connection, '/sec-negotiator');
@@ -317,6 +340,7 @@ class BasicUpgrader implements Upgrader {
         negotiatedMuxerProto: chosenMuxerId,
         localPeerId: localPId,
         remotePeerId: securedConn.remotePeer,
+        context: connContext,
       );
 
     } catch (e) {
@@ -331,6 +355,17 @@ class BasicUpgrader implements Upgrader {
     required Config config,
   }) async {
     try {
+      // Extract or generate connection context
+      ConnectionContext? connContext;
+      if (connection is RelayedConn) {
+        // For relay connections, use the existing context from RelayedConn
+        connContext = connection.context;
+      } else {
+        // For direct connections, generate a new context
+        // Note: We don't know the remote peer yet, will be set after security negotiation
+        connContext = null; // Will be created after we know the remote peer
+      }
+      
       final mssForSecurity = MultistreamMuxer();
       final negotiationSecStream = NegotiationStreamWrapper(connection, '/sec-negotiator-in');
 
@@ -403,6 +438,14 @@ class BasicUpgrader implements Upgrader {
       }
       final PeerId localPId = PeerId.fromPublicKey(localPublicKey); 
 
+      // Generate context for direct inbound connections if not already set
+      if (connContext == null && connection is! RelayedConn) {
+        connContext = ConnectionContext.direct(
+          remotePeerId: securedConn.remotePeer.toBase58(),
+          transportConnectionId: connection.id,
+        );
+      }
+
       return UpgradedConnectionImpl(
         muxedConn: muxedConnection,
         securedConn: securedConn,
@@ -410,6 +453,7 @@ class BasicUpgrader implements Upgrader {
         negotiatedMuxerProto: chosenMuxerId,
         localPeerId: localPId,
         remotePeerId: securedConn.remotePeer,
+        context: connContext,
       );
 
     } catch (e) {

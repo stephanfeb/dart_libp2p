@@ -5,6 +5,7 @@ import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:logging/logging.dart'; // Added for logging
 
 import 'package:dart_libp2p/core/network/conn.dart'; // Conn is directly available
+import 'package:dart_libp2p/core/peer/peer_id.dart'; // For PeerId
 
 import '../../../../core/network/stream.dart'; // For P2PStream, StreamStats
 import '../../../../core/network/common.dart' show Direction; // For Direction
@@ -12,6 +13,7 @@ import '../../../../core/network/rcmgr.dart' show StreamScope; // For StreamScop
 import '../../../../core/network/mux.dart' as core_mux; // For MuxedStream
 import 'frame.dart'; // Defines YamuxFrame, YamuxFrameType, YamuxFlags
 import 'yamux_exceptions.dart'; // Import Yamux exception handling
+import 'metrics_observer.dart'; // For YamuxMetricsObserver
 
 // Added logger instance
 final _log = Logger('YamuxStream');
@@ -67,6 +69,21 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// The parent connection (YamuxSession)
   final Conn _parentConn; // Added field
+  
+  /// Metrics observer for reporting stream events
+  final YamuxMetricsObserver? _metricsObserver;
+  
+  /// Remote peer ID for metrics reporting
+  final PeerId _remotePeer;
+  
+  /// When the stream was opened (for duration calculation)
+  DateTime? _openedAt;
+  
+  /// Total bytes read from this stream
+  int _bytesRead = 0;
+  
+  /// Total bytes written to this stream
+  int _bytesWritten = 0;
 
   /// Bytes consumed from our local receive window since last window update sent to remote
   int _consumedBytesForLocalWindowUpdate = 0;
@@ -157,6 +174,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     required int initialWindowSize, // This is the initial window for both sides
     required Future<void> Function(YamuxFrame frame) sendFrame,
     required Conn parentConn, // Added parameter
+    required PeerId remotePeer, // For metrics reporting
+    YamuxMetricsObserver? metricsObserver, // For metrics reporting
     String? logPrefix,
   })  : streamId = id,
         streamProtocol = protocol,
@@ -165,6 +184,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         _remoteReceiveWindow = initialWindowSize, // Initially, we can send this much
         _sendFrame = sendFrame,
         _parentConn = parentConn, // Initialize field
+        _remotePeer = remotePeer,
+        _metricsObserver = metricsObserver,
         _logPrefix = logPrefix ?? "StreamID=$id" {
     _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow');
   }
@@ -181,6 +202,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // For an inbound stream, receiving the first DATA frame opens it.
     // The session handles sending initial window updates when it establishes the stream.
     _state = YamuxStreamState.open;
+    _openedAt = DateTime.now(); // Record when stream opened for duration calculation
     _log.fine('$_logPrefix Stream opened. State: $_state. Sending initial window update.');
 
     // Send initial window update to the remote peer
@@ -308,6 +330,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         
         await _sendFrame(frame);
         
+        _bytesWritten += chunkSize; // Track bytes written
         _remoteReceiveWindow -= chunkSize;
         offset += chunkSize;
       }
@@ -406,6 +429,19 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     } catch (e) {
       _log.warning('$_logPrefix Error sending RESET frame during reset(): $e. Will proceed with local cleanup.');
     } finally {
+      // Notify metrics observer before cleanup
+      if (_metricsObserver != null) {
+        try {
+          _metricsObserver.onStreamReset(
+            _remotePeer,
+            streamId,
+            'Stream reset (previous state: $previousState)',
+          );
+        } catch (e) {
+          _log.warning('$_logPrefix Error notifying metrics observer on reset: $e');
+        }
+      }
+      
       _log.finer('$_logPrefix Cleaning up after reset (was $previousState).');
       await _cleanup();
     }
@@ -442,6 +478,22 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.warning(
           '$_logPrefix Error sending FIN frame during close(): $e. Proceeding to forceful cleanup (reset).');
     } finally {
+      // Notify metrics observer before cleanup
+      if (_metricsObserver != null && _openedAt != null) {
+        try {
+          final duration = DateTime.now().difference(_openedAt!);
+          _metricsObserver.onStreamClosed(
+            _remotePeer,
+            streamId,
+            duration,
+            _bytesRead,
+            _bytesWritten,
+          );
+        } catch (e) {
+          _log.warning('$_logPrefix Error notifying metrics observer on close: $e');
+        }
+      }
+      
       _log.finer(
           '$_logPrefix close() ensuring cleanup. State before final cleanup: $_state (was $previousState).');
       await _cleanup();
@@ -603,11 +655,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
               // Handle partial reads
               if (maxLength != null && data.length > maxLength) {
-
+                final chunk = data.sublist(0, maxLength);
+                _bytesRead += chunk.length; // Track bytes read
                 _incomingQueue.add(data.sublist(maxLength));
-                return data.sublist(0, maxLength);
+                return chunk;
               }
               
+              _bytesRead += data.length; // Track bytes read
               return data;
             } catch (e) {
               final completerErrorDuration = DateTime.now().difference(attemptStartTime);

@@ -23,5 +23,8 @@ abstract class YamuxMetricsObserver {
 
   /// Called when a stream is reset
   void onStreamReset(PeerId remotePeer, int streamId, String? reason);
+  
+  /// Called when a session-level error occurs
+  void onSessionError(PeerId remotePeer, String error, StackTrace? stackTrace);
 }
 
