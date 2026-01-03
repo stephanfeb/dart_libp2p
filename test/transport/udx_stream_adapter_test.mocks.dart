@@ -1018,6 +1018,15 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       );
 
   @override
+  void notifyStreamClosed(int? streamId) => super.noSuchMethod(
+        Invocation.method(
+          #notifyStreamClosed,
+          [streamId],
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i22.Future<void> close() => (super.noSuchMethod(
         Invocation.method(
           #close,
@@ -1968,6 +1977,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i13.UDXMultiplexer {
     int? port, {
     _i14.ConnectionId? localCid,
     _i14.ConnectionId? remoteCid,
+    bool? isServer = false,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -1980,6 +1990,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i13.UDXMultiplexer {
           {
             #localCid: localCid,
             #remoteCid: remoteCid,
+            #isServer: isServer,
           },
         ),
         returnValue: _FakeUDPSocket_23(
@@ -1994,6 +2005,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i13.UDXMultiplexer {
             {
               #localCid: localCid,
               #remoteCid: remoteCid,
+              #isServer: isServer,
             },
           ),
         ),
