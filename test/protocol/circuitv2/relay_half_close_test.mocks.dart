@@ -467,6 +467,16 @@ class MockCircuitV2Client extends _i1.Mock implements _i17.CircuitV2Client {
       ) as _i9.Peerstore);
 
   @override
+  set onRelayPathFailed(_i17.RelayPathFailedCallback? _onRelayPathFailed) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #onRelayPathFailed,
+          _onRelayPathFailed,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i16.Future<void> start() => (super.noSuchMethod(
         Invocation.method(
           #start,

@@ -319,6 +319,30 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       ) as int);
 
   @override
+  _i15.StreamType get streamType => (super.noSuchMethod(
+        Invocation.getter(#streamType),
+        returnValue: _i15.StreamType.bidirectional,
+      ) as _i15.StreamType);
+
+  @override
+  int get priority => (super.noSuchMethod(
+        Invocation.getter(#priority),
+        returnValue: 0,
+      ) as int);
+
+  @override
+  int get bytesRead => (super.noSuchMethod(
+        Invocation.getter(#bytesRead),
+        returnValue: 0,
+      ) as int);
+
+  @override
+  int get bytesWritten => (super.noSuchMethod(
+        Invocation.getter(#bytesWritten),
+        returnValue: 0,
+      ) as int);
+
+  @override
   bool get isInitiator => (super.noSuchMethod(
         Invocation.getter(#isInitiator),
         returnValue: false,
@@ -451,6 +475,15 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       ) as _i22.Stream<void>);
 
   @override
+  set priority(int? _priority) => super.noSuchMethod(
+        Invocation.setter(
+          #priority,
+          _priority,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   set remoteId(int? _remoteId) => super.noSuchMethod(
         Invocation.setter(
           #remoteId,
@@ -482,6 +515,33 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
         Invocation.setter(
           #remoteFamily,
           _remoteFamily,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  set connectedAt(DateTime? _connectedAt) => super.noSuchMethod(
+        Invocation.setter(
+          #connectedAt,
+          _connectedAt,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  set bytesRead(int? _bytesRead) => super.noSuchMethod(
+        Invocation.setter(
+          #bytesRead,
+          _bytesRead,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  set bytesWritten(int? _bytesWritten) => super.noSuchMethod(
+        Invocation.setter(
+          #bytesWritten,
+          _bytesWritten,
         ),
         returnValueForMissingStub: null,
       );
@@ -592,9 +652,28 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       );
 
   @override
+  void setPriority(int? newPriority) => super.noSuchMethod(
+        Invocation.method(
+          #setPriority,
+          [newPriority],
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i22.Future<void> reset(int? errorCode) => (super.noSuchMethod(
         Invocation.method(
           #reset,
+          [errorCode],
+        ),
+        returnValue: _i22.Future<void>.value(),
+        returnValueForMissingStub: _i22.Future<void>.value(),
+      ) as _i22.Future<void>);
+
+  @override
+  _i22.Future<void> stopReceiving(int? errorCode) => (super.noSuchMethod(
+        Invocation.method(
+          #stopReceiving,
           [errorCode],
         ),
         returnValue: _i22.Future<void>.value(),
@@ -1105,6 +1184,16 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       );
 
   @override
+  set metricsObserver(_i13.UdxMetricsObserver? _metricsObserver) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #metricsObserver,
+          _metricsObserver,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   List<_i15.UDXStream> getStreamBuffer() => (super.noSuchMethod(
         Invocation.method(
           #getStreamBuffer,
@@ -1114,12 +1203,12 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as List<_i15.UDXStream>);
 
   @override
-  void handleIncomingDatagram(
+  _i22.Future<void> handleIncomingDatagram(
     _i23.Uint8List? data,
     _i9.InternetAddress? fromAddress,
     int? fromPort,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #handleIncomingDatagram,
           [
@@ -1128,8 +1217,9 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
             fromPort,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i22.Future<void>.value(),
+        returnValueForMissingStub: _i22.Future<void>.value(),
+      ) as _i22.Future<void>);
 
   @override
   void send(_i23.Uint8List? data) => super.noSuchMethod(
@@ -1184,6 +1274,25 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
         ),
         returnValueForMissingStub: null,
       );
+
+  @override
+  _i22.Future<void> closeWithError(
+    int? errorCode,
+    String? reason, {
+    int? frameType = 0,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #closeWithError,
+          [
+            errorCode,
+            reason,
+          ],
+          {#frameType: frameType},
+        ),
+        returnValue: _i22.Future<void>.value(),
+        returnValueForMissingStub: _i22.Future<void>.value(),
+      ) as _i22.Future<void>);
 
   @override
   _i22.Future<void> close() => (super.noSuchMethod(
@@ -1456,6 +1565,30 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
         Invocation.getter(#protocols),
         returnValue: <String>[],
       ) as List<String>);
+
+  @override
+  set metricsObserver(_i13.UdxMetricsObserver? _metricsObserver) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #metricsObserver,
+          _metricsObserver,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  set onConnectionEstablished(
+          void Function(
+            _i14.ConnectionId,
+            _i6.PeerId,
+          )? _onConnectionEstablished) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #onConnectionEstablished,
+          _onConnectionEstablished,
+        ),
+        returnValueForMissingStub: null,
+      );
 
   @override
   _i22.Future<_i18.TransportConn> dial(
@@ -1865,6 +1998,40 @@ class MockUDXMultiplexer extends _i1.Mock implements _i13.UDXMultiplexer {
           ),
         ),
       ) as _i21.UDPSocket);
+
+  @override
+  void sendStatelessReset(
+    _i9.InternetAddress? address,
+    int? port,
+    _i14.ConnectionId? connectionId,
+  ) =>
+      super.noSuchMethod(
+        Invocation.method(
+          #sendStatelessReset,
+          [
+            address,
+            port,
+            connectionId,
+          ],
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  void registerResetToken(
+    _i14.ConnectionId? cid,
+    _i3.StatelessResetToken? token,
+  ) =>
+      super.noSuchMethod(
+        Invocation.method(
+          #registerResetToken,
+          [
+            cid,
+            token,
+          ],
+        ),
+        returnValueForMissingStub: null,
+      );
 
   @override
   Map<_i14.ConnectionId, _i21.UDPSocket> getSocketsForTest() =>

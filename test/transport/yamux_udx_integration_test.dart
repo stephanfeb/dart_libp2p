@@ -96,7 +96,7 @@ class TestNotifiee implements Notifiee {
 
 void main() {
   // Setup comprehensive logging to capture all layer interactions
-  Logger.root.level = Level.ALL;
+  Logger.root.level = Level.FINE;
   Logger.root.onRecord.listen((record) {
     final timestamp = record.time.toIso8601String().substring(11, 23);
     print('[$timestamp] ${record.level.name}: ${record.loggerName}: ${record.message}');

@@ -142,10 +142,10 @@ void main() {
       // Write the message
       await secured1.write(testData);
 
-      // Verify the raw bytes have only one length prefix
+      // Verify the raw bytes have only one length prefix (4-byte big-endian)
       final rawBytes = conn1.writes.first;
-      final actualLength = (rawBytes[0] << 8) | rawBytes[1];
-      final encryptedData = rawBytes.sublist(2);
+      final actualLength = (rawBytes[0] << 24) | (rawBytes[1] << 16) | (rawBytes[2] << 8) | rawBytes[3];
+      final encryptedData = rawBytes.sublist(4);
 
       // The actual length should be the encrypted data length (32) + MAC (16)
       expect(actualLength, equals(testData.length + 16),

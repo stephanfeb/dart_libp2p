@@ -378,23 +378,31 @@ void main() {
 
     test('connection health during mixed stream states with UDX', () async {
       print('\n=== Starting Mixed Stream States Test with UDX ===');
+      final testStart = DateTime.now();
       
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating swarmA...');
       final swarmA = await createUDXTestSwarm(
         name: 'MixedSwarmA', 
         udxInstance: udxInstance,
         resourceManager: resourceManager,
         connManager: connManager,
       );
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] SwarmA created');
+      
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating swarmB...');
       final swarmB = await createUDXTestSwarm(
         name: 'MixedSwarmB', 
         udxInstance: udxInstance,
         resourceManager: resourceManager,
         connManager: connManager,
       );
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] SwarmB created');
       
       try {
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Setting up listener...');
         final listenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
         await swarmA.listen([listenAddr]);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Listener ready');
         
         final actualListenAddr = swarmA.listenAddresses.firstWhere(
           (addr) => addr.hasProtocol(multiaddr_protocol.Protocols.udx.name)
@@ -411,51 +419,63 @@ void main() {
         );
         
         // Create streams with mixed lifecycle management
-        print('Creating streams with mixed states...');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating 5 streams with mixed states...');
         final streams = <P2PStream>[];
         
         for (int i = 0; i < 5; i++) {
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating stream $i...');
           final stream = await swarmB.newStream(Context(), swarmA.localPeer);
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Stream $i created, writing data...');
           streams.add(stream);
           await stream.write(utf8.encode('mixed-state-stream-$i'));
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Stream $i write complete');
         }
         
         final connections = swarmB.connsToPeer(swarmA.localPeer);
         expect(connections.length, equals(1));
         final connectionId = connections.first.id;
-        print('All streams using connection: $connectionId');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] All streams using connection: $connectionId');
         
         // Close some streams, keep others open
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Closing streams 0 and 2...');
         await streams[0].close();  // Closed
         await streams[2].close();  // Closed
         // streams[1], streams[3], streams[4] remain open
         
-        print('Closed streams 0 and 2, keeping 1, 3, 4 open');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Closed streams 0 and 2, keeping 1, 3, 4 open');
         
         // Verify connection is still healthy
         expect(connections.first.isClosed, isFalse);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Connection still healthy');
         
         // Create new streams while others are still open
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating newStream1...');
         final newStream1 = await swarmB.newStream(Context(), swarmA.localPeer);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating newStream2...');
         final newStream2 = await swarmB.newStream(Context(), swarmA.localPeer);
         
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Writing to new streams...');
         await newStream1.write(utf8.encode('new-stream-1'));
         await newStream2.write(utf8.encode('new-stream-2'));
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] New stream writes complete');
         
         // Verify still using same connection
         final connectionsAfter = swarmB.connsToPeer(swarmA.localPeer);
         expect(connectionsAfter.length, equals(1));
         expect(connectionsAfter.first.id, equals(connectionId));
         
-        print('✓ Mixed stream states test completed successfully!');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] ✓ Mixed stream states test completed successfully!');
         print('✓ Connection remained healthy with mixed stream states');
         print('✓ New streams successfully created alongside existing ones');
         
       } finally {
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: Starting cleanup...');
         await swarmA.close();
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: swarmA closed');
         await swarmB.close();
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: swarmB closed');
       }
-    });
+    }, timeout: Timeout(Duration(seconds: 60)));
 
     test('bidirectional data exchange with connection reuse', () async {
       print('\n=== Starting Bidirectional Data Exchange Test ===');

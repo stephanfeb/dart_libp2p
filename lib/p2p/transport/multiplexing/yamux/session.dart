@@ -61,9 +61,11 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   final _streams = <int, YamuxStream>{};
   int _nextStreamId;
   Future<void> Function(P2PStream stream)? _streamHandler;
-  // Changed from broadcast to single-subscription to prevent race condition
-  // where acceptStream() misses events if SYN arrives before .first listener attaches
-  final _incomingStreamsController = StreamController<P2PStream>();
+  // Using broadcast controller
+  final _incomingStreamsController = StreamController<P2PStream>.broadcast();
+  // Completer-based approach to prevent race condition where acceptStream()
+  // misses events if SYN arrives before .first listener attaches
+  Completer<P2PStream>? _pendingAcceptStreamCompleter;
   bool _closed = false;
   bool _cleanupStarted = false; 
   final _initCompleter = Completer<void>();
@@ -565,13 +567,22 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // Notify metrics observer of incoming stream opened
       metricsObserver?.onStreamOpened(remotePeer, frame.streamId, stream.protocol());
       
-      _log.fine('$_logPrefix _handleNewStream: Adding fully initialized stream ID ${frame.streamId} to _incomingStreamsController.'); // Elevated log level
+      // Check if there's a pending acceptStream() call waiting for a stream
+      if (_pendingAcceptStreamCompleter != null && !_pendingAcceptStreamCompleter!.isCompleted) {
+        _log.fine('$_logPrefix _handleNewStream: Completing pending acceptStream completer with stream ID ${frame.streamId}.');
+        _pendingAcceptStreamCompleter!.complete(stream);
+        _pendingAcceptStreamCompleter = null;
+      }
+      
+      // Always add to controller for broadcast stream listeners
+      _log.fine('$_logPrefix _handleNewStream: Adding fully initialized stream ID ${frame.streamId} to _incomingStreamsController.');
       _incomingStreamsController.add(stream);
 
+      // If there's a stream handler, invoke it
       if (_streamHandler != null) {
-        _log.fine('$_logPrefix _handleNewStream: Invoking _streamHandler for stream ID ${frame.streamId}.'); // Elevated log level
-        _streamHandler!(stream).catchError((e, st) { // Added stackTrace
-          _log.severe('$_logPrefix _handleNewStream: Error in _streamHandler for stream ID ${frame.streamId}: $e', st); // More specific message
+        _log.fine('$_logPrefix _handleNewStream: Invoking _streamHandler for stream ID ${frame.streamId}.');
+        _streamHandler!(stream).catchError((e, st) {
+          _log.severe('$_logPrefix _handleNewStream: Error in _streamHandler for stream ID ${frame.streamId}: $e', st);
           stream.reset().catchError((_) {});
         });
       }
@@ -929,20 +940,43 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         throw StateError('Session is closed, cannot accept new streams.');
     }
     
+    // Use completer-based approach to avoid race condition
+    _log.fine('$_logPrefix acceptStream: Creating completer for incoming stream');
+    _pendingAcceptStreamCompleter = Completer<P2PStream>();
+    
     try {
-      final p2pStream = await incomingStreams.first;
+      // Race between the completer (set by _handleNewStream) and the stream listener
+      // This handles the race condition where a SYN arrives before .first attaches
+      final p2pStream = await Future.any([
+        _pendingAcceptStreamCompleter!.future,
+        incomingStreams.first.catchError((e) {
+          // If .first fails with StateError (no element), check if session is closed
+          if (e is StateError) {
+            if (_closed || _incomingStreamsController.isClosed) {
+              throw StateError('Session closed while waiting for stream');
+            }
+          }
+          throw e;
+        }),
+      ]);
+      
       if (p2pStream is YamuxStream) {
+        _log.fine('$_logPrefix acceptStream: Returning stream ID ${p2pStream.id()}');
         return p2pStream;
       } else {
         throw StateError('Incoming stream is not a YamuxStream, which is unexpected.');
       }
-    } on StateError {
-      // Handle the case where the stream was closed during the await
-      if (_closed || _incomingStreamsController.isClosed) {
-        throw StateError('Session closed while waiting for stream');
+    } catch (e) {
+      // Handle errors from both the completer and the stream
+      if (e is StateError) {
+        // Propagate StateError as is
+        rethrow;
       }
-      // If it's a different StateError (like "not a YamuxStream"), rethrow it
-      rethrow;
+      // For other errors, wrap them
+      throw StateError('Error waiting for stream: $e');
+    } finally {
+      // Clean up the completer
+      _pendingAcceptStreamCompleter = null;
     }
   }
 

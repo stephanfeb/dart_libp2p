@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
+import 'package:dart_libp2p/core/peer/addr_info.dart';
+import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/network/network.dart'; // For Reachability
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRelayAddrsUpdated
@@ -378,5 +380,203 @@ void main() {
       
       print('\n✅ Test completed successfully!');
     }, timeout: Timeout(Duration(seconds: 30))); // Increased timeout for teardown
+
+    test('Circuit relay connections are reused by Swarm for multiple dials', () async {
+      // This test verifies that when dialing the same peer multiple times through
+      // a relay, the Swarm reuses the existing connection rather than creating
+      // new relay connections each time.
+      
+      print('\n🔄 Testing circuit relay connection reuse at Swarm level...');
+      
+      // Step 1: Verify both peers are connected to relay
+      expect(peerAHost.network.connectedness(relayPeerId).name, equals('connected'));
+      expect(peerBHost.network.connectedness(relayPeerId).name, equals('connected'));
+      print('✅ Both peers connected to relay');
+      
+      // Step 2: Wait for AutoRelay to properly set up circuit addresses
+      print('\n⏳ Waiting for AutoRelay to discover relay and advertise circuit addresses...');
+      await Future.delayed(Duration(seconds: 12)); // Same as other test - needs time for AutoRelay
+      
+      // Step 3: Get peer B's circuit addresses (must include relay peer ID)
+      final peerBAddrs = peerBHost.addrs;
+      final peerBCircuitAddrs = peerBAddrs.where((addr) {
+        final addrStr = addr.toString();
+        return addrStr.contains('/p2p-circuit') && addrStr.contains(relayPeerId.toBase58());
+      }).toList();
+      
+      print('Peer B addresses: $peerBAddrs');
+      print('Peer B circuit addresses: $peerBCircuitAddrs');
+      
+      expect(peerBCircuitAddrs, isNotEmpty,
+        reason: 'Peer B should advertise circuit relay addresses through relay ${relayPeerId.toBase58()}');
+      
+      // Step 4: Construct dialable circuit address to peer B
+      final peerBCircuitAddr = peerBCircuitAddrs.first;
+      final cleanAddr = peerBCircuitAddr.toString().endsWith('/') 
+        ? peerBCircuitAddr.toString().substring(0, peerBCircuitAddr.toString().length - 1)
+        : peerBCircuitAddr.toString();
+      final dialableCircuitAddrStr = '$cleanAddr/p2p/${peerBPeerId.toBase58()}';
+      final dialableCircuitAddr = MultiAddr(dialableCircuitAddrStr);
+      
+      print('Dialable circuit address to peer B: $dialableCircuitAddrStr');
+      
+      // Add the circuit address to peerstore so connect() can find it
+      await peerAHost.peerStore.addrBook.addAddrs(
+        peerBPeerId,
+        [dialableCircuitAddr],
+        Duration(hours: 1),
+      );
+      
+      // Step 5: First dial to peer B through relay
+      print('\n🔌 Dial #1: Creating initial relay connection...');
+      await peerAHost.connect(AddrInfo(peerBPeerId, [dialableCircuitAddr]));
+      
+      // Get the initial connection
+      final conns1 = peerAHost.network.connsToPeer(peerBPeerId);
+      expect(conns1, isNotEmpty, reason: 'Should have connection after first dial');
+      expect(conns1.length, equals(1), 
+        reason: 'Should have exactly one connection after first dial');
+      
+      final conn1 = conns1.first;
+      final conn1Addr = conn1.remoteMultiaddr.toString();
+      expect(conn1Addr.contains('/p2p-circuit'), isTrue,
+        reason: 'First connection should be via circuit relay');
+      
+      print('✅ First connection established: $conn1Addr');
+      print('   Connection ID: ${conn1.id}');
+      
+      // Step 6: Second dial to the same peer (should reuse connection)
+      print('\n🔌 Dial #2: Attempting to dial same peer again...');
+      await peerAHost.connect(AddrInfo(peerBPeerId, [dialableCircuitAddr]));
+      
+      // Get connections again
+      final conns2 = peerAHost.network.connsToPeer(peerBPeerId);
+      expect(conns2.length, equals(1),
+        reason: 'Should STILL have exactly one connection (reused, not duplicated)');
+      
+      final conn2 = conns2.first;
+      print('✅ Second dial completed');
+      print('   Connection ID: ${conn2.id}');
+      
+      // Verify it's the same connection
+      expect(identical(conn1, conn2), isTrue,
+        reason: 'Swarm MUST reuse the same connection instance for multiple dials to same peer');
+      
+      print('✅ Verified: Swarm reuses the same circuit relay connection');
+      
+      // Step 7: Third dial via ping service (another way to trigger dial)
+      print('\n🏓 Dial #3: Pinging peer (triggers dial internally)...');
+      final pingService = PingService(peerAHost);
+      final pingResult = await pingService.ping(peerBPeerId).first.timeout(
+        Duration(seconds: 10),
+      );
+      
+      expect(pingResult.hasError, isFalse, reason: 'Ping should succeed');
+      print('✅ Ping succeeded: RTT=${pingResult.rtt?.inMilliseconds}ms');
+      
+      // Verify still only one connection
+      final conns3 = peerAHost.network.connsToPeer(peerBPeerId);
+      expect(conns3.length, equals(1),
+        reason: 'Should STILL have exactly one connection after ping');
+      expect(identical(conns1.first, conns3.first), isTrue,
+        reason: 'Should be the same connection instance');
+      
+      print('✅ Verified: Ping reused existing connection (no new connection created)');
+      
+      // Step 8: CRITICAL - Test bidirectional reuse (B dials back to A)
+      print('\n🔄 Step 8: Testing BIDIRECTIONAL reuse - Peer B dials back to Peer A...');
+      
+      // Get Peer A's circuit addresses
+      final peerAAddrs = peerAHost.addrs;
+      final peerACircuitAddrs = peerAAddrs.where((addr) {
+        final addrStr = addr.toString();
+        return addrStr.contains('/p2p-circuit') && addrStr.contains(relayPeerId.toBase58());
+      }).toList();
+      
+      print('Peer A addresses: $peerAAddrs');
+      print('Peer A circuit addresses: $peerACircuitAddrs');
+      
+      expect(peerACircuitAddrs, isNotEmpty,
+        reason: 'Peer A should also advertise circuit relay addresses');
+      
+      // Construct dialable circuit address to Peer A
+      final peerACircuitAddr = peerACircuitAddrs.first;
+      final cleanAddrA = peerACircuitAddr.toString().endsWith('/')
+        ? peerACircuitAddr.toString().substring(0, peerACircuitAddr.toString().length - 1)
+        : peerACircuitAddr.toString();
+      final dialableCircuitAddrToA = '$cleanAddrA/p2p/${peerAPeerId.toBase58()}';
+      
+      print('Dialable circuit address to peer A: $dialableCircuitAddrToA');
+      
+      // Add to Peer B's peerstore
+      await peerBHost.peerStore.addrBook.addAddrs(
+        peerAPeerId,
+        [MultiAddr(dialableCircuitAddrToA)],
+        Duration(hours: 1),
+      );
+      
+      // Get connection count BEFORE B dials A
+      final connsFromABefore = peerAHost.network.connsToPeer(peerBPeerId);
+      final connsFromBBefore = peerBHost.network.connsToPeer(peerAPeerId);
+      
+      print('Before B→A dial:');
+      print('  Peer A sees ${connsFromABefore.length} connection(s) to B');
+      print('  Peer B sees ${connsFromBBefore.length} connection(s) to A');
+      
+      // Now Peer B dials Peer A (REVERSE direction)
+      print('\n🔌 Dial #4 (REVERSE): Peer B → Peer A...');
+      await peerBHost.connect(AddrInfo(peerAPeerId, [MultiAddr(dialableCircuitAddrToA)]));
+      
+      // Get connection counts AFTER B dials A
+      final connsFromAAfter = peerAHost.network.connsToPeer(peerBPeerId);
+      final connsFromBAfter = peerBHost.network.connsToPeer(peerAPeerId);
+      
+      print('\nAfter B→A dial:');
+      print('  Peer A sees ${connsFromAAfter.length} connection(s) to B');
+      print('  Peer B sees ${connsFromBAfter.length} connection(s) to A');
+      
+      // CRITICAL ASSERTIONS: Verify bidirectional reuse
+      expect(connsFromAAfter.length, equals(1),
+        reason: 'Peer A should STILL have only 1 connection to B after B dials A back (bidirectional reuse)');
+      
+      expect(connsFromBAfter.length, equals(1),
+        reason: 'Peer B should have exactly 1 connection to A (reused existing connection, not created new one)');
+      
+      // Verify it's still the same connection from A's perspective
+      expect(identical(connsFromABefore.first, connsFromAAfter.first), isTrue,
+        reason: 'Peer A should still have the SAME connection instance after B dials back');
+      
+      print('✅ CRITICAL: Verified bidirectional connection reuse!');
+      print('   ✓ A→B established 1 connection');
+      print('   ✓ B→A reused that SAME connection (not created new one)');
+      print('   ✓ Total connections: 1 (not 2)');
+      
+      // Step 9: Verify bidirectional communication works
+      print('\n🏓 Step 9: Testing bidirectional communication (B pings A)...');
+      final pingServiceB = PingService(peerBHost);
+      final pingResultBA = await pingServiceB.ping(peerAPeerId).first.timeout(
+        Duration(seconds: 10),
+      );
+      
+      expect(pingResultBA.hasError, isFalse, 
+        reason: 'Ping from B to A should succeed using reused connection');
+      print('✅ B→A Ping succeeded: RTT=${pingResultBA.rtt?.inMilliseconds}ms');
+      
+      // Final verification: Still only 1 connection each direction
+      final finalConnsA = peerAHost.network.connsToPeer(peerBPeerId);
+      final finalConnsB = peerBHost.network.connsToPeer(peerAPeerId);
+      
+      expect(finalConnsA.length, equals(1),
+        reason: 'After all operations, should STILL have only 1 connection');
+      expect(finalConnsB.length, equals(1),
+        reason: 'After all operations, should STILL have only 1 connection');
+      
+      print('\n🎉 Circuit relay BIDIRECTIONAL connection reuse test completed successfully!');
+      print('   ✓ Multiple dials from same peer reuse connection (A→B→A→B)');
+      print('   ✓ Reverse dial reuses connection (A→B, then B→A)');
+      print('   ✓ Bidirectional communication works (A pings B, B pings A)');
+      print('   ✓ No duplicate connections created');
+      print('   ✓ Connection reuse works at Swarm level (not transport level)');
+    }, timeout: Timeout(Duration(seconds: 60))); // Increased timeout for bidirectional test
   });
 }

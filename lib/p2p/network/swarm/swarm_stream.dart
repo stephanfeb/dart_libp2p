@@ -134,9 +134,18 @@ class SwarmStream implements P2PStream<Uint8List> {
         _logger.fine('Stream $_id: Scope already cleaned up, skipping');
       }
       
-      // Let SwarmConn handle its own cleanup without additional scope cleanup
-      await _conn.removeStream(this);
-      _logger.fine('Stream $_id closed and removed from connection');
+      // NOTE: We intentionally do NOT call _conn.removeStream(this) here.
+      // This caused a deadlock when called from SwarmConn.close() because:
+      // 1. SwarmConn.close() holds _streamsLock
+      // 2. This close() method would call removeStream()
+      // 3. removeStream() tries to acquire _streamsLock again
+      // 4. The Lock is not reentrant -> DEADLOCK
+      // 
+      // SwarmConn.close() already clears its _streams map after closing all streams,
+      // so removeStream() is not needed when closing as part of parent close.
+      // For individual stream closes, the stream is marked closed and will be
+      // cleaned up when SwarmConn is closed later.
+      _logger.fine('Stream $_id closed');
     });
   }
 

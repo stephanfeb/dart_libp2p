@@ -62,8 +62,12 @@ class CircuitV2Client implements Transport {
   final List<MultiAddr> _listenAddrs = [];
   bool _isListening = false;
 
-  // Connection tracking for reuse
+  // Connection tracking for monitoring and cleanup
   // Maps destination peer ID -> active RelayedConn
+  // NOTE: This is NOT used for connection reuse during dial(). The Swarm handles
+  // connection reuse at a higher level. This map is used for tracking incoming
+  // connections and proper cleanup when connections close.
+  // See test/p2p/host/autorelay_integration_test.dart for swarm-level reuse testing.
   final Map<String, RelayedConn> _activeConnections = {};
   final Lock _dialMutex = Lock();
   

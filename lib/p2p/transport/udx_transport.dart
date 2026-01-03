@@ -446,8 +446,18 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _logger.fine('[UDXSessionConn $id] Subscribing to initialStream closeEvents.');
     _initialStreamCloseSubscription = _initialStream.closeEvents.listen(
       (_) {
-        _logger.fine('[UDXSessionConn $id] Initial stream closed event. Closing session.');
-        close(); 
+        _logger.fine('[UDXSessionConn $id] Initial stream closed event. Active streams: ${_activeStreams.length}');
+        
+        // Remove the initial stream from active streams
+        _activeStreams.remove(_initialStream.id);
+        
+        // Only close the session if there are no other active streams
+        if (_activeStreams.isEmpty && !_isClosing && !_isClosed) {
+          _logger.fine('[UDXSessionConn $id] No other active streams. Closing session.');
+          close();
+        } else {
+          _logger.fine('[UDXSessionConn $id] Other streams still active (${_activeStreams.length}). Keeping session open.');
+        }
       },
       onError: (err, s) { 
         _logger.fine('[UDXSessionConn $id] Initial stream error event: $err. Closing session with error.');
@@ -719,6 +729,21 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   @override
   Socket get socket => throw UnimplementedError("UDX connections operate over UDPSocket, not a direct dart:io.Socket.");
 
+  /// Called by UDXP2PStreamAdapter when a stream closes.
+  /// Removes the stream from active streams and potentially closes the session
+  /// if no active streams remain.
+  void notifyStreamClosed(int streamId) {
+    _logger.fine('[UDXSessionConn $id] Stream $streamId closed. Active streams before removal: ${_activeStreams.length}');
+    _activeStreams.remove(streamId);
+    _logger.fine('[UDXSessionConn $id] Active streams after removal: ${_activeStreams.length}');
+    
+    // If no more active streams and we're not already closing, close the session
+    if (_activeStreams.isEmpty && !_isClosing && !_isClosed) {
+      _logger.fine('[UDXSessionConn $id] No active streams remaining. Closing session.');
+      close();
+    }
+  }
+
   @override
   Future<void> close() async {
     // Phase 1.3: Connection Resource Cleanup Analysis - Enhanced close logging
@@ -815,14 +840,32 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     // For negotiation purposes, read from the initial stream.
     // The 'length' parameter for TransportConn.read is a suggestion,
     // P2PStream.read also takes an optional maxLength.
-    _logger.fine('[UDXSessionConn $id] read() delegating to initialP2PStream.read(length: $length)');
-    return initialP2PStream.read(length);
+    _logger.fine('[UDXSessionConn $id] read() delegating to initialP2PStream.read(length: $length). Stream isClosed: ${initialP2PStream.isClosed}, Session _isClosed: $_isClosed, _isClosing: $_isClosing');
+    
+    // Fail fast if session is closing/closed
+    if (_isClosed || _isClosing) {
+      _logger.warning('[UDXSessionConn $id] read() called on closing/closed session. Returning empty (EOF).');
+      return Uint8List(0);
+    }
+    
+    final result = await initialP2PStream.read(length);
+    if (result.isEmpty) {
+      _logger.warning('[UDXSessionConn $id] read() returned EMPTY DATA (EOF signal). Stream isClosed: ${initialP2PStream.isClosed}');
+    }
+    return result;
   }
 
   @override
   Future<void> write(Uint8List data) async {
     // For negotiation purposes, write to the initial stream.
-    _logger.fine('[UDXSessionConn $id] write() delegating to initialP2PStream.write() data length: ${data.length}');
+    _logger.fine('[UDXSessionConn $id] write() delegating to initialP2PStream.write() data length: ${data.length}. Session _isClosed: $_isClosed, _isClosing: $_isClosing');
+    
+    // Fail fast if session is closing/closed to prevent hanging on writes to closed streams
+    if (_isClosed || _isClosing) {
+      _logger.warning('[UDXSessionConn $id] write() called on closing/closed session. Throwing StateError.');
+      throw StateError('Session is closing or closed, cannot write');
+    }
+    
     return initialP2PStream.write(data);
   }
 
