@@ -480,6 +480,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       sendFrame: _sendFrame,
       parentConn: this, // Added parentConn
       remotePeer: remotePeer, // For metrics reporting
+      maxFrameSize: _config.maxFrameSize, // Limit frame size for resilience
       metricsObserver: metricsObserver, // For metrics reporting
       logPrefix: "$_logPrefix StreamID=${frame.streamId}",
     );
@@ -706,6 +707,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       sendFrame: _sendFrame,
       parentConn: this, // Added parentConn
       remotePeer: remotePeer, // For metrics reporting
+      maxFrameSize: _config.maxFrameSize, // Limit frame size for resilience
       metricsObserver: metricsObserver, // For metrics reporting
       logPrefix: "$_logPrefix StreamID=$streamId",
     );

@@ -68,6 +68,24 @@ class MultiplexerConfig {
   /// Maximum stream window size in bytes (default: 16MB)
   final int maxStreamWindowSize;
 
+  /// Maximum size of a single DATA frame payload in bytes (default: 16KB)
+  /// 
+  /// This limits the size of individual Yamux DATA frames sent over the wire.
+  /// Smaller frames result in smaller encrypted messages when used with Noise,
+  /// which improves resilience to packet loss by reducing head-of-line blocking.
+  /// 
+  /// When encrypted with Noise, each frame becomes an atomic message that must
+  /// be fully received before decryption. Smaller frames mean:
+  /// - Faster recovery from packet loss (less data to retransmit)
+  /// - Better interleaving of control frames (window updates, pings)
+  /// - Reduced risk of deadlock from flow control starvation
+  /// 
+  /// Recommended values:
+  /// - 1024 (1KB): Most resilient, higher overhead
+  /// - 4096 (4KB): Good balance for high-latency/lossy networks
+  /// - 16384 (16KB): Default, suitable for reliable networks
+  final int maxFrameSize;
+
   /// Stream read timeout (default: 30 seconds)
   final Duration streamReadTimeout;
 
@@ -86,6 +104,7 @@ class MultiplexerConfig {
     this.maxStreams = 1000,
     this.initialStreamWindowSize = 256 * 1024, // 256KB
     this.maxStreamWindowSize = 16 * 1024 * 1024, // 16MB
+    this.maxFrameSize = 16 * 1024, // 16KB - balances throughput vs resilience
     this.streamReadTimeout = const Duration(seconds: 30),
     this.streamWriteTimeout = const Duration(seconds: 30),
     this.keepAliveInterval = const Duration(seconds: 10),

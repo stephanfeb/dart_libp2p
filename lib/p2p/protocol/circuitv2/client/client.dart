@@ -206,12 +206,15 @@ class CircuitV2Client implements Transport {
       // The remote multiaddr could also be a /p2p-circuit address from the source's perspective.
 
       // Construct the local and remote multiaddrs for the RelayedConn
-      // Local: /p2p/{relayId}/p2p-circuit/p2p/{myId} (or simpler if not needed for RelayedConn)
+      // Local: /p2p/{relayId}/p2p-circuit/p2p/{myId}
       // Remote: /p2p/{relayId}/p2p-circuit/p2p/{sourcePeerId}
-      final relayMa = stream.conn.remoteMultiaddr; // Address of the relay
-      // Ensure Multiaddr.fromString is available or use appropriate constructor
-      final localCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${host.id.toString()}');
-      final remoteCircuitMa = MultiAddr('${relayMa.toString()}/p2p-circuit/p2p/${sourcePeerId.toString()}');
+      final relayMa = stream.conn.remoteMultiaddr; // Address of the relay (transport part)
+      final relayPeerId = remoteRelayPeerId; // The relay's peer ID (from handler parameter)
+      
+      // CRITICAL FIX: Include relay peer ID in circuit addresses so canDial() recognizes them
+      // Format must be: /.../p2p/RELAY_ID/p2p-circuit/p2p/DEST_ID
+      final localCircuitMa = MultiAddr('${relayMa.toString()}/p2p/${relayPeerId.toString()}/p2p-circuit/p2p/${host.id.toString()}');
+      final remoteCircuitMa = MultiAddr('${relayMa.toString()}/p2p/${relayPeerId.toString()}/p2p-circuit/p2p/${sourcePeerId.toString()}');
       
       // CRITICAL: Store the relay circuit address in the peerstore so we can dial back to this peer
       // Without this, the peerstore has no address for the incoming peer, and any attempt

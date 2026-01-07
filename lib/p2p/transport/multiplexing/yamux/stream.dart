@@ -136,6 +136,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   static const int _maxFramesPerBatch = 10;
   static const Duration _frameProcessingDelay = Duration(milliseconds: 2);
 
+  /// Maximum size of a single DATA frame payload
+  /// This limits the size of Yamux frames to prevent head-of-line blocking
+  /// when encrypted messages are lost or delayed at the transport layer.
+  final int _maxFrameSize;
+
   /// Checks if the stream deadline has been exceeded
   void _checkDeadline() {
     if (_deadline != null && DateTime.now().isAfter(_deadline!)) {
@@ -175,6 +180,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     required Future<void> Function(YamuxFrame frame) sendFrame,
     required Conn parentConn, // Added parameter
     required PeerId remotePeer, // For metrics reporting
+    required int maxFrameSize, // Maximum DATA frame payload size
     YamuxMetricsObserver? metricsObserver, // For metrics reporting
     String? logPrefix,
   })  : streamId = id,
@@ -185,9 +191,10 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         _sendFrame = sendFrame,
         _parentConn = parentConn, // Initialize field
         _remotePeer = remotePeer,
+        _maxFrameSize = maxFrameSize,
         _metricsObserver = metricsObserver,
         _logPrefix = logPrefix ?? "StreamID=$id" {
-    _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow');
+    _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow, Max frame size: $_maxFrameSize');
   }
 
   /// Opens the stream (called by session when creating a new stream locally or accepting one)
@@ -312,9 +319,14 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         }
 
         final remaining = dataToWrite.length - offset;
-        // SecuredConnection now uses 4-byte length prefix, supporting messages up to ~4GB
-        // Only limit by remote receive window
-        final chunkSize = (remaining > _remoteReceiveWindow) ? _remoteReceiveWindow : remaining;
+        // Limit chunk size by:
+        // 1. _maxFrameSize - prevents large encrypted messages that cause head-of-line blocking
+        // 2. _remoteReceiveWindow - respects flow control from the receiver
+        // Using smaller frames improves resilience to packet loss and allows better
+        // interleaving of control frames (window updates, pings) with data frames.
+        int chunkSize = remaining;
+        if (chunkSize > _maxFrameSize) chunkSize = _maxFrameSize;
+        if (chunkSize > _remoteReceiveWindow) chunkSize = _remoteReceiveWindow;
         
         if (chunkSize == 0) {
           if (remaining > 0) {

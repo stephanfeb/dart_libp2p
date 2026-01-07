@@ -729,6 +729,23 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   @override
   Socket get socket => throw UnimplementedError("UDX connections operate over UDPSocket, not a direct dart:io.Socket.");
 
+  /// Ping the remote peer to verify connection liveness.
+  /// Uses UDX's native PING frame (1 byte) for minimal overhead.
+  /// 
+  /// This is a lightweight, non-intrusive way to check if the connection
+  /// is still alive, suitable for health monitoring and keepalive checks.
+  /// 
+  /// Returns true if the peer responds (ACK received), false on timeout or error.
+  Future<bool> ping({Duration timeout = const Duration(seconds: 5)}) async {
+    if (_isClosed) return false;
+    try {
+      return await _udpSocket.ping(timeout: timeout);
+    } catch (e) {
+      _logger.fine('[UDXSessionConn $id] Ping failed: $e');
+      return false;
+    }
+  }
+
   /// Called by UDXP2PStreamAdapter when a stream closes.
   /// Removes the stream from active streams and potentially closes the session
   /// if no active streams remain.
