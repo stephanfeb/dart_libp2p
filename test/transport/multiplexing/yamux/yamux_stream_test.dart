@@ -266,7 +266,7 @@ class MockConn implements Conn {
   @override
   MultiAddr get remoteMultiaddr => MockMultiaddr('/ip4/127.0.0.1/tcp/54321');
   @override
-  PeerId get remotePeer => MockPeerId('remote_mock_peer');
+  PeerId get remotePeer => MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx');
   @override
   Future<PublicKey?> get remotePublicKey async => null;
   @override
@@ -307,6 +307,8 @@ void main() {
         initialWindowSize: 256 * 1024, // 256KB
         sendFrame: sendFrame,
         parentConn: mockConn,
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024, // 64KB default
       );
     });
 
@@ -350,6 +352,8 @@ void main() {
         initialWindowSize: 10, // Start with just 10 bytes
         sendFrame: sendFrame,
         parentConn: mockConn,
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024,
       );
       await stream.open();
       sentFrames.clear();
@@ -436,6 +440,8 @@ void main() {
           initialWindowSize: 64 * 1024, // 64KB
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -515,6 +521,8 @@ void main() {
           initialWindowSize: 1024, // 1KB
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -651,6 +659,8 @@ void main() {
           initialWindowSize: 1024,
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -687,6 +697,8 @@ void main() {
           initialWindowSize: 1024,
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
 
         // Don't even open the stream, just close it
@@ -761,6 +773,8 @@ void main() {
             sentFrames.add(frame);
           },
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream.open();
@@ -790,6 +804,8 @@ void main() {
           initialWindowSize: 256 * 1024,
           sendFrame: (frame) async {},
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream.open();
@@ -817,6 +833,8 @@ void main() {
             sentFrames.add(frame);
           },
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream.open();
@@ -863,6 +881,8 @@ void main() {
           initialWindowSize: 256 * 1024,
           sendFrame: (frame) async {},
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         // Initial state should be init
@@ -886,6 +906,8 @@ void main() {
             sentFrames2.add(frame);
           },
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream2.open();
@@ -912,6 +934,8 @@ void main() {
           initialWindowSize: 256 * 1024,
           sendFrame: (frame) async {},
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream.open();
@@ -944,6 +968,8 @@ void main() {
             sentFrames.add(frame);
           },
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         
         await stream.open();

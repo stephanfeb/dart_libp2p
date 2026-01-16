@@ -679,14 +679,18 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
               final completerErrorDuration = DateTime.now().difference(attemptStartTime);
               _readCompleter = null;
               _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
-              
-              // Handle state transitions during read
-              if (_state == YamuxStreamState.closing) {
 
-                await _cleanup();
+              // Handle all terminal state transitions during read gracefully.
+              // When connection closes abruptly, forceReset() sets state to 'reset',
+              // or cleanup may set it to 'closed'. Return EOF instead of throwing
+              // to allow graceful handling by upper layers.
+              if (_state == YamuxStreamState.closing ||
+                  _state == YamuxStreamState.closed ||
+                  _state == YamuxStreamState.reset) {
+                _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state, returning EOF');
                 return Uint8List(0); // Return EOF instead of throwing
               }
-              
+
               // For other errors, rethrow with context
               rethrow;
             }
@@ -700,9 +704,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         final attemptDuration = DateTime.now().difference(attemptStartTime);
         _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-TIMEOUT] Timeout on attempt $attempts/$maxAttempts after ${attemptDuration.inMilliseconds}ms: ${e.message}');
         
-        // Check if stream is still viable
-        if (_state != YamuxStreamState.open || isClosed) {
-          _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-UNVIABLE] Stream no longer viable for retry. State: $_state, Closed: $isClosed');
+        // Check if stream is still viable - also check parent connection state
+        // for faster failure detection when underlying transport closes
+        final parentConnClosed = _parentConn.isClosed;
+        if (_state != YamuxStreamState.open || isClosed || parentConnClosed) {
+          _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-UNVIABLE] Stream no longer viable for retry. State: $_state, Closed: $isClosed, ParentConnClosed: $parentConnClosed');
           throw YamuxStreamStateException(
             'Stream became unavailable during read timeout',
             currentState: _state.name,
