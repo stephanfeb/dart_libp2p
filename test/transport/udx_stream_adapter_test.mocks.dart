@@ -1018,6 +1018,17 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       );
 
   @override
+  _i22.Future<bool> ping({Duration? timeout = const Duration(seconds: 5)}) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #ping,
+          [],
+          {#timeout: timeout},
+        ),
+        returnValue: _i22.Future<bool>.value(false),
+      ) as _i22.Future<bool>);
+
+  @override
   void notifyStreamClosed(int? streamId) => super.noSuchMethod(
         Invocation.method(
           #notifyStreamClosed,
@@ -1367,6 +1378,17 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
         ),
         returnValueForMissingStub: null,
       );
+
+  @override
+  _i22.Future<bool> ping({Duration? timeout = const Duration(seconds: 5)}) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #ping,
+          [],
+          {#timeout: timeout},
+        ),
+        returnValue: _i22.Future<bool>.value(false),
+      ) as _i22.Future<bool>);
 
   @override
   void setLocalMaxStreamsForTest(int? value) => super.noSuchMethod(

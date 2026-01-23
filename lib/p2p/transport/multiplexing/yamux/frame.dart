@@ -106,7 +106,6 @@ class YamuxFrame {
   /// Converts the frame to bytes
   Uint8List toBytes() {
     // ADDED LOG: Log frame details before serialization
-    // print('YamuxFrame.toBytes: Serializing Frame - Type: $type, StreamID: $streamId, Flags: $flags, Length: $length, Data (first 10 bytes): ${data.take(10).toList()}');
 
     final buffer = ByteData(12 + length);
     
@@ -132,7 +131,6 @@ class YamuxFrame {
 
     final resultBytes = buffer.buffer.asUint8List();
     // ADDED LOG: Log the first few bytes of the serialized frame
-    // print('YamuxFrame.toBytes: Serialized Bytes (first 16): ${resultBytes.take(16).toList()}');
     return resultBytes;
   }
 

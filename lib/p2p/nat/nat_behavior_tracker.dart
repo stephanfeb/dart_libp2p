@@ -223,7 +223,6 @@ class NatBehaviorTracker {
         }
       }
     } catch (e) {
-      print('Error loading NAT behavior history: $e');
     }
   }
 
@@ -236,7 +235,6 @@ class NatBehaviorTracker {
       final data = jsonEncode(json);
       await storageBroker!.save(storageKey, data);
     } catch (e) {
-      print('Error saving NAT behavior history: $e');
     }
   }
 

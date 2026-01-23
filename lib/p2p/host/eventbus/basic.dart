@@ -364,7 +364,6 @@ class _Node {
           }
         } catch (e) {
           // Log slow consumer warning or other errors
-          print('Error sending event to subscriber ${sink.name}: $e');
         }
       }
     });
@@ -404,8 +403,7 @@ class _WildcardNode {
             sink.controller.add(event);
           }
         } catch (e) {
-          print('Warning: subscriber named "${sink.name}" is a slow consumer of wildcard events. '
-              'This can lead to libp2p stalling and hard to debug issues. Error: $e');
+              print('This can lead to libp2p stalling and hard to debug issues. Error: $e');
         }
       }
     });

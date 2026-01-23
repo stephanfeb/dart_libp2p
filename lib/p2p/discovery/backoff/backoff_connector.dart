@@ -84,10 +84,8 @@ class BackoffConnector {
         await _host.network.dialPeer(context, pi.id).timeout(_connTryDur);
         return; // Successfully connected
       } catch (e) {
-        print('Error connecting to peer ${pi.id}: $e');
       }
     } catch (e) {
-      print('Error connecting to peer ${pi.id}: $e');
     } finally {
       if (!timeoutCompleter.isCompleted) {
         timeoutCompleter.complete();

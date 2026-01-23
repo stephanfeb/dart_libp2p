@@ -10,7 +10,6 @@ import 'package:dart_libp2p/p2p/host/resource_manager/limit.dart';
 
 // A simple logger placeholder, replace with actual logging if available
 void _logWarn(String message) {
-  print('WARN: $message');
 }
 
 class _Resources {
@@ -65,17 +64,14 @@ class _Resources {
   }
 
   void releaseMemory(int size) {
-    // print('DEBUG: _Resources.releaseMemory called with size $size. Memory before: $memory');
     memory -= size;
     if (memory < 0) {
       _logWarn('BUG: too much memory released (size: $size, memory before: ${memory + size}, after attempted subtract: $memory)');
       memory = 0;
     }
-    // print('DEBUG: _Resources.releaseMemory. Memory after: $memory');
   }
 
   Exception? addStream(Direction dir, String ownerId) {
-    // print('DEBUG: _Resources.addStream for $ownerId, limit: ${limit.runtimeType}, dir: $dir. Current streams: In=$streamsInbound, Out=$streamsOutbound. Limit obj: In=${limit.getStreamLimit(Direction.inbound)}, Out=${limit.getStreamLimit(Direction.outbound)}, Total=${limit.streamTotalLimit}');
 
     final currentLimit = limit.getStreamLimit(dir);
     final totalLimit = limit.streamTotalLimit;
@@ -103,7 +99,6 @@ class _Resources {
   }
 
   void removeStream(Direction dir, String ownerId) {
-    // print('DEBUG: _Resources.removeStream for $ownerId, dir: $dir. Current streams before remove: In=$streamsInbound, Out=$streamsOutbound.');
     if (dir == Direction.inbound) {
       streamsInbound--;
       if (streamsInbound < 0) {
@@ -117,7 +112,6 @@ class _Resources {
         streamsOutbound = 0;
       }
     }
-    // print('DEBUG: _Resources.removeStream for $ownerId, dir: $dir. Current streams after remove: In=$streamsInbound, Out=$streamsOutbound.');
   }
 
   Exception? addConn(Direction dir, bool usefd) {
@@ -208,9 +202,7 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
         _owner = owner,
         this.edges = edges ?? [] {
     // if (limit is BaseLimit) {
-    //   print('DEBUG: ResourceScopeImpl created: $name with BaseLimit: streams=${limit.streamTotalLimit}, In=${limit.getStreamLimit(Direction.inbound)}, Out=${limit.getStreamLimit(Direction.outbound)}');
     // } else {
-    //   print('DEBUG: ResourceScopeImpl created: $name with limit type: ${limit.runtimeType}');
     // }
     if (_owner == null) {
       // This is a DAG scope, increment ref count of its parents
@@ -250,30 +242,21 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   @override
   Future<void> reserveMemory(int size, int priority) async {
     if (_isDone) {
-      // print('DEBUG: $name.reserveMemory called on done scope.');
       throw _wrapError(network_errors.ResourceScopeClosedException());
     }
-    // print('DEBUG: $name.reserveMemory attempting to reserve $size bytes. Current memory: ${_resources.memory}');
     var err = _resources.reserveMemory(size, priority);
     if (err != null) {
-      // print('DEBUG: $name.reserveMemory local reservation failed: $err');
       // TODO: metrics.BlockMemory(size);
       throw _wrapError(err);
     }
-    // print('DEBUG: $name.reserveMemory local reservation succeeded. New memory: ${_resources.memory}');
 
     try {
-      // print('DEBUG: $name.reserveMemory propagating to ancestors.');
       await _reserveMemoryForAncestors(size, priority);
-      // print('DEBUG: $name.reserveMemory ancestor propagation succeeded.');
     } catch (e) {
-      // print('DEBUG: $name.reserveMemory ancestor propagation FAILED: $e. Rolling back local reservation of $size bytes. Memory before rollback: ${_resources.memory}');
       _resources.releaseMemory(size); // Rollback local reservation
       final memoryAfterRollback = _resources.memory; // Explicitly read after rollback
-      // print('DEBUG: $name.reserveMemory local reservation rolled back. Memory after rollback: $memoryAfterRollback');
       // Specific check for the failing test conditions - removing this as well
       // if (name == 'childScope' && size == 70 && memoryAfterRollback != 0) {
-      //   print('CRITICAL DEBUG for childScope (size 70): Memory is $memoryAfterRollback immediately after rollback, expected 0.');
       // }
       // TODO: metrics.BlockMemory(size);
       throw _wrapError(e as Exception);
@@ -509,14 +492,11 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _removeStreamForAncestors(Direction dir) {
-    // print('DEBUG: $name._removeStreamForAncestors called. Owner: ${_owner?.name}, Edges: ${edges.map((e) => e.name).join(', ')}');
     if (_owner != null) {
-      // print('DEBUG: $name._removeStreamForAncestors propagating to owner ${_owner!.name} by calling public removeStream');
       _owner!.removeStream(dir); // Call public method
       return;
     }
     for (var edge in edges) { 
-      // print('DEBUG: $name._removeStreamForAncestors: Calling public removeStream on edge ${edge.name}');
       edge.removeStream(dir); // Call public method
     }
   }
@@ -525,9 +505,7 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
     // This method is for a parent to update its own resources when directly told so by a child.
     // It does NOT trigger further propagation up from this parent.
     // final currentStat = _resources.stat();
-    // print('DEBUG: $name._removeStreamForChild called. IsDone: $_isDone. Current streams: In=${currentStat.numStreamsInbound}, Out=${currentStat.numStreamsOutbound}.');
     if (_isDone) {
-      // print('DEBUG: $name._removeStreamForChild returning early as _isDone is true.');
       return;
     }
     _resources.removeStream(dir, name);

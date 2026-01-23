@@ -42,7 +42,6 @@ class NatBehaviorDiscovery {
         // Get the OTHER-ADDRESS attribute to find the alternate address
         final otherAddress = StunMessage.extractOtherAddress(response1);
         if (otherAddress == null) {
-          print('STUN server does not support RFC 5780 (no OTHER-ADDRESS attribute)');
           return NatMappingBehavior.unknown;
         }
 
@@ -111,7 +110,6 @@ class NatBehaviorDiscovery {
         socket1.close();
       }
     } catch (e) {
-      print('Error discovering mapping behavior: $e');
       return NatMappingBehavior.unknown;
     }
   }
@@ -134,7 +132,6 @@ class NatBehaviorDiscovery {
         // Get the OTHER-ADDRESS attribute to find the alternate address
         final otherAddress = StunMessage.extractOtherAddress(response1);
         if (otherAddress == null) {
-          print('STUN server does not support RFC 5780 (no OTHER-ADDRESS attribute)');
           return NatFilteringBehavior.unknown;
         }
 
@@ -205,7 +202,6 @@ class NatBehaviorDiscovery {
         socket1.close();
       }
     } catch (e) {
-      print('Error discovering filtering behavior: $e');
       return NatFilteringBehavior.unknown;
     }
   }
@@ -218,102 +214,81 @@ class NatBehaviorDiscovery {
 
   /// Discovers the NAT mapping behavior using basic STUN tests
   Future<NatMappingBehavior> discoverMappingBehaviorBasic() async {
-    print('Starting discoverMappingBehaviorBasic');
     try {
       // Test 1: Get mapped address from primary address
       final socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      print('Socket 1 bound to port: ${socket1.port}');
       try {
         final response1 = await _sendRequest(socket1, StunMessage.createBindingRequest());
         if (response1 == null) {
-          print('No response received for socket 1');
           return NatMappingBehavior.unknown;
         }
 
         final mappedAddress1 = _extractMappedAddress(response1);
         if (mappedAddress1 == null) {
-          print('No mapped address extracted for socket 1');
           return NatMappingBehavior.unknown;
         }
 
         // Test 2: Send to a different STUN server
         final socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
-        print('Socket 2 bound to port: ${socket2.port}');
         try {
           final request2 = StunMessage.createBindingRequest();
           final response2 = await _sendRequestToServer(socket2, request2, await stunClient.stunServer, stunClient.stunPort);
 
           if (response2 == null) {
-            print('No response received for socket 2');
             return NatMappingBehavior.unknown;
           }
 
           final mappedAddress2 = _extractMappedAddress(response2);
           if (mappedAddress2 == null) {
-            print('No mapped address extracted for socket 2');
             return NatMappingBehavior.unknown;
           }
 
           // Compare the mapped addresses
           if (mappedAddress1.port == mappedAddress2.port) {
-            print('Same port for different destination IP addresses: Endpoint-independent mapping');
             return NatMappingBehavior.endpointIndependent;
           } else {
-            print('Different ports for different servers: Address-dependent mapping');
             return NatMappingBehavior.addressDependent;
           }
         } finally {
-          print('Closing socket 2');
           socket2.close();
         }
       } finally {
-        print('Closing socket 1');
         socket1.close();
       }
     } catch (e) {
-      print('Error discovering mapping behavior: $e');
       return NatMappingBehavior.unknown;
     }
   }
 
   /// Discovers the NAT filtering behavior using basic STUN tests
   Future<NatFilteringBehavior> discoverFilteringBehaviorBasic() async {
-    print('Starting discoverFilteringBehaviorBasic');
     try {
       // Test 1: Get mapped address from primary address
       RawDatagramSocket socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      print('Socket 1 bound to port: ${socket1.port}');
       try {
         final response1 = await _sendRequest(socket1, StunMessage.createBindingRequest());
         if (response1 == null) {
-          print('No response received for socket 1');
           return NatFilteringBehavior.unknown;
         }
 
         // Test 2: Request response from a different STUN server
         RawDatagramSocket socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
-        print('Socket 2 bound to port: ${socket2.port}');
         try {
           final request2 = StunMessage.createBindingRequest();
           final response2 = await _sendRequestToServer(socket2, request2, await stunClient.stunServer, stunClient.stunPort);
 
           if (response2 != null) {
-            print('Response received from a different server: Endpoint-independent filtering');
             return NatFilteringBehavior.endpointIndependent;
           } else {
-            print('No response from a different server: Address-dependent filtering');
             return NatFilteringBehavior.addressDependent;
           }
         } finally {
-          print('Closing socket 2');
           socket2.close();
         }
       } finally {
-        print('Closing socket 1');
         socket1.close();
       }
     } catch (e) {
-      print('Error discovering filtering behavior: $e');
       return NatFilteringBehavior.unknown;
     }
   }

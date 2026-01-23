@@ -24,7 +24,6 @@ class StunClient {
   Future<InternetAddress> get stunServer async {
     if (_resolvedAddress != null) return _resolvedAddress!;
     try {
-      // print('Resolving STUN server: $serverHost');
       final addresses = await InternetAddress.lookup(serverHost)
           .timeout(dnsTimeout);
       
@@ -35,10 +34,8 @@ class StunClient {
       );
       
       _resolvedAddress = ipv4Address;
-      // print('Resolved STUN server to: ${_resolvedAddress!.address}');
       return _resolvedAddress!;
     } catch (e) {
-      // print('Failed to resolve STUN server: $e');
       rethrow;
     }
   }
@@ -46,7 +43,6 @@ class StunClient {
   /// Discovers external IP address and port
   Future<StunResponse> discover() async {
     final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    // print('Bound socket to port ${socket.port}');
     
     final completer = Completer<StunResponse>();
     Timer? timeoutTimer;
@@ -63,7 +59,6 @@ class StunClient {
       // Set up timeout for STUN response only
       timeoutTimer = Timer(timeout, () {
         if (!completer.isCompleted) {
-          // print('STUN request timed out');
           cleanup();
           completer.completeError(
             TimeoutException('STUN request timed out after ${timeout.inSeconds} seconds'));
@@ -77,17 +72,14 @@ class StunClient {
             final datagram = socket.receive();
             if (datagram == null) return;
             
-            // print('Received response from ${datagram.address.address}:${datagram.port}');
             final response = StunMessage.decode(datagram.data);
             if (response == null) {
-              // print('Failed to decode STUN response');
               return;
             }
             
             // Extract mapped address from XOR-MAPPED-ADDRESS or MAPPED-ADDRESS
             final mappedAddress = _extractMappedAddress(response);
             if (mappedAddress != null && !completer.isCompleted) {
-              // print('Successfully extracted mapped address: ${mappedAddress.address.address}:${mappedAddress.port}');
               cleanup();
               completer.complete(StunResponse(
                 externalAddress: mappedAddress.address,
@@ -98,14 +90,12 @@ class StunClient {
           }
         },
         onError: (error) {
-          print('Socket error: $error');
           if (!completer.isCompleted) {
             cleanup();
             completer.completeError(error);
           }
         },
         onDone: () {
-          print('Socket closed');
           if (!completer.isCompleted) {
             cleanup();
             completer.completeError(
@@ -116,16 +106,13 @@ class StunClient {
       
       // Send request
       final requestData = request.encode();
-      // print('Sending ${requestData.length} bytes to ${server.address}:$stunPort');
       final sent = socket.send(requestData, server, stunPort);
-      // print('Sent $sent bytes');
       if (sent == 0) {
         throw Exception('Failed to send STUN request');
       }
       
       return await completer.future;
     } catch (e) {
-      print('Error in discover: $e');
       cleanup();
       rethrow;
     }

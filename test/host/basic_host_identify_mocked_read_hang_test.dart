@@ -347,6 +347,14 @@ class MockSecuredConn extends MockConnBase implements p2p_secured_conn.SecuredCo
 
   @override
   void notifyActivity() {}
+
+  @override
+  // TODO: implement currentRecvNonce
+  int get currentRecvNonce => throw UnimplementedError();
+
+  @override
+  // TODO: implement currentSendNonce
+  int get currentSendNonce => throw UnimplementedError();
 }
 
 class MockMuxerInstance implements p2p_muxer.Multiplexer {

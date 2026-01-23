@@ -131,8 +131,6 @@ class RsaPrivateKey implements p2pkeys.PrivateKey {
     try {
 
       // Debug information
-      print('Parsing DER bytes of length: ${bytes.length}');
-      print('First few bytes: ${bytes.take(10).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
       final parser = pc.ASN1Parser(bytes);
       final asn1Object = parser.nextObject();
@@ -212,7 +210,6 @@ class RsaPrivateKey implements p2pkeys.PrivateKey {
 
       return RsaPrivateKey(privateKey, RsaPublicKey(publicKey));
     } catch (e) {
-      print('Error parsing RSA private key: $e');
       if (e is FormatException) {
         rethrow;
       }

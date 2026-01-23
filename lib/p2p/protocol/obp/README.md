@@ -110,7 +110,6 @@ final handshakeSuccess = await OBPProtocolHandler.performHandshake(
 );
 
 if (!handshakeSuccess) {
-  print('Handshake failed');
   await stream.close();
   return;
 }
@@ -133,7 +132,6 @@ final response = await OBPProtocolHandler.sendRequest(
 
 if (response != null && response.type == OBPMessageType.prekeyFetchResp) {
   final data = jsonDecode(utf8.decode(response.payload));
-  print('Received prekeys: $data');
 }
 
 await OBPProtocolHandler.closeStream(stream, context: 'my-app-client');
@@ -189,7 +187,6 @@ host.setStreamHandler('/overnode/obp/1.0.0', (stream) async {
       }
     }
   } catch (e) {
-    print('Error handling OBP stream: $e');
   } finally {
     await OBPProtocolHandler.closeStream(stream, context: 'my-app-server');
   }

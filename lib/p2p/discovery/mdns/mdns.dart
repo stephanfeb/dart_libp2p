@@ -183,7 +183,6 @@ class MdnsDiscovery implements Discovery {
       await _server!.start();
 
     } catch (e) {
-      print('Failed to start mDNS service advertisement: $e');
     }
   }
 
@@ -206,7 +205,6 @@ class MdnsDiscovery implements Discovery {
       });
 
     } catch (e) {
-      print('Failed to start mDNS discovery: $e');
     }
   }
 
@@ -236,7 +234,6 @@ class MdnsDiscovery implements Discovery {
       }
       
     } catch (e) {
-      print('mDNS discovery query error: $e');
     }
   }
 
@@ -274,14 +271,12 @@ class MdnsDiscovery implements Discovery {
               }
             }
           } catch (e) {
-            print('Failed to parse multiaddr "$addrStr": $e');
           }
         }
       }
 
       // Don't discover ourselves
       if (peerId != null && peerId == _host.id) {
-        print('Ignoring self-discovery');
         return;
       }
 
@@ -291,7 +286,6 @@ class MdnsDiscovery implements Discovery {
         _notifee?.handlePeerFound(addrInfo);
       }
     } catch (e) {
-      print('Error processing discovered service: $e');
     }
   }
 

@@ -83,7 +83,6 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
 
   Future<Reservation> _reserveStream(P2PStream stream, PeerId relayPeerId) async {
     // 'host' is accessible here as 'this.host' from the CircuitV2Client instance
-    print('[Client] _reserveStream started for relay: ${relayPeerId.toBase58()}');
     try {
       // Create a completer to track when the async write completes
       final writeCompleter = Completer<void>();
@@ -94,55 +93,44 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       final requestMsg = pb.HopMessage()..type = pb.HopMessage_Type.RESERVE;
 
       // Write the message
-      print('[Client] Sending RESERVE message...');
       writeDelimitedMessage(writer, requestMsg);
       
       // CRITICAL: Wait for the write to complete before reading the response.
       // Without this, there's a race condition where we try to read before
       // the RESERVE message is fully transmitted, causing iOS to fail consistently.
       await writeCompleter.future;
-      print('[Client] RESERVE message sent and flushed, waiting for response...');
 
       // Read the response using manual reading (instead of DelimitedReader)
-      print('[Client] Reading response message length...');
       final responseLength = await bufferedReader.readVarint();
       if (responseLength > 4096) {
         throw Exception('RESERVE response message too large: $responseLength bytes');
       }
-      print('[Client] Reading response message bytes ($responseLength bytes)...');
       final responseBytes = await bufferedReader.readExact(responseLength);
       final responseMsg = pb.HopMessage.fromBuffer(responseBytes);
       
-      print('[Client] Response received, type: ${responseMsg.type}, status: ${responseMsg.status}');
       
       // Log any remaining buffered data (should not happen for reservations)
       final remainingBytes = bufferedReader.remainingBuffer;
       if (remainingBytes.isNotEmpty) {
-        print('[Client] ⚠️ WARNING: Unexpected ${remainingBytes.length} buffered bytes after RESERVE response');
       }
 
       if (responseMsg.type != pb.HopMessage_Type.STATUS) {
-        print('[Client] ERROR: Unexpected response type: ${responseMsg.type}');
         throw ReservationError(
             status: pb.Status.MALFORMED_MESSAGE,
             reason: 'unexpected relay response: not a status message (${responseMsg.type})');
       }
 
       if (responseMsg.status != pb.Status.OK) {
-        print('[Client] ERROR: Reservation failed with status: ${responseMsg.status.name}');
         throw ReservationError(status: responseMsg.status, reason: 'reservation failed with status ${responseMsg.status.name}');
       }
 
       if (!responseMsg.hasReservation()) {
-        print('[Client] ERROR: Response missing reservation info');
         throw ReservationError(status: pb.Status.MALFORMED_MESSAGE, reason: 'missing reservation info in response');
       }
 
-      print('[Client] Parsing reservation data...');
       final rsvpData = responseMsg.reservation;
       final int expireInSeconds = rsvpData.expire.toInt();
       final expiration = DateTime.fromMillisecondsSinceEpoch(expireInSeconds * 1000);
-      print('[Client] Reservation expires: $expiration');
 
       if (expiration.isBefore(DateTime.now())) {
         throw ReservationError(
@@ -156,15 +144,12 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
           final addr = MultiAddr.fromBytes(Uint8List.fromList(addrBytes));
           addrs.add(addr);
         } catch (e) {
-          print('[Client] WARNING: Ignoring unparsable relay address: $e');
         }
       }
-      print('[Client] Parsed ${addrs.length} relay addresses');
 
       Uint8List? voucherBytes;
       if (rsvpData.hasVoucher()) {
         voucherBytes = Uint8List.fromList(rsvpData.voucher);
-        print('[Client] Voucher received (${voucherBytes.length} bytes)');
         // TODO: Implement voucher parsing and validation (record.ConsumeEnvelope equivalent)
         // For now, we store the raw voucher bytes.
       }
@@ -179,10 +164,8 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
         if (limitPb.hasData()) {
           limitData = BigInt.from(limitPb.data.toInt());
         }
-        print('[Client] Limits: duration=$limitDuration, data=$limitData');
       }
 
-      print('[Client] ✅ Reservation created successfully');
       return Reservation(
         expiration,
         addrs,
@@ -192,16 +175,13 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       );
     } catch (e) {
       // stream.reset(); // P2PStream might not have reset, close is more common.
-      print('[Client] ❌ ERROR in _reserveStream: $e');
       if (e is ReservationError) {
         rethrow;
       }
       throw ReservationError(status: pb.Status.CONNECTION_FAILED, reason: 'error during reservation stream handling', cause: e is Exception ? e : Exception(e.toString()));
     } finally {
       // Close the stream
-      print('[Client] Closing stream...');
       await stream.close();
-      print('[Client] Stream closed');
     }
   }
 }

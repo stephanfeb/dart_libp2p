@@ -38,9 +38,7 @@ class ConnectionManager implements ConnManager {
 
   /// Registers a new connection with the manager
   void registerConnection(TransportConn connection) {
-    print('Registering connection: $connection');
     if (_connections.containsKey(connection)) {
-      print('Connection already registered');
       return;
     }
 
@@ -48,7 +46,6 @@ class ConnectionManager implements ConnManager {
     _connections[connection] = ConnectionState.connecting;
     _stateControllers[connection] = stateController;
     _lastActivity[connection] = DateTime.now();
-    print('Connection registered with initial state: ${_connections[connection]}');
 
     // Start monitoring the connection and set initial state
     _monitorConnection(connection);
@@ -57,16 +54,12 @@ class ConnectionManager implements ConnManager {
 
   /// Updates the state of a connection
   void updateState(TransportConn connection, ConnectionState newState, {Object? error}) {
-    print('Updating state for connection: $connection to $newState');
     final currentState = _connections[connection];
     if (currentState == null) {
-      print('Connection not found in manager: $connection');
-      print('Current connections: ${_connections.keys.join(', ')}');
       throw StateError('Connection not registered with manager');
     }
 
     if (currentState == newState) {
-      print('State unchanged: $currentState');
       return;
     }
 
@@ -78,7 +71,6 @@ class ConnectionManager implements ConnManager {
 
     _connections[connection] = newState;
     _stateControllers[connection]?.add(stateChange);
-    print('State updated: $currentState -> $newState');
 
     // Update last activity timestamp for state changes
     if (newState == ConnectionState.active) {

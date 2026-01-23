@@ -241,7 +241,6 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
     if (_muxedConn is p2p_mux.Multiplexer) {
       return (_muxedConn as p2p_mux.Multiplexer).streams;
     } else {
-      print('Warning: _muxedConn in UpgradedConnectionImpl is not a p2p_mux.Multiplexer. Cannot get streams directly.');
       return []; 
     }
   }
@@ -277,7 +276,6 @@ class BasicUpgrader implements Upgrader {
       final securityProtoIDs = config.securityProtocols.map((s) => s.protocolId).toList();
       final negotiationSecStream = NegotiationStreamWrapper(connection, '/sec-negotiator');
 
-      print("Going to try and upgrade to [${securityProtoIDs}]");
       final chosenSecurityIdStr = await mssForSecurity.selectOneOf(negotiationSecStream, securityProtoIDs);
 
       if (chosenSecurityIdStr == null) {

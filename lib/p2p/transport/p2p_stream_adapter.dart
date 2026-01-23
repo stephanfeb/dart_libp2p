@@ -190,7 +190,6 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
       await _underlyingMuxedStream.close();
     } catch (e) {
       // Log error, but proceed with local cleanup
-      print('Error closing underlying muxed stream: $e');
     } finally {
       await _handleResetOrClose();
     }
@@ -207,7 +206,6 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
       rethrow;
     } catch (e) {
       // Log or handle other errors
-      print('Error during closeWrite: $e');
       // Decide if this should also trigger _handleResetOrClose
     }
     // Note: closeWrite in MuxedStream doesn't free the stream.
@@ -230,7 +228,6 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
       await _handleResetOrClose();
       rethrow;
     } catch (e) {
-      print('Error during closeRead: $e');
     }
     // Note: closeRead in MuxedStream doesn't free the stream.
   }
@@ -242,7 +239,6 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
       await _underlyingMuxedStream.reset();
     } catch (e) {
       // Log error, but proceed with local cleanup
-      print('Error resetting underlying muxed stream: $e');
     } finally {
       await _handleResetOrClose();
     }

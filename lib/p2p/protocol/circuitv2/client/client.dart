@@ -87,7 +87,6 @@ class CircuitV2Client implements Transport {
     // Register a handler for the STOP protocol. This is how we receive incoming connections.
     host.setStreamHandler(CircuitV2Protocol.protoIDv2Stop, _handleStreamV2);
     _log.warning('🎯 [CircuitV2Client.start] Handler registered for ${CircuitV2Protocol.protoIDv2Stop}');
-    print('🎯 [CircuitV2Client.start] Handler registered for ${CircuitV2Protocol.protoIDv2Stop}');
     _log.fine('CircuitV2Client started, listening for ${CircuitV2Protocol.protoIDv2Stop}');
   }
 
@@ -102,19 +101,16 @@ class CircuitV2Client implements Transport {
   // Signature updated to match StreamHandler typedef: Future<void> Function(P2PStream stream, PeerId remotePeer)
   Future<void> _handleStreamV2(P2PStream stream, PeerId remoteRelayPeerId) async {
     _log.warning('🎯 [CircuitV2Client._handleStreamV2] ENTERED! Received incoming STOP stream from relay ${remoteRelayPeerId.toString()} for stream ${stream.id()}');
-    print('🎯 [CircuitV2Client._handleStreamV2] ENTERED! Stream ${stream.id()} from relay ${remoteRelayPeerId.toString()}');
     
     try {
       // Read the STOP message directly from the P2PStream without any adapters
       // This keeps the stream clean for the RelayedConn to use afterward
-      print('🎯 [CircuitV2Client._handleStreamV2] Reading length-prefixed STOP message...');
       
       // Accumulate data until we have the complete message
       final buffer = <int>[];
       
       // Read first chunk to get length prefix
       var chunk = await stream.read();
-      print('🎯 [CircuitV2Client._handleStreamV2] Read ${chunk.length} bytes (chunk 1)');
       
       if (chunk.isEmpty) {
         throw Exception('Empty message received from relay');
@@ -134,27 +130,22 @@ class CircuitV2Client implements Transport {
         shift += 7;
       }
       
-      print('🎯 [CircuitV2Client._handleStreamV2] Message length: $messageLength bytes (length prefix: $bytesRead bytes)');
       
       // Read more chunks until we have the complete message
       while (buffer.length < bytesRead + messageLength) {
-        print('🎯 [CircuitV2Client._handleStreamV2] Need ${bytesRead + messageLength} bytes, have ${buffer.length}, reading more...');
         chunk = await stream.read();
-        print('🎯 [CircuitV2Client._handleStreamV2] Read ${chunk.length} more bytes');
         if (chunk.isEmpty) {
           throw Exception('Stream closed before complete message received');
         }
         buffer.addAll(chunk);
       }
       
-      print('🎯 [CircuitV2Client._handleStreamV2] Complete message received: ${buffer.length} bytes total');
       
       // Extract message bytes (skip the length prefix)
       final messageBytes = buffer.sublist(bytesRead, bytesRead + messageLength);
       
       // Parse the STOP message
       final msg = circuit_pb.StopMessage.fromBuffer(messageBytes);
-      print('🎯 [CircuitV2Client._handleStreamV2] STOP message received! Type: ${msg.type}');
       
       // Extract diagnostic session ID if present
       final sessionId = msg.hasDiagnosticSessionId()
@@ -226,7 +217,6 @@ class CircuitV2Client implements Transport {
           AddressTTL.connectedAddrTTL,
         );
         _log.info('[CircuitV2Client._handleStreamV2] 📝 Stored relay circuit address for $sourcePeerShort: $remoteCircuitMa');
-        print('🎯 [CircuitV2Client._handleStreamV2] Stored relay address for $sourcePeerShort: $remoteCircuitMa');
       } catch (e) {
         _log.warning('[CircuitV2Client._handleStreamV2] Failed to store relay address for $sourcePeerShort: $e');
       }
@@ -271,7 +261,6 @@ class CircuitV2Client implements Transport {
       // before the Swarm picks it up for upgrade. If we add to controller first,
       // the Swarm starts reading from the stream while we're still writing the
       // STOP response, causing race conditions and handshake failures.
-      print('🎯 [CircuitV2Client._handleStreamV2] Sending STOP response with status OK...');
       final stopResponse = circuit_pb.StopMessage()
         ..type = circuit_pb.StopMessage_Type.STATUS
         ..status = circuit_pb.Status.OK;
@@ -281,7 +270,6 @@ class CircuitV2Client implements Transport {
       final responseLengthBytes = encodeVarint(responseBytes.length);
       await stream.write(responseLengthBytes);
       await stream.write(responseBytes);
-      print('🎯 [CircuitV2Client._handleStreamV2] STOP response sent successfully');
       
       _log.fine('Sent STOP response with status OK to relay ${stream.conn.remotePeer.toString()}');
 
@@ -298,7 +286,6 @@ class CircuitV2Client implements Transport {
       // and the stream is ready for the Noise+Yamux upgrade that the Swarm will perform.
       _incomingConnController.add(relayedConn);
       
-      print('🎯 [CircuitV2Client._handleStreamV2] Handler complete, stream now managed by RelayedConn');
 
     } catch (e, s) {
       _log.severe('Error handling incoming STOP stream: $e\n$s');
@@ -310,7 +297,6 @@ class CircuitV2Client implements Transport {
   @override
   Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
     _log.info('[CircuitV2Client.dial] 🔌 Starting circuit dial to $addr');
-    print('🔌 [CircuitV2Client.dial] CALLED with address: $addr');
     
     // 1. Parse the /p2p-circuit address.
     final addrComponents = addr.components; // Use the components getter
@@ -510,11 +496,6 @@ class CircuitV2Client implements Transport {
         _log.info('[CircuitV2Client.dial] 📝 Stored outbound connection in tracking map for $destPeerStr');
       });
       _log.info('[CircuitV2Client.dial] 🎉 Successfully dialed ${destId.toString()} via relay ${relayId.toString()}');
-      print('🎉 [CircuitV2Client.dial] SUCCESS! Returning RelayedConn for ${destId.toString()}');
-      print('   Local peer: ${relayedConn.localPeer}');
-      print('   Remote peer: ${relayedConn.remotePeer}');
-      print('   Local addr: ${relayedConn.localMultiaddr}');
-      print('   Remote addr: ${relayedConn.remoteMultiaddr}');
       
       // Notify metrics observer of successful relay dial
       final dialCompleteTime = DateTime.now();
@@ -534,7 +515,6 @@ class CircuitV2Client implements Transport {
 
     } catch (e, s) {
       _log.severe('Error during HOP stream negotiation: $e\n$s');
-      print('❌ [CircuitV2Client.dial] FAILED! Error: $e');
       
       // Notify metrics observer of failed relay dial
       final dialCompleteTime = DateTime.now();

@@ -26,7 +26,6 @@ import './metrics.dart';
 
 // Logging function for this file
 void _log(String message) {
-  print('[AutoNAT] $message');
 }
 
 const int maxConfidence = 3;

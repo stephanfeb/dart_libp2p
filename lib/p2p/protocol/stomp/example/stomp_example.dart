@@ -17,16 +17,12 @@ Future<void> main() async {
   // Set up logging
   Logger.root.level = Level.INFO;
   Logger.root.onRecord.listen((record) {
-    print('${record.level.name}: ${record.time}: ${record.message}');
   });
 
-  print('🚀 Starting STOMP Protocol Example');
   
   try {
     await runStompExample();
   } catch (e, stackTrace) {
-    print('❌ Error running STOMP example: $e');
-    print('Stack trace: $stackTrace');
     exit(1);
   }
 }
@@ -36,32 +32,24 @@ Future<void> runStompExample() async {
   final serverHost = await createHost('server');
   final clientHost = await createHost('client');
 
-  print('📡 Server Host ID: ${serverHost.id}');
-  print('📱 Client Host ID: ${clientHost.id}');
 
   // Start the STOMP server
-  print('\n🏗️  Setting up STOMP server...');
   final stompService = await serverHost.addStompService(
     options: const StompServiceOptions.serverEnabled(
       serverName: 'dart-libp2p-stomp-example/1.0',
     ),
   );
 
-  print('✅ STOMP server started');
 
   // Give the server a moment to start
   await Future.delayed(const Duration(milliseconds: 100));
 
   // Connect client to server
-  print('\n🔗 Connecting client to server...');
   final client = await clientHost.connectStomp(
     peerId: serverHost.id,
     hostName: 'example.com',
   );
 
-  print('✅ Client connected to server');
-  print('   Session ID: ${client.sessionId}');
-  print('   Server Info: ${client.serverInfo}');
 
   // Example 1: Simple message sending
   await demonstrateSimpleMessaging(client);
@@ -76,13 +64,11 @@ Future<void> runStompExample() async {
   await demonstrateServerBroadcast(stompService, client);
 
   // Clean up
-  print('\n🧹 Cleaning up...');
   await client.close();
   await stompService.stop();
   await serverHost.close();
   await clientHost.close();
 
-  print('✅ STOMP example completed successfully!');
 }
 
 Future<Host> createHost(String name) async {
@@ -93,7 +79,6 @@ Future<Host> createHost(String name) async {
   // Note: This is pseudo-code as the actual host creation depends on your
   // specific libp2p implementation details
   
-  print('Creating host: $name');
   // return await Host.create(/* your host configuration */);
   
   // Since we can't actually create a real host in this example without
@@ -105,7 +90,6 @@ Future<Host> createHost(String name) async {
 }
 
 Future<void> demonstrateSimpleMessaging(StompClient client) async {
-  print('\n📨 Example 1: Simple Message Sending');
   
   // Send a simple message to a destination
   final receiptId = await client.send(
@@ -115,11 +99,9 @@ Future<void> demonstrateSimpleMessaging(StompClient client) async {
     requestReceipt: true,
   );
   
-  print('✅ Message sent with receipt ID: $receiptId');
 }
 
 Future<void> demonstrateSubscriptions(StompClient client) async {
-  print('\n📬 Example 2: Subscriptions and Message Delivery');
   
   // Subscribe to a destination
   final subscription = await client.subscribe(
@@ -128,22 +110,16 @@ Future<void> demonstrateSubscriptions(StompClient client) async {
     requestReceipt: true,
   );
   
-  print('✅ Subscribed to /topic/news with ID: ${subscription.id}');
   
   // Listen for messages
   final messageCompleter = Completer<void>();
   late StreamSubscription messageSubscription;
   
   messageSubscription = subscription.messages.listen((message) async {
-    print('📩 Received message:');
-    print('   Message ID: ${message.messageId}');
-    print('   Destination: ${message.destination}');
-    print('   Content: ${message.body}');
     
     // Acknowledge the message
     if (message.requiresAck && message.ackId != null) {
       await client.ack(messageId: message.ackId!);
-      print('✅ Message acknowledged');
     }
     
     messageCompleter.complete();
@@ -162,15 +138,12 @@ Future<void> demonstrateSubscriptions(StompClient client) async {
   
   // Unsubscribe
   await client.unsubscribe(subscriptionId: subscription.id);
-  print('✅ Unsubscribed from /topic/news');
 }
 
 Future<void> demonstrateTransactions(StompClient client) async {
-  print('\n💳 Example 3: Transactions');
   
   // Begin a transaction
   final transaction = await client.beginTransaction();
-  print('✅ Transaction started: ${transaction.id}');
   
   try {
     // Send multiple messages within the transaction
@@ -186,22 +159,18 @@ Future<void> demonstrateTransactions(StompClient client) async {
       transactionId: transaction.id,
     );
     
-    print('📦 Added 2 orders to transaction');
     
     // Commit the transaction
     await client.commitTransaction(transactionId: transaction.id);
-    print('✅ Transaction committed successfully');
     
   } catch (e) {
     // Abort the transaction on error
     await client.abortTransaction(transactionId: transaction.id);
-    print('❌ Transaction aborted due to error: $e');
     rethrow;
   }
 }
 
 Future<void> demonstrateServerBroadcast(StompService service, StompClient client) async {
-  print('\n📡 Example 4: Server-side Broadcasting');
   
   // Subscribe to a broadcast destination
   final subscription = await client.subscribe(
@@ -209,14 +178,12 @@ Future<void> demonstrateServerBroadcast(StompService service, StompClient client
     ackMode: StompAckMode.auto,
   );
   
-  print('✅ Subscribed to broadcast destination');
   
   // Set up message listener
   final messageCompleter = Completer<void>();
   late StreamSubscription messageSubscription;
   
   messageSubscription = subscription.messages.listen((message) {
-    print('📻 Received broadcast message: ${message.body}');
     messageCompleter.complete();
   });
   
@@ -231,5 +198,4 @@ Future<void> demonstrateServerBroadcast(StompService service, StompClient client
   await messageCompleter.future.timeout(const Duration(seconds: 5));
   await messageSubscription.cancel();
   
-  print('✅ Broadcast example completed');
 }

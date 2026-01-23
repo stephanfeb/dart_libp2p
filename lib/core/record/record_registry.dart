@@ -59,11 +59,9 @@ void main() {
     Uint8List.fromList('my-codec'.codeUnits),
     payload
   );
-  print(genericRecord is MyRecord); // true
 
   // Unmarshal with type safety
   final typedRecord = RecordRegistry.unmarshalAs<MyRecord>(payload);
-  print(typedRecord?.content); // Hello, world!
 }
  */
 

@@ -69,25 +69,21 @@ class LoggingMetricsTracer implements MetricsTracer {
     } else if (event is EvtLocalAddressesUpdated) {
       type = 'addresses_updated';
     }
-    print('Identify push triggered by $type');
   }
   
   @override
   void connPushSupport(IdentifyPushSupport support) {
-    print('Connection push support: $support');
   }
   
   @override
   void identifyReceived(bool isPush, int numProtocols, int numAddrs) {
     final direction = isPush ? 'inbound' : 'outbound';
     final type = isPush ? 'push' : 'identify';
-    print('Received $type ($direction) with $numProtocols protocols and $numAddrs addresses');
   }
   
   @override
   void identifySent(bool isPush, int numProtocols, int numAddrs) {
     final direction = isPush ? 'outbound' : 'inbound';
     final type = isPush ? 'push' : 'identify';
-    print('Sent $type ($direction) with $numProtocols protocols and $numAddrs addresses');
   }
 }

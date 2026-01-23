@@ -11,6 +11,7 @@ import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/yamux_exceptions.dart';
 
 // Generate mocks
+import 'multiplexing/yamux/yamux_stream_test.dart' show MockPeerId;
 @GenerateMocks([Conn])
 import 'yamux_stream_hardening_test.mocks.dart';
 
@@ -41,6 +42,8 @@ void main() {
         },
         parentConn: mockConn,
         logPrefix: 'Test',
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024,
       );
     });
 
@@ -268,6 +271,8 @@ void main() {
         },
         parentConn: mockConn,
         logPrefix: 'Integration',
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024,
       );
     });
 

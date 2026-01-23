@@ -266,6 +266,14 @@ class DelegatingMockSecuredConnection implements SecuredConnection {
   void notifyActivity() {
     _delegate.notifyActivity(); // Delegate to the underlying mock transport connection
   }
+
+  @override
+  // TODO: implement currentRecvNonce
+  int get currentRecvNonce => throw UnimplementedError();
+
+  @override
+  // TODO: implement currentSendNonce
+  int get currentSendNonce => throw UnimplementedError();
 }
 
 

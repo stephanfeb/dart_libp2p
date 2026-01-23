@@ -199,7 +199,6 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
       // Clear the completer after successful read
       _pendingReadCompleter = null;
 
-      // print('[UDX ${id()}] ✅ AWAIT COMPLETED with ${newData.length}B, maxLength=$maxLength');
 
       // CRITICAL FIX: If we got more bytes than requested, only return maxLength
       // and buffer the remainder. This prevents framing desync in higher layers.
@@ -209,7 +208,6 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
         final toReturn = newData.sublist(0, maxLength);
         final remainder = newData.sublist(maxLength);
         _readBuffer.insert(0, remainder); // Put remainder BACK at front of buffer
-        // print('[UDX ${id()}] ✅ PARTIAL: returning $maxLength, buffering remainder ${remainder.length}');
         return toReturn;
       }
     } catch (e) {
