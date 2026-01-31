@@ -24,17 +24,23 @@ import (
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	relayv2client "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/ipfs/go-cid"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multiaddr"
 )
 
 const echoProtocol = "/echo/1.0.0"
 
 func main() {
-	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client")
+	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
 	message := flag.String("message", "hello from go-libp2p", "Message to send in echo-client mode")
 	relayAddr := flag.String("relay", "", "Relay multiaddr for relay-echo-server mode")
+	key := flag.String("key", "", "DHT record key (for put/get value)")
+	value := flag.String("value", "", "DHT record value (for put value)")
+	cidStr := flag.String("cid", "", "Content ID (for provide/find-providers)")
 	flag.Parse()
 
 	switch *mode {
@@ -56,6 +62,16 @@ func main() {
 		runRelayEchoServer(*relayAddr)
 	case "relay-echo-client":
 		runRelayEchoClient(*target, *message)
+	case "dht-server":
+		runDHTServer(*port)
+	case "dht-put-value":
+		runDHTPutValue(*target, *key, *value)
+	case "dht-get-value":
+		runDHTGetValue(*target, *key)
+	case "dht-provide":
+		runDHTProvide(*target, *cidStr)
+	case "dht-find-providers":
+		runDHTFindProviders(*target, *cidStr)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -602,4 +618,239 @@ func runEchoClient(targetStr, message string) {
 		fmt.Fprintf(os.Stderr, "Echo mismatch: sent %q, got %q\n", message, string(resp))
 		os.Exit(1)
 	}
+}
+
+// dht-server mode: run a Kademlia DHT server
+func runDHTServer(port int) {
+	h, err := createHost(port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx := context.Background()
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
+		os.Exit(1)
+	}
+	defer kadDHT.Close()
+
+	if err := kadDHT.Bootstrap(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "DHT bootstrap error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printHostInfo(h)
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "quit" || line == "exit" {
+				os.Exit(0)
+			}
+		}
+	}()
+
+	waitForShutdown()
+}
+
+// dht-put-value mode: connect to target DHT peer and store a value
+func runDHTPutValue(targetStr, key, value string) {
+	if targetStr == "" || key == "" || value == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target, --key, and --value required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
+		os.Exit(1)
+	}
+	defer kadDHT.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := kadDHT.PutValue(ctx, key, []byte(value)); err != nil {
+		fmt.Fprintf(os.Stderr, "PutValue failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Put successful")
+}
+
+// dht-get-value mode: connect to target DHT peer and retrieve a value
+func runDHTGetValue(targetStr, key string) {
+	if targetStr == "" || key == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target and --key required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
+		os.Exit(1)
+	}
+	defer kadDHT.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	val, err := kadDHT.GetValue(ctx, key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "GetValue failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Value: %s\n", string(val))
+}
+
+// dht-provide mode: connect to target DHT peer and announce as provider
+func runDHTProvide(targetStr, cidStr string) {
+	if targetStr == "" || cidStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target and --cid required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
+		os.Exit(1)
+	}
+	defer kadDHT.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	c, err := cid.Decode(cidStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid CID: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := kadDHT.Provide(ctx, c, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Provide failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Provide successful")
+}
+
+// dht-find-providers mode: connect to target DHT peer and find providers for a CID
+func runDHTFindProviders(targetStr, cidStr string) {
+	if targetStr == "" || cidStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target and --cid required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
+		os.Exit(1)
+	}
+	defer kadDHT.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	c, err := cid.Decode(cidStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid CID: %v\n", err)
+		os.Exit(1)
+	}
+
+	provChan := kadDHT.FindProvidersAsync(ctx, c, 20)
+	found := false
+	for prov := range provChan {
+		if prov.ID == "" {
+			continue
+		}
+		fmt.Printf("Provider: %s\n", prov.ID)
+		found = true
+	}
+	if !found {
+		fmt.Fprintln(os.Stderr, "No providers found")
+		os.Exit(1)
+	}
+}
+
+// makeCID creates a CIDv1 from arbitrary data using sha256.
+func makeCID(data []byte) (cid.Cid, error) {
+	hash, err := mh.Sum(data, mh.SHA2_256, -1)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return cid.NewCidV1(cid.Raw, hash), nil
 }

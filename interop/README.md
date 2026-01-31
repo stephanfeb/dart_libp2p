@@ -28,6 +28,9 @@ dart test test/interop/go_interop_host_test.dart
 # Circuit Relay v2 tests
 dart test test/interop/go_interop_relay_test.dart
 
+# Kademlia DHT tests (currently skipped — see note below)
+dart test test/interop/go_dht_interop_test.dart
+
 # Low-level transport tests (Noise, Yamux, multistream)
 dart test test/interop/go_interop_test.dart
 
@@ -58,6 +61,21 @@ Circuit Relay v2 tests using a 3-node topology (Go relay + two peers).
 | Dart dials through relay | Go relay <- Go echo-server; Dart client dials via circuit | Relay reservation, HOP CONNECT, Noise+Yamux over relay, echo round-trip |
 | Go dials through relay | Go relay <- Dart echo-handler; Go client dials via circuit | Dart `CircuitV2Client.reserve()`, inbound STOP handling, echo round-trip |
 
+### `go_dht_interop_test.dart` (4 tests — currently skipped)
+
+Kademlia DHT (`/ipfs/kad/1.0.0`) interop tests using `dart-libp2p-kad-dht`.
+
+| Test | Direction | What it verifies |
+|------|-----------|-----------------|
+| FIND_NODE | Dart -> Go | Dart connects to Go DHT server, queries for peer via routing table |
+| GET_VALUE | Go -> Dart | Go stores value, Dart retrieves it via DHT |
+| PROVIDE/FIND_PROVIDERS | Dart -> Go | Dart announces provider, Go finds it |
+| PUT_VALUE/GET_VALUE | Dart -> Go | Dart stores value, Go retrieves it |
+
+> **Note:** These tests are currently skipped because `dart-libp2p-kad-dht` uses JSON encoding
+> for DHT messages, while the spec requires protobuf. The tests are ready to enable once the
+> encoding is fixed.
+
 ### `go_interop_test.dart`
 
 Lower-level transport tests that directly exercise the upgrader pipeline (TCP -> Noise -> Yamux) without the full BasicHost stack.
@@ -77,8 +95,13 @@ The Go peer binary (`interop/go-peer/go-peer`) supports multiple modes:
 | `relay` | Run a Circuit Relay v2 service |
 | `relay-echo-server` | Reserve slot on relay, handle echo streams |
 | `relay-echo-client` | Dial peer through relay, send echo message |
+| `dht-server` | Run a Kademlia DHT server (long-running) |
+| `dht-put-value` | Connect to DHT peer and store a key-value pair |
+| `dht-get-value` | Connect to DHT peer and retrieve a value by key |
+| `dht-provide` | Connect to DHT peer and announce as content provider |
+| `dht-find-providers` | Connect to DHT peer and find providers for a CID |
 
-Usage: `./go-peer --mode=<mode> [--port=N] [--target=<multiaddr>] [--relay=<multiaddr>] [--message=<text>]`
+Usage: `./go-peer --mode=<mode> [--port=N] [--target=<multiaddr>] [--relay=<multiaddr>] [--message=<text>] [--key=<key>] [--value=<value>] [--cid=<cid>]`
 
 ## Architecture
 

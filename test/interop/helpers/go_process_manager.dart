@@ -139,6 +139,51 @@ class GoProcessManager {
     ).timeout(const Duration(seconds: 30));
   }
 
+  /// Starts the Go peer in dht-server mode.
+  Future<void> startDHTServer({int port = 0}) async {
+    await _start(['--mode=dht-server', '--port=$port']);
+  }
+
+  /// Runs the Go peer in dht-put-value mode.
+  Future<ProcessResult> runDHTPutValue(String target, String key, String value) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-put-value', '--target=$target', '--key=$key', '--value=$value'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
+  /// Runs the Go peer in dht-get-value mode.
+  Future<ProcessResult> runDHTGetValue(String target, String key) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-get-value', '--target=$target', '--key=$key'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
+  /// Runs the Go peer in dht-provide mode.
+  Future<ProcessResult> runDHTProvide(String target, String cid) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-provide', '--target=$target', '--cid=$cid'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
+  /// Runs the Go peer in dht-find-providers mode.
+  Future<ProcessResult> runDHTFindProviders(String target, String cid) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-find-providers', '--target=$target', '--cid=$cid'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
   /// Runs the Go peer in echo-client mode.
   Future<ProcessResult> runEchoClient(String targetMultiaddr, String message) async {
     return Process.run(
