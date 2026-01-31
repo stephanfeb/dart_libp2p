@@ -11,6 +11,7 @@ class GoProcessManager {
   Process? _process;
   PeerId? _peerId;
   MultiAddr? _listenAddr;
+  String? _circuitAddr;
   final List<String> _output = [];
   final _outputController = StreamController<String>.broadcast();
   bool _ready = false;
@@ -25,6 +26,11 @@ class GoProcessManager {
   MultiAddr get listenAddr {
     if (_listenAddr == null) throw StateError('Go peer not started');
     return _listenAddr!;
+  }
+
+  String get circuitAddr {
+    if (_circuitAddr == null) throw StateError('No circuit address available');
+    return _circuitAddr!;
   }
 
   List<String> get output => List.unmodifiable(_output);
@@ -73,6 +79,8 @@ class GoProcessManager {
         _peerId = PeerId.fromString(line.substring('PeerID: '.length).trim());
       } else if (line.startsWith('Listening: ') && line.contains('127.0.0.1')) {
         _listenAddr = MultiAddr(line.substring('Listening: '.length).trim());
+      } else if (line.startsWith('CircuitAddr: ')) {
+        _circuitAddr = line.substring('CircuitAddr: '.length).trim();
       } else if (line == 'Ready') {
         _ready = true;
       }
@@ -105,6 +113,27 @@ class GoProcessManager {
     return Process.run(
       binaryPath,
       ['--mode=push-test', '--target=$targetMultiaddr'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
+  /// Starts the Go peer in relay mode (circuit relay v2 service).
+  Future<void> startRelay({int port = 0}) async {
+    await _start(['--mode=relay', '--port=$port']);
+  }
+
+  /// Starts the Go peer in relay-echo-server mode.
+  /// Connects to the relay and reserves a slot, then handles echo streams.
+  Future<void> startRelayEchoServer(String relayAddr) async {
+    await _start(['--mode=relay-echo-server', '--relay=$relayAddr']);
+  }
+
+  /// Runs the Go peer in relay-echo-client mode.
+  Future<ProcessResult> runRelayEchoClient(String circuitAddr, String message) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=relay-echo-client', '--target=$circuitAddr', '--message=$message'],
       stdoutEncoding: utf8,
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 30));
@@ -157,6 +186,7 @@ class GoProcessManager {
     }
     _peerId = null;
     _listenAddr = null;
+    _circuitAddr = null;
     _ready = false;
     _output.clear();
   }

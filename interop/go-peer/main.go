@@ -21,6 +21,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	yamux "github.com/libp2p/go-libp2p/p2p/muxer/yamux"
+	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	relayv2client "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -28,10 +30,11 @@ import (
 const echoProtocol = "/echo/1.0.0"
 
 func main() {
-	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test")
+	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
 	message := flag.String("message", "hello from go-libp2p", "Message to send in echo-client mode")
+	relayAddr := flag.String("relay", "", "Relay multiaddr for relay-echo-server mode")
 	flag.Parse()
 
 	switch *mode {
@@ -47,6 +50,12 @@ func main() {
 		runEchoClient(*target, *message)
 	case "push-test":
 		runPushTest(*target)
+	case "relay":
+		runRelay(*port)
+	case "relay-echo-server":
+		runRelayEchoServer(*relayAddr)
+	case "relay-echo-client":
+		runRelayEchoClient(*target, *message)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -66,6 +75,22 @@ func createHost(port int) (host.Host, error) {
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
 		libp2p.DisableRelay(),
+	)
+}
+
+func createHostWithRelay(port int) (host.Host, error) {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+
+	return libp2p.New(
+		libp2p.Identity(priv),
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port)),
+		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Security(noise.ID, noise.New),
+		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
+		libp2p.EnableRelay(),
 	)
 }
 
@@ -311,6 +336,216 @@ func runPushTest(targetStr string) {
 	// Give the push time to propagate
 	time.Sleep(3 * time.Second)
 	fmt.Println("Push test complete")
+}
+
+// relay mode: run a circuit relay v2 service
+func runRelay(port int) {
+	h, err := createHostWithRelay(port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	_, err = relayv2.New(h)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Relay service error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printHostInfo(h)
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "quit" || line == "exit" {
+				os.Exit(0)
+			}
+		}
+	}()
+
+	waitForShutdown()
+}
+
+// relay-echo-server mode: connect to relay, reserve, then handle echo streams
+func runRelayEchoServer(relayAddrStr string) {
+	if relayAddrStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --relay required")
+		os.Exit(1)
+	}
+
+	h, err := createHostWithRelay(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	// Parse relay address and connect
+	relayInfo, err := parseTarget(relayAddrStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing relay addr: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := h.Connect(ctx, *relayInfo); err != nil {
+		fmt.Fprintf(os.Stderr, "Relay connection failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Connected to relay")
+
+	// Reserve a slot on the relay using the client package
+	rsvp, err := relayv2client.Reserve(ctx, h, *relayInfo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Relay reservation failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Reservation expires: %v\n", rsvp.Expiration)
+
+	// Listen on the relay circuit address so we can accept incoming relayed connections
+	relayMA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayInfo.ID))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating relay listen addr: %v\n", err)
+		os.Exit(1)
+	}
+	if err := h.Network().Listen(relayMA); err != nil {
+		fmt.Fprintf(os.Stderr, "Relay listen failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Set echo handler
+	h.SetStreamHandler(protocol.ID(echoProtocol), func(s network.Stream) {
+		defer s.Close()
+		buf := make([]byte, 64*1024)
+		for {
+			n, err := s.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					fmt.Fprintf(os.Stderr, "Echo read error: %v\n", err)
+				}
+				return
+			}
+			fmt.Printf("Echo: received %d bytes\n", n)
+			if _, err := s.Write(buf[:n]); err != nil {
+				fmt.Fprintf(os.Stderr, "Echo write error: %v\n", err)
+				return
+			}
+		}
+	})
+
+	// Wait for the relay reservation to propagate
+	time.Sleep(2 * time.Second)
+
+	// Print circuit address for clients to connect to
+	fmt.Printf("PeerID: %s\n", h.ID())
+	foundCircuit := false
+	for _, addr := range h.Addrs() {
+		addrStr := addr.String()
+		if strings.Contains(addrStr, "p2p-circuit") {
+			fmt.Printf("CircuitAddr: %s/p2p/%s\n", addr, h.ID())
+			foundCircuit = true
+		}
+	}
+	if !foundCircuit {
+		// Construct circuit address using relay's transport address
+		for _, raddr := range relayInfo.Addrs {
+			raddrStr := raddr.String()
+			if strings.Contains(raddrStr, "127.0.0.1") {
+				fmt.Printf("CircuitAddr: %s/p2p/%s/p2p-circuit/p2p/%s\n", raddr, relayInfo.ID, h.ID())
+				foundCircuit = true
+				break
+			}
+		}
+		if !foundCircuit {
+			fmt.Printf("CircuitAddr: %s/p2p/%s/p2p-circuit/p2p/%s\n", relayInfo.Addrs[0], relayInfo.ID, h.ID())
+		}
+	}
+	fmt.Println("Ready")
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "quit" || line == "exit" {
+				os.Exit(0)
+			}
+		}
+	}()
+
+	waitForShutdown()
+}
+
+// relay-echo-client mode: connect to peer through relay and send echo
+func runRelayEchoClient(targetStr, message string) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+
+	h, err := createHostWithRelay(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	// Parse the circuit address — contains relay + destination
+	targetMA, err := multiaddr.NewMultiaddr(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing target: %v\n", err)
+		os.Exit(1)
+	}
+
+	info, err := peer.AddrInfoFromP2pAddr(targetMA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error extracting peer info: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Add the circuit address to the peerstore
+	h.Peerstore().AddAddrs(info.ID, info.Addrs, time.Hour)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Connect through the relay
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Circuit connection failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Connected through relay")
+
+	// Use WithAllowLimitedConn to allow streams over transient (relayed) connections
+	s, err := h.NewStream(network.WithAllowLimitedConn(ctx, "relay-echo-client"), info.ID, protocol.ID(echoProtocol))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Stream failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	data := []byte(message)
+	if _, err := s.Write(data); err != nil {
+		fmt.Fprintf(os.Stderr, "Write failed: %v\n", err)
+		os.Exit(1)
+	}
+	s.CloseWrite()
+
+	resp, err := io.ReadAll(s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Read failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(resp) == message {
+		fmt.Printf("Echo successful: %q\n", string(resp))
+	} else {
+		fmt.Fprintf(os.Stderr, "Echo mismatch: sent %q, got %q\n", message, string(resp))
+		os.Exit(1)
+	}
 }
 
 // echo-client mode: connect and send a message

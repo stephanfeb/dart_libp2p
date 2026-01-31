@@ -127,6 +127,9 @@ class BasicHost implements Host {
   RelayManager? _relayManager; // Added RelayManager field
   AutoRelay? _autoRelay; // Added AutoRelay field
   CircuitV2Client? _circuitV2Client; // Added CircuitV2Client field
+
+  /// Access the Circuit Relay v2 client, if relay is enabled.
+  CircuitV2Client? get circuitV2Client => _circuitV2Client;
   AmbientAutoNATv2? _autoNATService; // Changed to AmbientAutoNATv2 orchestrator
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
