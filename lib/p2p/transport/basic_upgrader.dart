@@ -379,7 +379,7 @@ class BasicUpgrader implements Upgrader {
           }
         });
       }
-      await mssForSecurity.handle(negotiationSecStream); 
+      await mssForSecurity.handle(negotiationSecStream);
       final chosenSecurityId = await securityProtoCompleter.future;
 
       final securityModule = config.securityProtocols.firstWhere(

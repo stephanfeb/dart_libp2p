@@ -18,18 +18,18 @@ void main() {
 
     test('creates window update frame correctly', () {
       final frame = YamuxFrame.windowUpdate(1, 1024);
-      
+
       expect(frame.type, equals(YamuxFrameType.windowUpdate));
       expect(frame.flags, equals(0));
       expect(frame.streamId, equals(1));
-      expect(frame.length, equals(4));
-      expect(frame.data.buffer.asByteData().getUint32(0, Endian.big), equals(1024));
+      expect(frame.length, equals(1024));
+      expect(frame.data, isEmpty);
     });
 
-    test('creates new stream frame correctly', () {
-      final frame = YamuxFrame.newStream(1);
-      
-      expect(frame.type, equals(YamuxFrameType.newStream));
+    test('creates SYN stream frame correctly', () {
+      final frame = YamuxFrame.synStream(1);
+
+      expect(frame.type, equals(YamuxFrameType.windowUpdate));
       expect(frame.flags, equals(YamuxFlags.syn));
       expect(frame.streamId, equals(1));
       expect(frame.length, equals(0));
@@ -38,8 +38,8 @@ void main() {
 
     test('creates reset frame correctly', () {
       final frame = YamuxFrame.reset(1);
-      
-      expect(frame.type, equals(YamuxFrameType.reset));
+
+      expect(frame.type, equals(YamuxFrameType.windowUpdate));
       expect(frame.flags, equals(YamuxFlags.rst));
       expect(frame.streamId, equals(1));
       expect(frame.length, equals(0));
@@ -48,32 +48,32 @@ void main() {
 
     test('creates ping frame correctly', () {
       final frame = YamuxFrame.ping(false, 42);
-      
+
       expect(frame.type, equals(YamuxFrameType.ping));
-      expect(frame.flags, equals(0));
+      expect(frame.flags, equals(YamuxFlags.syn));
       expect(frame.streamId, equals(0));
-      expect(frame.length, equals(8));
-      expect(frame.data.buffer.asByteData().getUint64(0, Endian.big), equals(42));
+      expect(frame.length, equals(42));
+      expect(frame.data, isEmpty);
     });
 
     test('creates ping ack frame correctly', () {
       final frame = YamuxFrame.ping(true, 42);
-      
+
       expect(frame.type, equals(YamuxFrameType.ping));
       expect(frame.flags, equals(YamuxFlags.ack));
       expect(frame.streamId, equals(0));
-      expect(frame.length, equals(8));
-      expect(frame.data.buffer.asByteData().getUint64(0, Endian.big), equals(42));
+      expect(frame.length, equals(42));
+      expect(frame.data, isEmpty);
     });
 
     test('creates go away frame correctly', () {
       final frame = YamuxFrame.goAway(1);
-      
+
       expect(frame.type, equals(YamuxFrameType.goAway));
       expect(frame.flags, equals(0));
       expect(frame.streamId, equals(0));
-      expect(frame.length, equals(4));
-      expect(frame.data.buffer.asByteData().getUint32(0, Endian.big), equals(1));
+      expect(frame.length, equals(1));
+      expect(frame.data, isEmpty);
     });
 
     group('frame serialization', () {

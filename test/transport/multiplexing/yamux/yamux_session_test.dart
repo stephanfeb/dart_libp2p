@@ -9,7 +9,7 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
-// import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart'; // Not strictly needed for this test
+import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:logging/logging.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
@@ -53,13 +53,40 @@ void main() {
           usedEarlyMuxerNegotiation: false, // Provide a default
       ));
       
-      // Mock write to succeed immediately. YamuxSession.openStream will try to send a SYN frame.
-      when(mockTransportConn.write(any)).thenAnswer((_) async {});
+      // Feed data to the session's read loop via a queue of pending reads
+      final pendingReads = <Completer<Uint8List>>[];
+      final dataToFeed = <Uint8List>[];
 
-      // Mock read to simulate no immediate response, to prevent openStream from hanging if it expects one.
-      final readCompleter = Completer<Uint8List>();
-      // Ensure read() can be called multiple times if the session logic needs it.
-      when(mockTransportConn.read(any)).thenAnswer((_) => readCompleter.future);
+      void _feedData(Uint8List data) {
+        if (pendingReads.isNotEmpty) {
+          final c = pendingReads.removeAt(0);
+          c.complete(data);
+        } else {
+          dataToFeed.add(data);
+        }
+      }
+
+      when(mockTransportConn.read(any)).thenAnswer((_) {
+        if (dataToFeed.isNotEmpty) {
+          return Future.value(dataToFeed.removeAt(0));
+        }
+        final c = Completer<Uint8List>();
+        pendingReads.add(c);
+        return c.future;
+      });
+
+      // Mock write: intercept SYN frames and respond with ACK via read
+      when(mockTransportConn.write(any)).thenAnswer((invocation) async {
+        final data = invocation.positionalArguments[0] as Uint8List;
+        try {
+          final frame = YamuxFrame.fromBytes(data);
+          if (frame.type == YamuxFrameType.windowUpdate &&
+              (frame.flags & YamuxFlags.syn != 0)) {
+            final ackBytes = YamuxFrame.synAckStream(frame.streamId).toBytes();
+            _feedData(ackBytes);
+          }
+        } catch (_) {}
+      });
 
 
       yamuxConfig = MultiplexerConfig(

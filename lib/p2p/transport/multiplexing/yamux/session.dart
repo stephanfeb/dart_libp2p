@@ -238,51 +238,33 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
 
         final headerView = ByteData.view(buffer.buffer, buffer.offsetInBytes, headerSize);
-        final bodyLength = headerView.getUint32(8, Endian.big);
-        final expectedTotalFrameLength = headerSize + bodyLength;
-        
+        final frameTypeValue = headerView.getUint8(1);
+        final lengthField = headerView.getUint32(8, Endian.big);
 
-        // Ensure we have the full frame (header + body) in the buffer
+        // Only Data frames (type 0x0) have a data payload after the header.
+        // For WindowUpdate/Ping/GoAway, the length field carries a value, not data size.
+        final hasDataPayload = frameTypeValue == YamuxFrameType.dataFrame.value;
+        final dataPayloadSize = hasDataPayload ? lengthField : 0;
+        final expectedTotalFrameLength = headerSize + dataPayloadSize;
+
+        // Ensure we have the full frame (header + data payload if applicable)
         while (buffer.length < expectedTotalFrameLength) {
-          if (_closed || _connection.isClosed) { // Check before read
+          if (_closed || _connection.isClosed) {
              await _cleanupWithoutFrames(); return;
           }
           final stillNeeded = expectedTotalFrameLength - buffer.length;
-
-          final bodyReadStartTime = DateTime.now();
           final chunk = await _connection.read(stillNeeded);
-          final bodyReadDuration = DateTime.now().difference(bodyReadStartTime);
-          
-
-          if (chunk.isEmpty) { // Connection closed by peer
+          if (chunk.isEmpty) {
             await _cleanupWithoutFrames(); return;
           }
           final newBuffer = Uint8List(buffer.length + chunk.length);
           newBuffer.setAll(0, buffer);
           newBuffer.setAll(buffer.length, chunk);
           buffer = newBuffer;
-          
         }
-
 
         final frameBytesForParser = buffer.sublist(0, expectedTotalFrameLength);
-        final parseStartTime = DateTime.now();
         final frame = YamuxFrame.fromBytes(frameBytesForParser);
-        final parseDuration = DateTime.now().difference(parseStartTime);
-        
-
-
-        if (frame.length != bodyLength) {
-            _log.severe("$_logPrefix 🔧 [YAMUX-FRAME-READER-ERROR-$frameCount] Frame body length mismatch! Header said $bodyLength, frame parser said ${frame.length}. Frame: ${frame.type}, StreamID: ${frame.streamId}, Flags: ${frame.flags}");
-            await _goAway(YamuxCloseReason.protocolError);
-            return; 
-        }
-        if (frame.data.length != bodyLength) { // Should be redundant if YamuxFrame.fromBytes is correct
-            _log.severe("$_logPrefix 🔧 [YAMUX-FRAME-READER-ERROR-$frameCount] Frame data actual length mismatch! Header said bodyLength $bodyLength, frame.data.length is ${frame.data.length}. Frame: ${frame.type}, StreamID: ${frame.streamId}, Flags: ${frame.flags}");
-             await _goAway(YamuxCloseReason.protocolError);
-            return;
-        }
-
 
         final handleStartTime = DateTime.now();
         
@@ -326,15 +308,47 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   Future<void> _handleFrame(YamuxFrame frame) async {
-    final handleStartTime = DateTime.now();
-
-    // If session is closing/closed, only process essential frames like GO_AWAY or RESETs for cleanup.
-    if (_closed && frame.type != YamuxFrameType.goAway && frame.type != YamuxFrameType.reset) {
+    // If session is closing/closed, only process essential frames
+    if (_closed && frame.type != YamuxFrameType.goAway && (frame.flags & YamuxFlags.rst == 0)) {
         return;
     }
 
     try {
-      // Fast path for common frame types to improve performance
+      // Ping and GoAway are session-level frames — dispatch directly.
+      // SYN/ACK/RST/FIN flags on these types have different semantics
+      // (e.g., go-yamux uses SYN on Ping to mean "request", ACK for "response").
+      if (frame.type == YamuxFrameType.ping) {
+        await _handlePing(frame);
+        return;
+      }
+      if (frame.type == YamuxFrameType.goAway) {
+        await _handleGoAway(frame);
+        return;
+      }
+
+      // For stream-bearing frames (Data, WindowUpdate), check lifecycle flags.
+      // Per go-yamux: SYN opens a stream, ACK (without SYN) accepts it.
+      if (frame.flags & YamuxFlags.ack != 0 && frame.flags & YamuxFlags.syn == 0) {
+        // ACK (no SYN): response to our outbound stream creation
+        final completer = _pendingStreams.remove(frame.streamId);
+        if (completer != null && !completer.isCompleted) {
+          completer.complete();
+        }
+      } else if (frame.flags & YamuxFlags.syn != 0) {
+        // SYN: new incoming stream from remote
+        await _handleNewStream(frame);
+      }
+
+      if (frame.flags & YamuxFlags.rst != 0) {
+        // RST: reset the stream
+        final stream = _streams[frame.streamId];
+        if (stream != null) {
+          await stream.handleFrame(frame);
+        }
+        return; // RST terminates processing
+      }
+
+      // Dispatch by frame type for the actual payload/value
       switch (frame.type) {
         case YamuxFrameType.dataFrame:
           await _handleDataFrame(frame);
@@ -342,28 +356,12 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         case YamuxFrameType.windowUpdate:
           await _handleWindowUpdateFrame(frame);
           break;
-        case YamuxFrameType.newStream:
-          await _handleNewStreamFrame(frame);
-          break;
-        case YamuxFrameType.reset:
-          await _handleResetFrame(frame);
-          break;
         case YamuxFrameType.ping:
-          await _handlePing(frame);
-          break;
         case YamuxFrameType.goAway:
-          await _handleGoAway(frame);
-          break;
-        default:
-          _log.severe('$_logPrefix 🔧 [YAMUX-HANDLE-FRAME-UNKNOWN] Unknown frame type: ${frame.type} for stream ${frame.streamId}');
-          break;
+          break; // Already handled above
       }
-      
-      final handleDuration = DateTime.now().difference(handleStartTime);
-
     } catch (e, st) {
-      final handleDuration = DateTime.now().difference(handleStartTime);
-      _log.severe('$_logPrefix 🔧 [YAMUX-HANDLE-FRAME-ERROR] Error handling frame after ${handleDuration.inMilliseconds}ms: Type=${frame.type}, StreamID=${frame.streamId}, Error: $e\n$st');
+      _log.severe('$_logPrefix Error handling frame: Type=${frame.type}, StreamID=${frame.streamId}, Error: $e\n$st');
       rethrow;
     }
   }
@@ -388,27 +386,6 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   /// Optimized handler for WINDOW_UPDATE frames (second most common)
   Future<void> _handleWindowUpdateFrame(YamuxFrame frame) async {
-    final stream = _streams[frame.streamId];
-    if (stream != null) {
-      await stream.handleFrame(frame);
-    }
-  }
-
-  /// Handler for NEW_STREAM frames
-  Future<void> _handleNewStreamFrame(YamuxFrame frame) async {
-
-    if (frame.flags & YamuxFlags.syn != 0 && frame.flags & YamuxFlags.ack != 0) {
-      final completer = _pendingStreams.remove(frame.streamId);
-      if (completer != null && !completer.isCompleted) {
-        completer.complete();
-      }
-    } else if (frame.flags & YamuxFlags.syn != 0) {
-      await _handleNewStream(frame);
-    }
-  }
-
-  /// Handler for RESET frames
-  Future<void> _handleResetFrame(YamuxFrame frame) async {
     final stream = _streams[frame.streamId];
     if (stream != null) {
       await stream.handleFrame(frame);
@@ -457,13 +434,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       return;
     }
     
-    final ackFrame = YamuxFrame(
-      type: YamuxFrameType.newStream,
-      flags: YamuxFlags.syn | YamuxFlags.ack,
-      streamId: frame.streamId,
-      length: 0,
-      data: Uint8List(0),
-    );
+    final ackFrame = YamuxFrame.synAckStream(frame.streamId);
     try {
       await _sendFrame(ackFrame); 
     } catch (e) {
@@ -521,16 +492,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   Future<void> _handlePing(YamuxFrame frame) async {
-    // Extract opaque value from frame.data (8-byte big-endian integer), NOT frame.length
-    // frame.length is just the data size (8), not the ping ID itself
-    int opaqueValue = 0;
-    if (frame.data.length >= 8) {
-      final byteData = ByteData.view(frame.data.buffer, frame.data.offsetInBytes, 8);
-      opaqueValue = byteData.getUint64(0, Endian.big);
-    }
-    
+    final opaqueValue = frame.length;
+
     if (frame.flags & YamuxFlags.ack != 0) {
-      // PONG received - clear from pending pings
+      // PONG received (ACK flag) - clear from pending pings
       final removed = _pendingPings.remove(opaqueValue);
       if (removed != null) {
         final receivedTime = DateTime.now();
@@ -541,6 +506,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       }
       return;
     }
+    // Ping request (SYN flag or no flags) — respond with ACK
     final response = YamuxFrame.ping(true, opaqueValue);
     await _sendFrame(response);
   }
@@ -573,8 +539,6 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       // Detailed logging for outgoing frames, especially Identify SYN
       if (frame.streamId == 1 && (frame.flags & YamuxFlags.syn != 0)) {
-        final bytes = frame.toBytes();
-      } else if (frame.type == YamuxFrameType.newStream && (frame.flags & YamuxFlags.syn != 0)) { // Log other SYN frames too for context
         final bytes = frame.toBytes();
       }
       
@@ -722,7 +686,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     _pendingStreams[streamId] = completer;
 
     try {
-      final frame = YamuxFrame.newStream(streamId);
+      final frame = YamuxFrame.synStream(streamId);
       await _sendFrame(frame);
 
       await completer.future.timeout(_config.streamWriteTimeout);

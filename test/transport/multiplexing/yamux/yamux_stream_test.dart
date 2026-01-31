@@ -328,7 +328,7 @@ void main() {
       expect(sentFrames.length, equals(1));
       expect(sentFrames[0].type, equals(YamuxFrameType.windowUpdate));
       expect(sentFrames[0].streamId, equals(1));
-      expect(sentFrames[0].data.buffer.asByteData().getUint32(0, Endian.big), equals(256 * 1024));
+      expect(sentFrames[0].length, equals(256 * 1024));
     });
 
     test('throws when writing to unopened stream', () async {
@@ -731,7 +731,8 @@ void main() {
         expect(stream.streamState, equals(YamuxStreamState.reset));
         expect(stream.isClosed, isTrue);
         expect(sentFrames.length, equals(1));
-        expect(sentFrames[0].type, equals(YamuxFrameType.reset));
+        expect(sentFrames[0].type, equals(YamuxFrameType.windowUpdate));
+        expect(sentFrames[0].flags & YamuxFlags.rst, equals(YamuxFlags.rst));
       });
 
       test('handles invalid frame types', () async {

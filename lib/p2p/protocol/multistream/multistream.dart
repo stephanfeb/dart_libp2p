@@ -68,6 +68,10 @@ class MultistreamMuxer implements ProtocolSwitch {
   
   /// Configuration for multistream operations
   final MultistreamConfig config;
+
+  /// Leftover bytes from previous _actualReadDelimited call.
+  /// When a single read returns multiple messages, the extra bytes are stored here.
+  Uint8List _leftover = Uint8List(0);
   
   /// Creates a new MultistreamMuxer with optional configuration
   MultistreamMuxer({
@@ -359,40 +363,28 @@ class MultistreamMuxer implements ProtocolSwitch {
     );
   }
 
-  /// Internal method that performs the actual read operation without timeout
+  /// Internal method that performs the actual read operation without timeout.
+  /// Handles leftover bytes from previous reads to support multiple messages
+  /// arriving in a single TCP segment (common with go-libp2p).
   Future<Uint8List> _actualReadDelimited(P2PStream<dynamic> stream) async {
     final buffer = BytesBuilder();
-    int length = -1;
-    int bytesRead = 0;
     int varintBytesRead = 0;
     bool lengthDecoded = false;
+    int length = -1;
+
+    // Start with any leftover bytes from previous call
+    if (_leftover.isNotEmpty) {
+      buffer.add(_leftover);
+      _leftover = Uint8List(0);
+    }
 
     while (true) {
-      // Check stream state before each read
-      if (stream.isClosed) {
-        _log.warning('[multistream] Stream closed during read operation');
-        throw FormatException('Stream closed during read operation');
-      }
-      
-      final chunk = await stream.read();
-      
-      // Handle EOF gracefully
-      if (chunk.isEmpty) {
-        if (stream.isClosed) {
-          _log.warning('[multistream] Stream closed during read operation');
-          throw FormatException('Stream closed during read operation');
-        }
-        throw FormatException('Unexpected end of stream');
-      }
+      // Try to decode from what we have before reading more
+      final accumulated = buffer.toBytes();
 
-      buffer.add(chunk);
-      bytesRead += chunk.length;
-
-      if (!lengthDecoded) {
-        // Try to decode varint from the buffer
+      if (!lengthDecoded && accumulated.isNotEmpty) {
         try {
-          final (decodedLength, consumed) = MultiAddrCodec.decodeVarint(
-              buffer.toBytes());
+          final (decodedLength, consumed) = MultiAddrCodec.decodeVarint(accumulated);
           if (consumed > 0) {
             length = decodedLength;
             lengthDecoded = true;
@@ -403,26 +395,37 @@ class MultistreamMuxer implements ProtocolSwitch {
             }
           }
         } catch (e) {
-          // Not enough bytes yet to decode varint, continue reading
-          if (e is! RangeError) {
-            rethrow;
-          }
+          if (e is! RangeError) rethrow;
         }
       }
 
-      if (lengthDecoded) {
-        if (bytesRead >= length + varintBytesRead) {
-          // We have read at least the full message + varint
-          final fullMessage = buffer.toBytes();
-          if (fullMessage.length > length + varintBytesRead &&
-              fullMessage[length + varintBytesRead - 1] != 10) {
-            throw FormatException('Message did not have trailing newline');
-          }
-          // Return the message without the varint and newline
-          return Uint8List.fromList(fullMessage.sublist(
-              varintBytesRead, length + varintBytesRead - 1));
+      if (lengthDecoded && accumulated.length >= length + varintBytesRead) {
+        final totalMessageSize = varintBytesRead + length;
+        // Save leftover bytes for next call
+        if (accumulated.length > totalMessageSize) {
+          _leftover = Uint8List.fromList(accumulated.sublist(totalMessageSize));
         }
+        // Return message without varint prefix and trailing newline
+        return Uint8List.fromList(
+            accumulated.sublist(varintBytesRead, varintBytesRead + length - 1));
       }
+
+      // Need more data
+      if (stream.isClosed) {
+        _log.warning('[multistream] Stream closed during read operation');
+        throw FormatException('Stream closed during read operation');
+      }
+
+      final chunk = await stream.read();
+
+      if (chunk.isEmpty) {
+        if (stream.isClosed) {
+          throw FormatException('Stream closed during read operation');
+        }
+        throw FormatException('Unexpected end of stream');
+      }
+
+      buffer.add(chunk);
     }
   }
   

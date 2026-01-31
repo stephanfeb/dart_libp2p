@@ -752,6 +752,14 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       return;
     }
 
+    // Handle RST flag on any frame type
+    if (frame.flags & YamuxFlags.rst != 0) {
+      _log.fine('$_logPrefix Received RST flag. Resetting stream.');
+      _state = YamuxStreamState.reset;
+      await _cleanup();
+      return;
+    }
+
     // For DATA frames, use optimized queuing to handle rapid delivery
     if (frame.type == YamuxFrameType.dataFrame) {
       return await _handleDataFrameOptimized(frame);
@@ -766,12 +774,6 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
         case YamuxFrameType.ping:
           await _handlePingFrame(frame);
-          break;
-
-        case YamuxFrameType.reset:
-          _log.fine('$_logPrefix Received RESET frame. Session is terminating.');
-          _state = YamuxStreamState.reset; // Treat as reset
-          await _cleanup();
           break;
 
         default:
@@ -795,7 +797,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
        _log.finer('$_logPrefix Received WINDOW_UPDATE on non-open/non-closing stream. State: $_state. Ignoring.');
       return;
     }
-    final delta = frame.data.buffer.asByteData().getUint32(0, Endian.big);
+    final delta = frame.length; // Delta is in the length field per Yamux spec
     _log.finer('$_logPrefix Received WINDOW_UPDATE from remote, delta: $delta. Current our send window: $_remoteReceiveWindow, New: ${_remoteReceiveWindow + delta}');
     _remoteReceiveWindow += delta;
     if (_sendWindowUpdateCompleter?.isCompleted == false) {

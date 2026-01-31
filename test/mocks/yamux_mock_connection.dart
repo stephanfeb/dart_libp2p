@@ -232,20 +232,14 @@ class YamuxMockConnection extends BaseMockConnection implements TransportConn {
     try {
       final frame = YamuxFrame.fromBytes(Uint8List.fromList(data));
       
-      // Auto-respond to SYN frames with SYN-ACK
-      if (autoRespondToSyn && 
-          frame.type == YamuxFrameType.newStream && 
-          (frame.flags & YamuxFlags.syn != 0) && 
+      // Auto-respond to SYN frames with ACK
+      if (autoRespondToSyn &&
+          frame.type == YamuxFrameType.windowUpdate &&
+          (frame.flags & YamuxFlags.syn != 0) &&
           (frame.flags & YamuxFlags.ack == 0)) {
-        
+
         print('$id auto-responding to SYN frame for stream ${frame.streamId}');
-        final synAckFrame = YamuxFrame(
-          type: YamuxFrameType.newStream,
-          flags: YamuxFlags.syn | YamuxFlags.ack,
-          streamId: frame.streamId,
-          length: 0,
-          data: Uint8List(0),
-        );
+        final synAckFrame = YamuxFrame.synAckStream(frame.streamId);
         
         // Send SYN-ACK response asynchronously to avoid blocking
         Future.microtask(() async {

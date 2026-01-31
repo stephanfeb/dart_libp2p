@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux_types;
@@ -15,7 +14,8 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
 import 'package:dart_libp2p/config/stream_muxer.dart';
 import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
-import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
+import 'package:dart_libp2p/core/network/stream.dart' as p2p_stream;
+import 'package:dart_libp2p/p2p/protocol/multistream/client.dart' as ms_client;
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
 import 'package:dart_libp2p/p2p/transport/listener.dart';
@@ -148,12 +148,17 @@ void main() {
         remoteAddr: goAddr,
       );
 
-      // Open a stream
+      // Open a stream and negotiate echo protocol via multistream-select
       final muxedConn = upgradedConn as core_mux_types.MuxedConn;
       final stream = await muxedConn.openStream(core_context.Context());
       print('Stream opened');
 
-      // Manually do a ping: send 32 random bytes, expect echo
+      // Negotiate /echo/1.0.0 protocol via multistream-select
+      // YamuxStream implements both MuxedStream and P2PStream
+      await ms_client.selectProtoOrFail('/echo/1.0.0', stream as p2p_stream.P2PStream<dynamic>);
+      print('Echo protocol negotiated');
+
+      // Send 32 random bytes, expect echo
       final random = Random();
       final pingData =
           Uint8List.fromList(List.generate(32, (_) => random.nextInt(256)));
