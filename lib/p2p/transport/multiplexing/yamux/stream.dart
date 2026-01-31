@@ -748,7 +748,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     final handleStartTime = DateTime.now();
 
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
-      _log.warning('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');
+      _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');
       return;
     }
 
