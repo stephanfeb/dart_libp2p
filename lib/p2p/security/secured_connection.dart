@@ -140,16 +140,20 @@ class SecuredConnection implements TransportConn {
   /// Get the current recv nonce value (useful for continuing nonces after handshake)
   int get currentRecvNonce => _recvNonce;
 
+  /// Builds a 12-byte nonce per Noise spec for ChaChaPoly:
+  /// 4 bytes of zeros followed by 8-byte little-endian counter.
   Uint8List _getNonce(int counter) {
-    final nonce = Uint8List(12);  // ChaCha20-Poly1305 uses 12-byte nonces
-    nonce[0] = (counter >> 56) & 0xFF;
-    nonce[1] = (counter >> 48) & 0xFF;
-    nonce[2] = (counter >> 40) & 0xFF;
-    nonce[3] = (counter >> 32) & 0xFF;
-    nonce[4] = (counter >> 24) & 0xFF;
-    nonce[5] = (counter >> 16) & 0xFF;
-    nonce[6] = (counter >> 8) & 0xFF;
-    nonce[7] = counter & 0xFF;
+    final nonce = Uint8List(12);
+    // Bytes 0-3: zeros
+    // Bytes 4-11: little-endian counter
+    nonce[4] = counter & 0xFF;
+    nonce[5] = (counter >> 8) & 0xFF;
+    nonce[6] = (counter >> 16) & 0xFF;
+    nonce[7] = (counter >> 24) & 0xFF;
+    nonce[8] = (counter >> 32) & 0xFF;
+    nonce[9] = (counter >> 40) & 0xFF;
+    nonce[10] = (counter >> 48) & 0xFF;
+    nonce[11] = (counter >> 56) & 0xFF;
     return nonce;
   }
 
@@ -354,25 +358,22 @@ class SecuredConnection implements TransportConn {
   Future<Uint8List> _readAndDecryptMessage() async {
     // This method now encapsulates reading one full encrypted message and decrypting it.
     // It handles partial reads from the underlying transport robustly.
-    // Uses 4-byte big-endian length prefix to support messages up to ~4GB.
-    _log.finer('SecuredConnection: Reading length prefix (4 bytes)');
-    final lengthBytes = await _readFullMessage(4);
-    _log.finer('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}, ${lengthBytes[2]}, ${lengthBytes[3]}]');
+    // Uses 2-byte big-endian length prefix per libp2p Noise spec (max 65535 bytes per frame).
+    _log.finer('SecuredConnection: Reading length prefix (2 bytes)');
+    final lengthBytes = await _readFullMessage(2);
+    _log.finer('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}]');
     _log.finer('SecuredConnection: FROM_UNDERLYING_READ (Length Prefix) - Bytes: ${hex.encode(lengthBytes)}');
 
     if (lengthBytes.isEmpty) {
       _log.finer('SecuredConnection: EOF when reading length prefix.');
       return Uint8List(0);
     }
-    if (lengthBytes.length < 4) {
+    if (lengthBytes.length < 2) {
       _log.finer('SecuredConnection: Connection closed while reading length prefix, got ${lengthBytes.length} bytes.');
       throw StateError('Connection closed while reading length prefix');
     }
 
-    final dataLength = (lengthBytes[0] << 24) | 
-                       (lengthBytes[1] << 16) | 
-                       (lengthBytes[2] << 8) | 
-                       lengthBytes[3];
+    final dataLength = (lengthBytes[0] << 8) | lengthBytes[1];
     _log.finer('SecuredConnection: Got length prefix: $dataLength');
 
     if (dataLength == 0) return Uint8List(0); // Valid empty message
@@ -428,63 +429,56 @@ class SecuredConnection implements TransportConn {
     }
   }
 
+  /// Writes a single Noise transport frame: 2-byte big-endian length + encrypted data + MAC.
+  Future<void> _writeFrame(Uint8List plaintext) async {
+    final algorithm = crypto.Chacha20.poly1305Aead();
+    final nonceValue = _sendNonce++;
+    final nonce = _getNonce(nonceValue);
+    _log.fine('SecuredConnection: 🔑 ENCRYPTING with SEND NONCE=$nonceValue');
+
+    final secretBox = await algorithm.encrypt(
+      plaintext,
+      secretKey: _encryptionKey,
+      nonce: nonce,
+      aad: Uint8List(0),
+    );
+
+    final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
+    _log.finer('SecuredConnection: Writing frame: $dataLength bytes (plaintext was ${plaintext.length})');
+
+    // 2-byte big-endian length prefix per libp2p Noise spec
+    final combinedData = Uint8List(2 + dataLength)
+      ..[0] = (dataLength >> 8) & 0xFF
+      ..[1] = dataLength & 0xFF
+      ..setAll(2, secretBox.cipherText)
+      ..setAll(2 + secretBox.cipherText.length, secretBox.mac.bytes);
+
+    _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${combinedData.length}');
+    await _connection.write(combinedData);
+  }
+
   @override
   Future<void> write(Uint8List data) async {
     // Acquire write lock to ensure writes are atomic and don't interleave
     await _acquireWriteLock();
     
     try {
-      // ADDED LOGGING: Print the initial plaintext data received by write()
-
       _log.finer('SecuredConnection.write: Plaintext data received (length: ${data.length}, first 20 bytes: ${data.take(20).toList()})');
-      _log.finer('SecuredConnection: Writing data of length ${data.length}');
-      final algorithm = crypto.Chacha20.poly1305Aead();
-      final nonceValue = _sendNonce++;
-      final nonce = _getNonce(nonceValue);
-      _log.fine('SecuredConnection: 🔑 ENCRYPTING with SEND NONCE=$nonceValue (${nonce.toList()})');
-      // ADDED LOGGING for hashCode
-      _log.finer('SecuredConnection: Using encryption key (hashCode: ${_encryptionKey.hashCode}): ${await _encryptionKey.extractBytes()}');
 
-      final secretBox = await algorithm.encrypt(
-        data,
-        secretKey: _encryptionKey,
-        nonce: nonce,
-        aad: Uint8List(0),
-      );
+      // libp2p Noise spec: 2-byte length prefix, max 65535 bytes per frame.
+      // Max plaintext per frame = 65535 - 16 (MAC) = 65519 bytes.
+      const maxPlaintextPerFrame = 65535 - 16;
 
-
-      // Calculate total length of encrypted data + MAC
-      final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
-      
-      // 4-byte length prefix supports messages up to ~4GB (2^32 - 1 bytes)
-      // In practice, memory limits will kick in long before this
-      
-      _log.finer('SecuredConnection: Encrypted data length: ${secretBox.cipherText.length}');
-      _log.finer('SecuredConnection: MAC length: ${secretBox.mac.bytes.length}');
-      _log.finer('SecuredConnection: MAC: ${secretBox.mac.bytes.toList()}');
-      _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
-      _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
-
-
-      // Write 4-byte big-endian length prefix and data in one operation
-      _log.finer('SecuredConnection: Writing length prefix: $dataLength bytes (plaintext was ${data.length})');
-      final combinedData = Uint8List(4 + dataLength)
-      // Write length prefix (4 bytes, big-endian)
-        ..[0] = (dataLength >> 24) & 0xFF
-        ..[1] = (dataLength >> 16) & 0xFF
-        ..[2] = (dataLength >> 8) & 0xFF
-        ..[3] = dataLength & 0xFF
-      // Write encrypted data
-        ..setAll(4, secretBox.cipherText)
-      // Write MAC
-        ..setAll(4 + secretBox.cipherText.length, secretBox.mac.bytes);
-
-      _log.finer('SecuredConnection: Writing ${data.length} bytes as ${dataLength} bytes encrypted+MAC');
-      _log.finer('SecuredConnection:   Raw Ciphertext to send: ${hex.encode(secretBox.cipherText)}');
-      _log.finer('SecuredConnection:   Raw MAC to send: ${hex.encode(secretBox.mac.bytes)}');
-      _log.finer('SecuredConnection: First 4 bytes of encrypted: ${secretBox.cipherText.take(4).toList()}');
-      _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${combinedData.length}, Bytes: ${hex.encode(combinedData)}');
-      await _connection.write(combinedData);
+      // Chunk data if it exceeds max plaintext per frame
+      var offset = 0;
+      do {
+        final chunkEnd = (offset + maxPlaintextPerFrame < data.length)
+            ? offset + maxPlaintextPerFrame
+            : data.length;
+        final chunk = data.sublist(offset, chunkEnd);
+        await _writeFrame(chunk);
+        offset = chunkEnd;
+      } while (offset < data.length);
     } finally {
       // Always release the write lock, even if an exception occurs
       _releaseWriteLock();

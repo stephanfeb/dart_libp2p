@@ -48,48 +48,72 @@ class NoiseSecurity implements SecurityProtocol {
     return NoiseSecurity._(identityKey);
   }
 
-  // Helper to read a length-prefixed message from a SecuredConnection
-  Future<Uint8List> _readEncryptedPayload(SecuredConnection conn) async {
-    final lengthBytes = await conn.read(2); // Assuming SecuredConnection.read handles underlying raw reads
-    if (lengthBytes.length < 2) throw NoiseProtocolException("Failed to read payload length");
+  /// The prefix used when signing the Noise static public key per libp2p spec.
+  static const String _signaturePrefix = 'noise-libp2p-static-key:';
+
+  /// Writes a Noise handshake message with 2-byte big-endian length prefix.
+  Future<void> _writeHandshakeMessage(TransportConn conn, Uint8List msg) async {
+    final framed = Uint8List(2 + msg.length);
+    framed[0] = (msg.length >> 8) & 0xFF;
+    framed[1] = msg.length & 0xFF;
+    framed.setAll(2, msg);
+    await conn.write(framed);
+  }
+
+  /// Reads a Noise handshake message with 2-byte big-endian length prefix.
+  Future<Uint8List> _readHandshakeMessage(TransportConn conn) async {
+    final lengthBytes = await conn.read(2);
+    if (lengthBytes.length < 2) throw NoiseProtocolException('Failed to read handshake message length prefix');
     final length = (lengthBytes[0] << 8) | lengthBytes[1];
-    return conn.read(length); // SecuredConnection.read will decrypt
-  }
-
-  // Helper to write a length-prefixed message to a SecuredConnection
-  Future<void> _writeEncryptedPayload(SecuredConnection conn, Uint8List payload) async {
-    final lengthBytes = Uint8List(2);
-    lengthBytes[0] = payload.length >> 8;
-    lengthBytes[1] = payload.length & 0xFF;
-    // SecuredConnection.write will encrypt
-    // It expects the raw payload, and it handles its own length prefixing for the *encrypted* data.
-    // So, we send the raw payload here. The SecuredConnection's write method will then
-    // encrypt it and prepend its *own* length prefix for the encrypted blob.
-    // This means the _readEncryptedPayload needs to be careful.
-    // For the libp2p handshake payload, it's simpler: the payload itself is length-prefixed *before* encryption.
-    // The SecuredConnection then encrypts this (length-prefix + payload) and prepends *another* length prefix.
-
-    // Correct approach for libp2p handshake payload:
-    // 1. Create payload.
-    // 2. Prepend length of this payload.
-    // 3. Pass this (length + payload) to SecuredConnection.write().
-    final prefixedPayload = Uint8List(2 + payload.length);
-    prefixedPayload[0] = payload.length >> 8;
-    prefixedPayload[1] = payload.length & 0xFF;
-    prefixedPayload.setAll(2, payload);
-    await conn.write(prefixedPayload);
-  }
-
-  Future<Uint8List> _readLibp2pHandshakePayload(SecuredConnection conn) async {
-    // SecuredConnection.read handles decryption and its own framing.
-    // We expect it to return the decrypted (length-prefix + actual_payload).
-    final decryptedOuterFrame = await conn.read(); // Read one full message decrypted by SecuredConnection
-    if (decryptedOuterFrame.length < 2) throw NoiseProtocolException("Payload too short after decryption");
-    final actualPayloadLength = (decryptedOuterFrame[0] << 8) | decryptedOuterFrame[1];
-    if (decryptedOuterFrame.length != 2 + actualPayloadLength) {
-      throw NoiseProtocolException("Decrypted payload length mismatch: expected ${2 + actualPayloadLength}, got ${decryptedOuterFrame.length}");
+    if (length == 0) return Uint8List(0);
+    final data = await conn.read(length);
+    if (data.length < length) {
+      throw NoiseProtocolException('Short read on handshake message: expected $length, got ${data.length}');
     }
-    return decryptedOuterFrame.sublist(2);
+    return data;
+  }
+
+  /// Creates the NoiseHandshakePayload for embedding inside a Noise handshake message.
+  /// Per libp2p spec, each peer signs their OWN Noise static public key with
+  /// the prefix "noise-libp2p-static-key:" using their libp2p identity key.
+  Future<Uint8List> _createHandshakePayload(Uint8List ownStaticNoiseKey) async {
+    final payload = noise_pb.NoiseHandshakePayload();
+    payload.identityKey = await _identityKey.publicKey.marshal();
+
+    // Sign: "noise-libp2p-static-key:" + own_static_noise_key
+    final dataToSign = Uint8List.fromList([
+      ..._signaturePrefix.codeUnits,
+      ...ownStaticNoiseKey,
+    ]);
+    payload.identitySig = await _identityKey.privateKey.sign(dataToSign);
+
+    return payload.writeToBuffer();
+  }
+
+  /// Verifies a remote peer's NoiseHandshakePayload.
+  /// Returns the remote PeerId on success.
+  Future<PeerId> _verifyHandshakePayload(
+    Uint8List payloadBytes,
+    Uint8List remoteStaticNoiseKey,
+  ) async {
+    final payload = noise_pb.NoiseHandshakePayload.fromBuffer(payloadBytes);
+
+    if (!payload.hasIdentityKey()) throw NoiseProtocolException('Remote payload missing identity key');
+    if (!payload.hasIdentitySig()) throw NoiseProtocolException('Remote payload missing signature');
+
+    final remoteLibp2pPublicKey = ed25519_keys.Ed25519PublicKey.unmarshal(
+        Uint8List.fromList(payload.identityKey));
+
+    // Verify: "noise-libp2p-static-key:" + remote_static_noise_key
+    final dataToVerify = Uint8List.fromList([
+      ..._signaturePrefix.codeUnits,
+      ...remoteStaticNoiseKey,
+    ]);
+    final sigVerified = await remoteLibp2pPublicKey.verify(
+        dataToVerify, Uint8List.fromList(payload.identitySig));
+    if (!sigVerified) throw NoiseProtocolException('Failed to verify remote signature');
+
+    return PeerId.fromPublicKey(remoteLibp2pPublicKey);
   }
 
 
@@ -101,71 +125,44 @@ class NoiseSecurity implements SecurityProtocol {
       final staticKey = await crypto.X25519().newKeyPair();
       final pattern = await NoiseXXPattern.create(true, staticKey);
 
-      final msg1 = await pattern.writeMessage(Uint8List(0)); // -> e
-      _log.info('NoiseSecurity.secureOutbound: Writing msg1 (e): ${msg1.length} bytes');
-      await connection.write(msg1);
-      
-      final msg2Raw = await connection.read(80); // <- e, ee, s, es
-      _log.info('NoiseSecurity.secureOutbound: Read msg2 (e,ee,s,es): expected 80, got ${msg2Raw.length} bytes');
-      await pattern.readMessage(msg2Raw);
-      
-      final msg3 = await pattern.writeMessage(Uint8List(0)); // -> s, se
-      _log.info('NoiseSecurity.secureOutbound: Writing msg3 (s,se): ${msg3.length} bytes');
-      await connection.write(msg3);
+      // XX handshake with embedded identity payloads per libp2p Noise spec:
+      //   msg1: -> e                (initiator sends ephemeral, empty payload)
+      //   msg2: <- e, ee, s, es     (responder sends with identity payload)
+      //   msg3: -> s, se            (initiator sends with identity payload)
 
-      // Noise XX handshake complete, session keys derived.
-      // Now, exchange libp2p handshake payload over the encrypted channel.
+      // 1. Send msg1 (empty payload)
+      final msg1 = await pattern.writeMessage(Uint8List(0));
+      _log.info('secureOutbound: Writing msg1 (e): ${msg1.length} bytes');
+      await _writeHandshakeMessage(connection, msg1);
 
-      // ADDED LOGGING
-      _log.finer('NoiseSecurity.secureOutbound: Handshake complete. Pattern keys:');
-      _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
-      _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
+      // 2. Read msg2 (contains responder's identity payload)
+      final msg2Raw = await _readHandshakeMessage(connection);
+      _log.info('secureOutbound: Read msg2: ${msg2Raw.length} bytes');
+      final msg2Payload = await pattern.readMessage(msg2Raw);
 
-      // Create a temporary SecuredConnection for exchanging the NoiseHandshakePayload
-      final tempSecuredConn = SecuredConnection(
-        connection,
-        pattern.sendKey,
-        pattern.recvKey,
-        securityProtocolId: _protocolString, // Temporary, won't have peer details yet
-      );
+      // Verify responder's identity from msg2 payload
+      if (msg2Payload == null || msg2Payload.isEmpty) {
+        throw NoiseProtocolException('Responder msg2 did not contain identity payload');
+      }
+      if (pattern.remoteStaticKey == null) {
+        throw NoiseProtocolException("Responder's static key is null after msg2");
+      }
+      final remotePeerId = await _verifyHandshakePayload(msg2Payload, pattern.remoteStaticKey!);
 
-      // 1. Prepare and send initiator's payload
-      final initiatorPayload = noise_pb.NoiseHandshakePayload();
-      initiatorPayload.identityKey = await _identityKey.publicKey.marshal();
-      // Initiator signs responder's static X25519 key
-      if (pattern.remoteStaticKey == null) throw NoiseProtocolException("Responder's remote static key is null during outbound secure");
-      final signature = await _identityKey.privateKey.sign(pattern.remoteStaticKey!); 
-      initiatorPayload.identitySig = signature;
-      
-      await _writeEncryptedPayload(tempSecuredConn, initiatorPayload.writeToBuffer());
+      // 3. Send msg3 with our identity payload
+      final ownStaticKey = await pattern.getStaticPublicKey();
+      final initiatorPayload = await _createHandshakePayload(ownStaticKey);
+      final msg3 = await pattern.writeMessage(initiatorPayload);
+      _log.info('secureOutbound: Writing msg3 (s,se + payload): ${msg3.length} bytes');
+      await _writeHandshakeMessage(connection, msg3);
 
-      // 2. Receive and process responder's payload
-      final responderEncryptedPayloadBytes = await _readLibp2pHandshakePayload(tempSecuredConn);
-      final responderPayload = noise_pb.NoiseHandshakePayload.fromBuffer(responderEncryptedPayloadBytes);
+      _log.info('secureOutbound: Handshake complete. Remote peer: ${remotePeerId.toBase58()}');
 
-      if (!responderPayload.hasIdentityKey()) throw NoiseProtocolException("Responder payload missing identity key");
-      // Assuming Ed25519 key as per Noise spec for libp2p identity
-      final remoteLibp2pPublicKey = ed25519_keys.Ed25519PublicKey.unmarshal(Uint8List.fromList(responderPayload.identityKey)); 
-      
-      if (!responderPayload.hasIdentitySig()) throw NoiseProtocolException("Responder payload missing signature");
-      // Responder's signature is over initiator's static X25519 key
-      final initiatorStaticNoiseKey = await pattern.getStaticPublicKey(); 
-      
-      final sigVerified = await remoteLibp2pPublicKey.verify(
-          initiatorStaticNoiseKey, Uint8List.fromList(responderPayload.identitySig));
-      if (!sigVerified) throw NoiseProtocolException("Failed to verify responder's signature");
+      // Session keys are now derived. Nonces start at 0 (no post-handshake exchange).
+      final remoteLibp2pPublicKey = ed25519_keys.Ed25519PublicKey.unmarshal(
+          Uint8List.fromList(
+              noise_pb.NoiseHandshakePayload.fromBuffer(msg2Payload).identityKey));
 
-      final remotePeerId = await PeerId.fromPublicKey(remoteLibp2pPublicKey);
-
-      // ADDED LOGGING
-      _log.finer('NoiseSecurity.secureOutbound: Libp2p handshake payload processed. Finalizing SecuredConnection with pattern keys:');
-      _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
-      _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
-      _log.finer('  - tempSecuredConn nonces: send=${tempSecuredConn.currentSendNonce}, recv=${tempSecuredConn.currentRecvNonce}');
-      
-      // CRITICAL: Continue nonces from tempSecuredConn to prevent nonce reuse!
-      // The tempSecuredConn used nonces 0, 1, 2... during handshake payload exchange.
-      // The final SecuredConnection must continue from where tempSecuredConn left off.
       return SecuredConnection(
         connection,
         pattern.sendKey,
@@ -173,8 +170,6 @@ class NoiseSecurity implements SecurityProtocol {
         establishedRemotePeer: remotePeerId,
         establishedRemotePublicKey: remoteLibp2pPublicKey,
         securityProtocolId: _protocolString,
-        initialSendNonce: tempSecuredConn.currentSendNonce,
-        initialRecvNonce: tempSecuredConn.currentRecvNonce,
       );
     } catch (e) {
       await connection.close();
@@ -191,68 +186,44 @@ class NoiseSecurity implements SecurityProtocol {
       final staticKey = await crypto.X25519().newKeyPair();
       final pattern = await NoiseXXPattern.create(false, staticKey);
 
-      final msg1Raw = await connection.read(32); // <- e
-      _log.info('NoiseSecurity.secureInbound: Read msg1 (e): expected 32, got ${msg1Raw.length} bytes');
+      // XX handshake (responder side):
+      //   msg1: <- e                (read initiator's ephemeral)
+      //   msg2: -> e, ee, s, es     (send with our identity payload)
+      //   msg3: <- s, se            (read with initiator's identity payload)
+
+      // 1. Read msg1
+      final msg1Raw = await _readHandshakeMessage(connection);
+      _log.info('secureInbound: Read msg1 (e): ${msg1Raw.length} bytes');
       await pattern.readMessage(msg1Raw);
-      
-      final msg2 = await pattern.writeMessage(Uint8List(0)); // -> e, ee, s, es
-      _log.info('NoiseSecurity.secureInbound: Writing msg2 (e,ee,s,es): ${msg2.length} bytes');
-      await connection.write(msg2);
-      
-      final msg3Raw = await connection.read(48); // <- s, se
-      _log.info('NoiseSecurity.secureInbound: Read msg3 (s,se): expected 48, got ${msg3Raw.length} bytes');
-      await pattern.readMessage(msg3Raw);
 
-      // Noise XX handshake complete. Exchange libp2p handshake payload.
-      // ADDED LOGGING
-      _log.finer('NoiseSecurity.secureInbound: Handshake complete. Pattern keys:');
-      _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
-      _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
-      
-      final tempSecuredConn = SecuredConnection(
-        connection,
-        pattern.sendKey, // Responder's send is initiator's recv
-        pattern.recvKey, // Responder's recv is initiator's send
-        securityProtocolId: _protocolString,
-      );
+      // 2. Send msg2 with our identity payload
+      final ownStaticKey = await pattern.getStaticPublicKey();
+      final responderPayload = await _createHandshakePayload(ownStaticKey);
+      final msg2 = await pattern.writeMessage(responderPayload);
+      _log.info('secureInbound: Writing msg2 (e,ee,s,es + payload): ${msg2.length} bytes');
+      await _writeHandshakeMessage(connection, msg2);
 
-      // 1. Receive and process initiator's payload
-      final initiatorEncryptedPayloadBytes = await _readLibp2pHandshakePayload(tempSecuredConn);
-      final initiatorPayload = noise_pb.NoiseHandshakePayload.fromBuffer(initiatorEncryptedPayloadBytes);
+      // 3. Read msg3 (contains initiator's identity payload)
+      final msg3Raw = await _readHandshakeMessage(connection);
+      _log.info('secureInbound: Read msg3: ${msg3Raw.length} bytes');
+      final msg3Payload = await pattern.readMessage(msg3Raw);
 
-      if (!initiatorPayload.hasIdentityKey()) throw NoiseProtocolException("Initiator payload missing identity key");
-      // Assuming Ed25519 key
-      final remoteLibp2pPublicKey = ed25519_keys.Ed25519PublicKey.unmarshal(Uint8List.fromList(initiatorPayload.identityKey));
+      // Verify initiator's identity from msg3 payload
+      if (msg3Payload == null || msg3Payload.isEmpty) {
+        throw NoiseProtocolException('Initiator msg3 did not contain identity payload');
+      }
+      if (pattern.remoteStaticKey == null) {
+        throw NoiseProtocolException("Initiator's static key is null after msg3");
+      }
+      final remotePeerId = await _verifyHandshakePayload(msg3Payload, pattern.remoteStaticKey!);
 
-      if (!initiatorPayload.hasIdentitySig()) throw NoiseProtocolException("Initiator payload missing signature");
-      // Initiator's signature is over responder's static X25519 key
-      final responderStaticNoiseKey = await pattern.getStaticPublicKey();
-      
-      final sigVerified = await remoteLibp2pPublicKey.verify(
-          responderStaticNoiseKey, Uint8List.fromList(initiatorPayload.identitySig));
-      if (!sigVerified) throw NoiseProtocolException("Failed to verify initiator's signature");
-      
-      // 2. Prepare and send responder's payload
-      final responderPayload = noise_pb.NoiseHandshakePayload();
-      responderPayload.identityKey = await _identityKey.publicKey.marshal();
-      // Responder signs initiator's X25519 static key (which is pattern.remoteStaticKey from responder's PoV)
-      if (pattern.remoteStaticKey == null) throw NoiseProtocolException("Initiator's remote static key is null during inbound secure");
-      final signature = await _identityKey.privateKey.sign(pattern.remoteStaticKey!);
-      responderPayload.identitySig = signature;
+      _log.info('secureInbound: Handshake complete. Remote peer: ${remotePeerId.toBase58()}');
 
-      await _writeEncryptedPayload(tempSecuredConn, responderPayload.writeToBuffer());
+      final remoteLibp2pPublicKey = ed25519_keys.Ed25519PublicKey.unmarshal(
+          Uint8List.fromList(
+              noise_pb.NoiseHandshakePayload.fromBuffer(msg3Payload).identityKey));
 
-      final remotePeerId = await PeerId.fromPublicKey(remoteLibp2pPublicKey);
-
-      // ADDED LOGGING
-      _log.finer('NoiseSecurity.secureInbound: Libp2p handshake payload processed. Finalizing SecuredConnection with pattern keys:');
-      _log.finer('  - pattern.sendKey.hashCode: ${pattern.sendKey.hashCode}, pattern.sendKey.bytes: ${await pattern.sendKey.extractBytes()}');
-      _log.finer('  - pattern.recvKey.hashCode: ${pattern.recvKey.hashCode}, pattern.recvKey.bytes: ${await pattern.recvKey.extractBytes()}');
-      _log.finer('  - tempSecuredConn nonces: send=${tempSecuredConn.currentSendNonce}, recv=${tempSecuredConn.currentRecvNonce}');
-
-      // CRITICAL: Continue nonces from tempSecuredConn to prevent nonce reuse!
-      // The tempSecuredConn used nonces 0, 1, 2... during handshake payload exchange.
-      // The final SecuredConnection must continue from where tempSecuredConn left off.
+      // Nonces start at 0 (no post-handshake exchange needed).
       return SecuredConnection(
         connection,
         pattern.sendKey,
@@ -260,8 +231,6 @@ class NoiseSecurity implements SecurityProtocol {
         establishedRemotePeer: remotePeerId,
         establishedRemotePublicKey: remoteLibp2pPublicKey,
         securityProtocolId: _protocolString,
-        initialSendNonce: tempSecuredConn.currentSendNonce,
-        initialRecvNonce: tempSecuredConn.currentRecvNonce,
       );
     } catch (e) {
       await connection.close();
