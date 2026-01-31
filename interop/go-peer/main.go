@@ -25,6 +25,7 @@ import (
 	relayv2client "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -32,7 +33,7 @@ import (
 const echoProtocol = "/echo/1.0.0"
 
 func main() {
-	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers")
+	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers, pubsub-server, pubsub-client")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
 	message := flag.String("message", "hello from go-libp2p", "Message to send in echo-client mode")
@@ -42,6 +43,7 @@ func main() {
 	cidStr := flag.String("cid", "", "Content ID (for provide/find-providers)")
 	pkSelf := flag.Bool("pk-self", false, "For dht-put-value: store own public key as /pk/<self> record")
 	pkPeer := flag.String("pk-peer", "", "PeerId (base58) to construct /pk/<raw-id> key for get-value")
+	topic := flag.String("topic", "test-topic", "PubSub topic name")
 	flag.Parse()
 
 	switch *mode {
@@ -73,6 +75,10 @@ func main() {
 		runDHTProvide(*target, *cidStr)
 	case "dht-find-providers":
 		runDHTFindProviders(*target, *cidStr)
+	case "pubsub-server":
+		runPubSubServer(*port, *topic)
+	case "pubsub-client":
+		runPubSubClient(*target, *topic, *message)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -920,5 +926,159 @@ func runDHTFindProviders(targetStr, cidStr string) {
 		fmt.Fprintln(os.Stderr, "No providers found")
 		os.Exit(1)
 	}
+}
+
+// debugTracer logs pubsub validation events
+type debugTracer struct{}
+func (t *debugTracer) AddPeer(p peer.ID, proto protocol.ID) {}
+func (t *debugTracer) RemovePeer(p peer.ID) {}
+func (t *debugTracer) Join(topic string) {}
+func (t *debugTracer) Leave(topic string) {}
+func (t *debugTracer) Graft(p peer.ID, topic string) {}
+func (t *debugTracer) Prune(p peer.ID, topic string) {}
+func (t *debugTracer) ValidateMessage(msg *pubsub.Message) {
+	fmt.Fprintf(os.Stderr, "TRACE ValidateMessage: from=%s topic=%s datalen=%d\n", msg.GetFrom(), msg.GetTopic(), len(msg.Data))
+}
+func (t *debugTracer) DeliverMessage(msg *pubsub.Message) {
+	fmt.Fprintf(os.Stderr, "TRACE DeliverMessage: from=%s topic=%s datalen=%d\n", msg.GetFrom(), msg.GetTopic(), len(msg.Data))
+}
+func (t *debugTracer) RejectMessage(msg *pubsub.Message, reason string) {
+	fmt.Fprintf(os.Stderr, "TRACE RejectMessage: from=%s topic=%s reason=%s\n", msg.GetFrom(), msg.GetTopic(), reason)
+}
+func (t *debugTracer) DuplicateMessage(msg *pubsub.Message) {}
+func (t *debugTracer) ThrottlePeer(p peer.ID) {}
+func (t *debugTracer) RecvRPC(rpc *pubsub.RPC) {}
+func (t *debugTracer) SendRPC(rpc *pubsub.RPC, p peer.ID) {}
+func (t *debugTracer) DropRPC(rpc *pubsub.RPC, p peer.ID) {}
+func (t *debugTracer) UndeliverableMessage(msg *pubsub.Message) {
+	fmt.Fprintf(os.Stderr, "TRACE UndeliverableMessage: from=%s topic=%s\n", msg.GetFrom(), msg.GetTopic())
+}
+
+// pubsub-server mode: create GossipSub, subscribe to topic, print received messages
+func runPubSubServer(port int, topicName string) {
+	h, err := createHost(port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx := context.Background()
+	ps, err := pubsub.NewGossipSub(ctx, h,
+		pubsub.WithRawTracer(&debugTracer{}),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "GossipSub error: %v\n", err)
+		os.Exit(1)
+	}
+
+	topic, err := ps.Join(topicName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Join topic error: %v\n", err)
+		os.Exit(1)
+	}
+
+	sub, err := topic.Subscribe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Subscribe error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printHostInfo(h)
+
+	// Read messages in background
+	go func() {
+		for {
+			msg, err := sub.Next(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Sub.Next error: %v\n", err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "Got message from %s (receivedFrom: %s), data len: %d\n",
+				msg.GetFrom(), msg.ReceivedFrom, len(msg.Data))
+			// Skip our own messages
+			if msg.ReceivedFrom == h.ID() {
+				fmt.Fprintf(os.Stderr, "Skipping own message\n")
+				continue
+			}
+			fmt.Printf("Received: %s\n", string(msg.Data))
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "quit" || line == "exit" {
+				os.Exit(0)
+			}
+		}
+	}()
+
+	waitForShutdown()
+}
+
+// pubsub-client mode: connect to target, subscribe to topic, publish a message
+func runPubSubClient(targetStr, topicName, message string) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Connected")
+
+	ps, err := pubsub.NewGossipSub(ctx, h)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "GossipSub error: %v\n", err)
+		os.Exit(1)
+	}
+
+	topic, err := ps.Join(topicName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Join topic error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Subscribe first (required before publishing in GossipSub)
+	sub, err := topic.Subscribe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Subscribe error: %v\n", err)
+		os.Exit(1)
+	}
+	_ = sub
+
+	// Wait for mesh to form, then publish multiple times to ensure delivery
+	time.Sleep(3 * time.Second)
+
+	for i := 0; i < 5; i++ {
+		if err := topic.Publish(ctx, []byte(message)); err != nil {
+			fmt.Fprintf(os.Stderr, "Publish failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Published attempt %d: %s\n", i+1, message)
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Printf("Published: %s\n", message)
+	fmt.Println("PubSub client done")
 }
 

@@ -204,6 +204,21 @@ class GoProcessManager {
     ).timeout(const Duration(seconds: 30));
   }
 
+  /// Starts the Go peer in pubsub-server mode.
+  Future<void> startPubSubServer({int port = 0, String topic = 'test-topic'}) async {
+    await _start(['--mode=pubsub-server', '--port=$port', '--topic=$topic']);
+  }
+
+  /// Runs the Go peer in pubsub-client mode.
+  Future<ProcessResult> runPubSubClient(String targetMultiaddr, String topic, String message) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=pubsub-client', '--target=$targetMultiaddr', '--topic=$topic', '--message=$message'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
   /// Runs the Go peer in echo-client mode.
   Future<ProcessResult> runEchoClient(String targetMultiaddr, String message) async {
     return Process.run(

@@ -1,20 +1,20 @@
 import 'dart:typed_data';
 
-/// Encodes a non-negative integer as a varint.
+/// Encodes a non-negative integer as a varint (unsigned LEB128).
 Uint8List encodeVarint(int value) {
   if (value < 0) {
     throw ArgumentError('Value must be non-negative');
   }
 
   final bytes = <int>[];
-  while (value > 0) {
-    bytes.add((value & 0x7F) | (bytes.isEmpty ? 0 : 0x80));
+  do {
+    var byte = value & 0x7F;
     value >>= 7;
-  }
-
-  if (bytes.isEmpty) {
-    bytes.add(0);
-  }
+    if (value > 0) {
+      byte |= 0x80; // Set continuation bit
+    }
+    bytes.add(byte);
+  } while (value > 0);
 
   return Uint8List.fromList(bytes);
 }
