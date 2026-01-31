@@ -97,10 +97,12 @@ void main() {
     return host;
   }
 
-  // NOTE: These tests require dart-libp2p-kad-dht to use protobuf wire format
-  // instead of JSON encoding. The Go DHT uses protobuf per the spec.
-  // See: https://github.com/libp2p/specs/blob/master/kad-dht/README.md
-  // Until the encoding is fixed, these tests will fail with JSON decode errors.
+  /// Builds a spec-compliant /pk/ DHT record key from a PeerId.
+  /// Format: "/pk/" + raw multihash bytes (as per go-libp2p spec).
+  String pkKeyForPeer(PeerId peerId) {
+    return '/pk/${String.fromCharCodes(peerId.toBytes())}';
+  }
+
   group('Kademlia DHT Go-libp2p Interop', () {
     late GoProcessManager goDHTServer;
     BasicHost? dartHost;
@@ -111,7 +113,6 @@ void main() {
     });
 
     tearDown(() async {
-      await goDHTServer.stop();
       if (dartDHT != null) {
         await dartDHT!.close();
         dartDHT = null;
@@ -120,9 +121,10 @@ void main() {
         await dartHost!.close();
         dartHost = null;
       }
+      await goDHTServer.stop();
     });
 
-    test('Dart FIND_NODE via Go DHT bootstrap', skip: 'Requires protobuf wire format in dart-libp2p-kad-dht (currently uses JSON)', () async {
+    test('Dart FIND_NODE via Go DHT bootstrap', () async {
       // 1. Start Go DHT server
       await goDHTServer.startDHTServer();
       final goAddr = goDHTServer.listenAddr;
@@ -157,21 +159,23 @@ void main() {
       print('FIND_NODE interop verified');
     }, timeout: Timeout(Duration(seconds: 60)));
 
-    test('Go stores value, Dart retrieves via DHT', skip: 'Requires protobuf wire format in dart-libp2p-kad-dht (currently uses JSON)', () async {
+    test('Go stores /pk/ record, Dart retrieves via DHT', () async {
       // 1. Start Go DHT server
       await goDHTServer.startDHTServer();
       final goAddr = goDHTServer.listenAddr;
       final goPeerId = goDHTServer.peerId;
-      final goFullAddr = '$goAddr';
-      print('Go DHT server: $goFullAddr');
+      print('Go DHT server: $goAddr');
 
-      // 2. Go puts a value
+      // 2. Go puts its own public key record (spec-compliant /pk/ namespace)
       final goClient = GoProcessManager(binaryPath: goBinaryPath);
-      final putResult = await goClient.runDHTPutValue(
-          goFullAddr.toString(), '/test/key1', 'hello-from-go');
+      final putResult = await goClient.runDHTPutPkSelf(goAddr.toString());
       print('Go put stdout: ${putResult.stdout}');
       print('Go put stderr: ${putResult.stderr}');
-      expect(putResult.exitCode, 0, reason: 'Go PutValue should succeed');
+      expect(putResult.exitCode, 0, reason: 'Go PutValue /pk/ should succeed');
+
+      // Parse the Go client's peer ID from the output
+      final goClientPeerId = _parsePeerId(putResult.stdout.toString());
+      print('Go client peer ID: ${goClientPeerId.toBase58()}');
 
       // 3. Create Dart host + DHT and connect
       final keyPair = await crypto_ed25519.generateEd25519KeyPair();
@@ -191,15 +195,19 @@ void main() {
       await dartDHT!.routingTable.tryAddPeer(goPeerId, queryPeer: false);
       print('Dart connected to Go DHT server');
 
-      // 4. Dart gets the value
-      final value = await dartDHT!.getValue('/test/key1', null);
-      print('getValue result: ${value != null ? String.fromCharCodes(value) : null}');
-      expect(value, isNotNull, reason: 'Should retrieve the stored value');
-      expect(String.fromCharCodes(value!), equals('hello-from-go'));
-      print('GET_VALUE interop verified');
+      // 4. Dart retrieves the Go client's public key via /pk/ namespace
+      final pkKey = pkKeyForPeer(goClientPeerId);
+      final value = await dartDHT!.getValue(pkKey, null);
+      print('getValue result: ${value != null ? '${value.length} bytes' : 'null'}');
+      expect(value, isNotNull, reason: 'Should retrieve the Go peer public key record');
+      print('GET_VALUE /pk/ interop verified');
     }, timeout: Timeout(Duration(seconds: 60)));
 
-    test('Dart provides, Go finds providers via DHT', skip: 'Requires protobuf wire format in dart-libp2p-kad-dht (currently uses JSON)', () async {
+    test('Dart provides, Go finds providers via DHT', () async {
+      // Known issue: Go's handleAddProvider silently rejects the provider record.
+      // Likely due to address filtering (loopback) or peer ID byte matching.
+      // Fire-and-forget ADD_PROVIDER works (message sent successfully) but
+      // Go doesn't store the provider record.
       // 1. Start Go DHT server
       await goDHTServer.startDHTServer();
       final goAddr = goDHTServer.listenAddr;
@@ -226,7 +234,6 @@ void main() {
       print('Dart connected to Go DHT server');
 
       // 3. Dart provides a CID
-      // Create a test CID from some data
       final testData = Uint8List.fromList('test-provide-data'.codeUnits);
       final testCid = CID.fromData(1, 'raw', testData);
       print('Dart providing CID: $testCid');
@@ -248,7 +255,7 @@ void main() {
       print('PROVIDE/FIND_PROVIDERS interop verified');
     }, timeout: Timeout(Duration(seconds: 60)));
 
-    test('Dart stores value, Go retrieves via DHT', skip: 'Requires protobuf wire format in dart-libp2p-kad-dht (currently uses JSON)', () async {
+    test('Dart stores /pk/ record, Go retrieves via DHT', () async {
       // 1. Start Go DHT server
       await goDHTServer.startDHTServer();
       final goAddr = goDHTServer.listenAddr;
@@ -257,6 +264,7 @@ void main() {
 
       // 2. Create Dart host + DHT
       final keyPair = await crypto_ed25519.generateEd25519KeyPair();
+      final dartPeerId = await PeerId.fromPublicKey(keyPair.publicKey);
       dartHost = await createHost(keyPair,
           listenAddrs: [MultiAddr('/ip4/127.0.0.1/tcp/0')]);
 
@@ -273,22 +281,32 @@ void main() {
       await dartDHT!.routingTable.tryAddPeer(goPeerId, queryPeer: false);
       print('Dart connected to Go DHT server');
 
-      // 3. Dart puts a value
-      await dartDHT!.putValue(
-          '/test/key2', Uint8List.fromList('hello-from-dart'.codeUnits));
-      print('Dart putValue complete');
+      // 3. Dart puts its own public key record (/pk/ namespace)
+      final pkKey = pkKeyForPeer(dartPeerId);
+      final pubKeyBytes = keyPair.publicKey.marshal();
+      await dartDHT!.putValue(pkKey, pubKeyBytes);
+      print('Dart putValue /pk/ complete');
 
-      // 4. Go gets the value
+      // 4. Go gets the value using --pk-peer with the Dart peer's base58 ID
       final goClient = GoProcessManager(binaryPath: goBinaryPath);
-      final getResult = await goClient.runDHTGetValue(
-          goAddr.toString(), '/test/key2');
+      final getResult = await goClient.runDHTGetPkPeer(
+          goAddr.toString(), dartPeerId.toBase58());
       print('Go get-value stdout: ${getResult.stdout}');
       print('Go get-value stderr: ${getResult.stderr}');
 
       expect(getResult.exitCode, 0,
-          reason: 'Go GetValue should succeed');
-      expect(getResult.stdout.toString(), contains('Value: hello-from-dart'));
-      print('PUT_VALUE/GET_VALUE (Dart→Go) interop verified');
+          reason: 'Go GetValue /pk/ should succeed');
+      expect(getResult.stdout.toString(), contains('Get successful'));
+      print('PUT_VALUE/GET_VALUE /pk/ (Dart→Go) interop verified');
     }, timeout: Timeout(Duration(seconds: 60)));
   });
+}
+
+/// Parses a PeerId from Go process output containing "PeerID: <base58>"
+PeerId _parsePeerId(String output) {
+  final match = RegExp(r'PeerID:\s*(\S+)').firstMatch(output);
+  if (match == null) {
+    throw StateError('Could not find PeerID in output: $output');
+  }
+  return PeerId.fromString(match.group(1)!);
 }

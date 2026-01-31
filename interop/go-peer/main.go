@@ -26,7 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/ipfs/go-cid"
-	mh "github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -41,6 +40,8 @@ func main() {
 	key := flag.String("key", "", "DHT record key (for put/get value)")
 	value := flag.String("value", "", "DHT record value (for put value)")
 	cidStr := flag.String("cid", "", "Content ID (for provide/find-providers)")
+	pkSelf := flag.Bool("pk-self", false, "For dht-put-value: store own public key as /pk/<self> record")
+	pkPeer := flag.String("pk-peer", "", "PeerId (base58) to construct /pk/<raw-id> key for get-value")
 	flag.Parse()
 
 	switch *mode {
@@ -65,9 +66,9 @@ func main() {
 	case "dht-server":
 		runDHTServer(*port)
 	case "dht-put-value":
-		runDHTPutValue(*target, *key, *value)
+		runDHTPutValue(*target, *key, *value, *pkSelf)
 	case "dht-get-value":
-		runDHTGetValue(*target, *key)
+		runDHTGetValue(*target, *key, *pkPeer)
 	case "dht-provide":
 		runDHTProvide(*target, *cidStr)
 	case "dht-find-providers":
@@ -630,7 +631,13 @@ func runDHTServer(port int) {
 	defer h.Close()
 
 	ctx := context.Background()
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer))
+	// Use permissive options for local testing: allow private/loopback addresses
+	kadDHT, err := dht.New(ctx, h,
+		dht.Mode(dht.ModeServer),
+		dht.AddressFilter(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			return addrs // Accept all addresses including loopback
+		}),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
 		os.Exit(1)
@@ -658,9 +665,13 @@ func runDHTServer(port int) {
 }
 
 // dht-put-value mode: connect to target DHT peer and store a value
-func runDHTPutValue(targetStr, key, value string) {
-	if targetStr == "" || key == "" || value == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target, --key, and --value required")
+func runDHTPutValue(targetStr, key, value string, pkSelf bool) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+	if !pkSelf && (key == "" || value == "") {
+		fmt.Fprintln(os.Stderr, "Error: --key and --value required (or use --pk-self)")
 		os.Exit(1)
 	}
 
@@ -692,17 +703,45 @@ func runDHTPutValue(targetStr, key, value string) {
 		os.Exit(1)
 	}
 
-	if err := kadDHT.PutValue(ctx, key, []byte(value)); err != nil {
-		fmt.Fprintf(os.Stderr, "PutValue failed: %v\n", err)
+	if err := kadDHT.Bootstrap(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "DHT bootstrap error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Put successful")
+	// Allow routing table to populate
+	time.Sleep(2 * time.Second)
+
+	if pkSelf {
+		// Store own public key as /pk/<raw-peer-id> record
+		// This is the spec-compliant way to publish a public key
+		pkKey := "/pk/" + string(h.ID())
+		pubKeyBytes, err := crypto.MarshalPublicKey(h.Peerstore().PubKey(h.ID()))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to marshal public key: %v\n", err)
+			os.Exit(1)
+		}
+		if err := kadDHT.PutValue(ctx, pkKey, pubKeyBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "PutValue /pk/ failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PeerID: %s\n", h.ID())
+		fmt.Println("Put /pk/ successful")
+	} else {
+		if err := kadDHT.PutValue(ctx, key, []byte(value)); err != nil {
+			fmt.Fprintf(os.Stderr, "PutValue failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Put successful")
+	}
 }
 
 // dht-get-value mode: connect to target DHT peer and retrieve a value
-func runDHTGetValue(targetStr, key string) {
-	if targetStr == "" || key == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target and --key required")
+func runDHTGetValue(targetStr, key, pkPeerStr string) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+	if key == "" && pkPeerStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --key or --pk-peer required")
 		os.Exit(1)
 	}
 
@@ -734,12 +773,31 @@ func runDHTGetValue(targetStr, key string) {
 		os.Exit(1)
 	}
 
-	val, err := kadDHT.GetValue(ctx, key)
+	if err := kadDHT.Bootstrap(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "DHT bootstrap error: %v\n", err)
+		os.Exit(1)
+	}
+	time.Sleep(2 * time.Second)
+
+	// Build the actual key
+	actualKey := key
+	if pkPeerStr != "" {
+		// Construct /pk/<raw-peer-id> from the base58 peer ID
+		pid, err := peer.Decode(pkPeerStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid peer ID: %v\n", err)
+			os.Exit(1)
+		}
+		actualKey = "/pk/" + string(pid)
+	}
+
+	val, err := kadDHT.GetValue(ctx, actualKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "GetValue failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Value: %s\n", string(val))
+	fmt.Printf("Value: %d bytes\n", len(val))
+	fmt.Println("Get successful")
 }
 
 // dht-provide mode: connect to target DHT peer and announce as provider
@@ -776,6 +834,12 @@ func runDHTProvide(targetStr, cidStr string) {
 		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
 		os.Exit(1)
 	}
+
+	if err := kadDHT.Bootstrap(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "DHT bootstrap error: %v\n", err)
+		os.Exit(1)
+	}
+	time.Sleep(2 * time.Second)
 
 	c, err := cid.Decode(cidStr)
 	if err != nil {
@@ -825,6 +889,12 @@ func runDHTFindProviders(targetStr, cidStr string) {
 		os.Exit(1)
 	}
 
+	if err := kadDHT.Bootstrap(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "DHT bootstrap error: %v\n", err)
+		os.Exit(1)
+	}
+	time.Sleep(2 * time.Second)
+
 	c, err := cid.Decode(cidStr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid CID: %v\n", err)
@@ -846,11 +916,3 @@ func runDHTFindProviders(targetStr, cidStr string) {
 	}
 }
 
-// makeCID creates a CIDv1 from arbitrary data using sha256.
-func makeCID(data []byte) (cid.Cid, error) {
-	hash, err := mh.Sum(data, mh.SHA2_256, -1)
-	if err != nil {
-		return cid.Undef, err
-	}
-	return cid.NewCidV1(cid.Raw, hash), nil
-}

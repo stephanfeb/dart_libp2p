@@ -154,11 +154,31 @@ class GoProcessManager {
     ).timeout(const Duration(seconds: 30));
   }
 
+  /// Runs the Go peer in dht-put-value mode with --pk-self (stores own public key).
+  Future<ProcessResult> runDHTPutPkSelf(String target) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-put-value', '--target=$target', '--pk-self'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
   /// Runs the Go peer in dht-get-value mode.
   Future<ProcessResult> runDHTGetValue(String target, String key) async {
     return Process.run(
       binaryPath,
       ['--mode=dht-get-value', '--target=$target', '--key=$key'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
+  /// Runs the Go peer in dht-get-value mode with --pk-peer (gets /pk/ record for a peer).
+  Future<ProcessResult> runDHTGetPkPeer(String target, String peerId) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=dht-get-value', '--target=$target', '--pk-peer=$peerId'],
       stdoutEncoding: utf8,
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 30));
