@@ -126,6 +126,12 @@ class Config {
     // Validate configuration
     _validate();
 
+    // Ensure core record types are registered (idempotent)
+    RecordRegistry.register<pb.PeerRecord>(
+      String.fromCharCodes(PeerRecordEnvelopePayloadType),
+      pb.PeerRecord.fromBuffer
+    );
+
     // This is a placeholder implementation that outlines the steps involved in creating a Host.
     // In a real implementation, these steps would be implemented with actual code.
 

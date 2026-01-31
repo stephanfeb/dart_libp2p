@@ -195,7 +195,17 @@ class MultistreamMuxer implements ProtocolSwitch {
   
   @override
   Future<void> handle(P2PStream<dynamic> stream) async {
-    final (proto, handler) = await negotiate(stream);
+    late final ProtocolID proto;
+    late final HandlerFunc handler;
+    try {
+      final result = await negotiate(stream);
+      proto = result.$1;
+      handler = result.$2;
+    } catch (e) {
+      // Clean up any leftover bytes on negotiation failure
+      _leftoverMap.remove(stream.id());
+      rethrow;
+    }
 
     // After negotiation, inject any leftover bytes back into the stream.
     // This handles the case where Go sends protocol negotiation + application data

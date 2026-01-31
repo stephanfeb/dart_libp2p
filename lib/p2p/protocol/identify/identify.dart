@@ -657,59 +657,31 @@ class IdentifyService implements IDService {
     final peerId = conn.remotePeer;
     final connAge = DateTime.now().difference(conn.stat.stats.opened);
 
-    // DEBUG: Add detailed stream creation logging for identify service
-    _log.warning(' [IDENTIFY-STREAM-CREATE-START] Creating stream for peer=$peerId, protocol=$protoIDString, conn_age=${connAge.inMilliseconds}ms');
-    
     P2PStream? stream;
     final streamCreateStart = DateTime.now();
-    
+
     try {
-      // DEBUG: Log stream creation attempt
-      _log.warning(' [IDENTIFY-STREAM-CREATE-ATTEMPT] About to call conn.newStream() for peer=$peerId, protocol=$protoIDString');
-
-      stream = await conn.newStream(Context()); // Context and StreamID are placeholders if not used by underlying muxer for initial open
+      stream = await conn.newStream(Context());
       final streamCreateDuration = DateTime.now().difference(streamCreateStart);
-
-      // DEBUG: Log successful stream creation
-      _log.warning(' [IDENTIFY-STREAM-CREATE-SUCCESS] Stream created for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString, duration=${streamCreateDuration.inMilliseconds}ms');
+      _log.fine(' [IDENTIFY-STREAM-CREATE] peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString, duration=${streamCreateDuration.inMilliseconds}ms');
 
       stream.setDeadline(DateTime.now().add(timeout));
-
-      // DEBUG: Log protocol negotiation start
-      _log.warning(' [IDENTIFY-PROTOCOL-NEGOTIATE-START] Starting protocol negotiation for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString');
-      final negotiateStart = DateTime.now();
 
       final protocolMuxer = host.mux as MultistreamMuxer;
       final selectedProtocol = await protocolMuxer.selectOneOf(stream, [protoIDString as ProtocolID]);
-      final negotiateDuration = DateTime.now().difference(negotiateStart);
-
-      // DEBUG: Log protocol negotiation result
-      _log.warning(' [IDENTIFY-PROTOCOL-NEGOTIATE-RESULT] Protocol negotiation for peer=$peerId, stream_id=${stream.id()}, requested=$protoIDString, selected=$selectedProtocol, duration=${negotiateDuration.inMilliseconds}ms');
 
       if (selectedProtocol == null) {
-        _log.warning('🔧 [NEWSTREAM-STEP-3-FAILED] Protocol negotiation failed for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString. Resetting stream.');
+        _log.warning('Protocol negotiation failed for peer=$peerId, protocol=$protoIDString. Resetting stream.');
         await stream.reset();
         return null;
       }
-      
-      // CRITICAL FIX: Reset stream deadline after successful protocol negotiation
-      // This gives the actual identify data exchange its own full timeout window,
-      // preventing deadline exhaustion when negotiation takes significant time
+
+      // Reset stream deadline after successful protocol negotiation
       stream.setDeadline(DateTime.now().add(timeout));
-      _log.warning(' [IDENTIFY-DEADLINE-RESET] Reset stream deadline after negotiation for peer=$peerId, stream_id=${stream.id()}, new_deadline=${DateTime.now().add(timeout).toIso8601String()}');
-      
-      // DEBUG: Log protocol assignment
-      _log.warning(' [IDENTIFY-PROTOCOL-ASSIGN-START] Setting protocol scope and stream protocol for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
 
       await stream.scope().setProtocol(selectedProtocol);
-
-      // DEBUG: Log stream protocol assignment
-      _log.warning(' [IDENTIFY-PROTOCOL-ASSIGN-STREAM] Setting stream protocol for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
-
       await stream.setProtocol(selectedProtocol);
-
-      // DEBUG: Log successful completion
-      _log.warning(' [IDENTIFY-STREAM-CREATE-COMPLETE] Stream creation and negotiation complete for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
+      _log.fine(' [IDENTIFY-STREAM-READY] peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
 
       return stream;
     } catch (e, st) {

@@ -441,12 +441,7 @@ class Swarm implements Network {
         // Use upgradedConn.remotePeer for the map key
         // Note: remotePeerIdStr may already be set from relay address extraction above
         final String actualPeerIdStr = upgradedConn.remotePeer.toString();
-        _logger.warning('=== STORING INBOUND CONNECTION ===');
-        _logger.warning('Storing connection for peer: ${upgradedConn.remotePeer}');
-        _logger.warning('Peer ID toString(): "$actualPeerIdStr"');
-        _logger.warning('Peer ID toBase58(): ${upgradedConn.remotePeer.toBase58()}');
-        _logger.warning('Connection ID: ${swarmConn.id}');
-        _logger.warning('=== END STORING INBOUND CONNECTION ===');
+        _logger.fine('Storing inbound connection for peer=$actualPeerIdStr, conn_id=${swarmConn.id}');
         
         // For relayed connections, deduplicate older connections to same peer via same relay
         if (_isRelayedConnection(swarmConn)) {
@@ -475,7 +470,7 @@ class Swarm implements Network {
             _connections[actualPeerIdStr] = [];
           }
           _connections[actualPeerIdStr]!.add(swarmConn);
-          _logger.warning('Connection stored. Total connections for "$actualPeerIdStr": ${_connections[actualPeerIdStr]!.length}');
+          _logger.fine('Connection stored. Total connections for "$actualPeerIdStr": ${_connections[actualPeerIdStr]!.length}');
           
           // Fix 1.1 & 1.2: Initialize activity tracking and creation time for incoming connections
           _connectionLastActivity[swarmConn.id] = DateTime.now();
@@ -575,9 +570,8 @@ class Swarm implements Network {
           if (conn.streamHandler != null) {
             // Don't await this; let each stream be handled concurrently.
             // The handler itself is async.
-            _logger.warning('🎯 [Swarm._handleIncomingStreams] Accepted stream ${acceptedP2PStream.id()} from ${conn.remotePeer} on conn ${conn.id}. Invoking streamHandler...');
+            _logger.fine('Accepted inbound stream ${acceptedP2PStream.id()} from ${conn.remotePeer} on conn ${conn.id}');
             conn.streamHandler!(acceptedP2PStream);
-            _logger.warning('✅ [Swarm._handleIncomingStreams] streamHandler invoked for stream ${acceptedP2PStream.id()}');
           } else {
             // This case should ideally not happen if _handleIncomingStreams is always called
             // before streams can be accepted, or if streamHandler is set at conn construction.
@@ -684,22 +678,7 @@ class Swarm implements Network {
 
   @override
   Future<Conn> dialPeer(Context context, PeerId peerId) async {
-    _logger.warning('Swarm.dialPeer: Entered for peer ${peerId.toString()}. Context: ${context.hashCode}');
-    
-    // Debug peer ID information
-    _logger.warning('=== SWARM DIAL PEER DEBUG ===');
-    _logger.warning('Target peer ID: ${peerId.toString()}');
-    _logger.warning('Target peer ID toBase58(): ${peerId.toBase58()}');
-    _logger.warning('Target peer ID hashCode: ${peerId.hashCode}');
-    _logger.warning('Current connections map keys: ${_connections.keys.toList()}');
-    _logger.warning('Total connections in map: ${_connections.length}');
-    for (final entry in _connections.entries) {
-      _logger.warning('  Connection key: "${entry.key}" -> ${entry.value.length} connections');
-      for (final conn in entry.value) {
-        _logger.warning('    Conn ${conn.id}: remotePeer=${conn.remotePeer}, remotePeer.toString()="${conn.remotePeer.toString()}", isClosed=${conn.isClosed}');
-      }
-    }
-    _logger.warning('=== END SWARM DIAL PEER DEBUG ===');
+    _logger.fine('Swarm.dialPeer: peer=${peerId.toBase58()}, existing_conns=${_connections.length}');
     
     // Check if we're closed
     if (_isClosed) {
@@ -714,7 +693,7 @@ class Swarm implements Network {
 
     // Check if we already have a connection to this peer
     final peerIDStr = peerId.toString();
-    _logger.warning('Looking up connections for peer ID string: "$peerIDStr"');
+    _logger.fine('Looking up connections for peer ID string: "$peerIDStr"');
     
     // FIX: Check if connection is being upgraded (race condition prevention)
     Completer<SwarmConn>? upgradingCompleter;
@@ -743,10 +722,10 @@ class Swarm implements Network {
     final existingConns = await _connLock.synchronized(() {
       return _connections[peerIDStr] ?? [];
     });
-    _logger.warning('Found ${existingConns.length} existing connections for peer ID string: "$peerIDStr"');
+    _logger.fine('Found ${existingConns.length} existing connections for peer ID string: "$peerIDStr"');
 
     if (existingConns.isNotEmpty) {
-      _logger.warning('Swarm.dialPeer: Found ${existingConns.length} existing connection(s) for peer ${peerId.toString()}. Validating health...');
+      _logger.fine('Swarm.dialPeer: Found ${existingConns.length} existing connection(s) for peer ${peerId.toString()}. Validating health...');
       
       // Filter out closed/unhealthy connections
       final healthyConns = <SwarmConn>[];
@@ -808,7 +787,7 @@ class Swarm implements Network {
         _logger.warning('Swarm.dialPeer: No healthy connections found for peer ${peerId.toString()}. Will create new connection.');
       }
     }
-    _logger.warning('Swarm.dialPeer: No existing connection found for peer ${peerId.toString()}. Attempting new dial.');
+    _logger.fine('Swarm.dialPeer: No existing connection for peer ${peerId.toString()}. Dialing.');
 
     // Get addresses for the peer
     final allAddrs = await _peerstore.addrBook.addrs(peerId);
@@ -976,7 +955,7 @@ class Swarm implements Network {
       // Handle incoming streams
       _handleIncomingStreams(swarmConn);
       
-      _logger.warning('Swarm.dialPeer: Connection established for $peerId. Conn ID: ${swarmConn.id}');
+      _logger.fine('Swarm.dialPeer: Connection established for $peerId. Conn ID: ${swarmConn.id}');
       return swarmConn;
       
     } catch (e) {
