@@ -97,6 +97,17 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   /// Queue for incoming data
   final _incomingQueue = <Uint8List>[];
 
+  /// Pushes data to the front of the incoming queue, so the next read() returns it.
+  /// Used to inject leftover bytes after multistream-select negotiation.
+  void pushData(Uint8List data) {
+    if (data.isEmpty) return;
+    if (_readCompleter != null && !_readCompleter!.isCompleted) {
+      _readCompleter!.complete(data);
+    } else {
+      _incomingQueue.insert(0, data);
+    }
+  }
+
   /// Completer for next read operation
   Completer<Uint8List>? _readCompleter;
 

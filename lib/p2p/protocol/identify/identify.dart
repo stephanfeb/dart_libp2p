@@ -28,6 +28,7 @@ import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRe
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart'; // Added import
+import 'package:dart_libp2p/p2p/multiaddr/codec.dart' show MultiAddrCodec; // For varint encoding
 import 'package:dart_libp2p/p2p/protocol/identify/identify_exceptions.dart';
 
 import 'package:dart_libp2p/core/certified_addr_book.dart';
@@ -911,28 +912,38 @@ class IdentifyService implements IDService {
     }
   }
 
+  /// Writes a varint-length-prefixed protobuf message to the stream.
+  /// This matches go-libp2p's protoio.NewDelimitedWriter format.
+  Future<void> _writeDelimitedMsg(P2PStream stream, List<int> msgBytes) async {
+    final lenPrefix = MultiAddrCodec.encodeVarint(msgBytes.length);
+    final frame = Uint8List(lenPrefix.length + msgBytes.length);
+    frame.setRange(0, lenPrefix.length, lenPrefix);
+    frame.setRange(lenPrefix.length, frame.length, msgBytes);
+    await stream.write(frame);
+  }
+
   Future<void> _writeChunkedIdentifyMsg(P2PStream stream, Identify mes) async {
     final msgBytes = mes.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing to stream ${stream.id()} for peer ${stream.conn.remotePeer}. Total message size: ${msgBytes.length} bytes. SignedPeerRecord present: ${mes.signedPeerRecord.isNotEmpty}');
     if (mes.signedPeerRecord.isEmpty || msgBytes.length <= legacyIDSize) {
-      _log.finer('IdentifyService._writeChunkedIdentifyMsg: Sending as single message (size ${msgBytes.length} <= $legacyIDSize or no signed record).');
-      await stream.write(msgBytes);
+      _log.finer('IdentifyService._writeChunkedIdentifyMsg: Sending as single delimited message (size ${msgBytes.length}).');
+      await _writeDelimitedMsg(stream, msgBytes);
       _log.fine('IdentifyService._writeChunkedIdentifyMsg: Single message sent to ${stream.conn.remotePeer}.');
       return;
     }
-    
+
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Message size ${msgBytes.length} > $legacyIDSize and has signed record. Sending in chunks.');
     final sr = mes.signedPeerRecord;
     mes.signedPeerRecord = []; // Clear signed record for the first chunk
     final firstChunkBytes = mes.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing first chunk (${firstChunkBytes.length} bytes, without signed record) to ${stream.conn.remotePeer}.');
-    await stream.write(firstChunkBytes);
+    await _writeDelimitedMsg(stream, firstChunkBytes);
     _log.fine('IdentifyService._writeChunkedIdentifyMsg: First chunk sent to ${stream.conn.remotePeer}.');
 
     final srMsg = Identify()..signedPeerRecord = sr;
     final secondChunkBytes = srMsg.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing second chunk (${secondChunkBytes.length} bytes, only signed record) to ${stream.conn.remotePeer}.');
-    await stream.write(secondChunkBytes);
+    await _writeDelimitedMsg(stream, secondChunkBytes);
     _log.fine('IdentifyService._writeChunkedIdentifyMsg: Second chunk (signed record) sent to ${stream.conn.remotePeer}.');
   }
 
@@ -1023,55 +1034,66 @@ class IdentifyService implements IDService {
     final peer = stream.conn.remotePeer;
     final readStart = DateTime.now();
 
-    
-    final finalMsg = Identify();
-    for (var i = 0; i < maxMessages; i++) {
-      final chunkStart = DateTime.now();
-
-      
-      try {
-
-        final data = await stream.read();
-        final chunkReadTime = DateTime.now().difference(chunkStart);
-        
-        if (data.isEmpty) {
-
-          break;
-        }
-        
-
-
-        
-        final mes = Identify.fromBuffer(data);
-        final chunkParseTime = DateTime.now().difference(chunkStart);
-
-        
-
-        _mergeIdentify(finalMsg, mes);
-        final chunkMergeTime = DateTime.now().difference(chunkStart);
-
-        
-      } catch (e) {
-        final chunkErrorTime = DateTime.now().difference(chunkStart);
-        _log.severe(' [READ-ALL-ID-MESSAGES-CHUNK-${i+1}-ERROR] Error reading chunk from peer=$peer, duration=${chunkErrorTime.inMilliseconds}ms, error=$e');
-        
-        // Check for specific stream closed / EOF conditions
-        if (e is StateError && (e.message.contains('remote side closed (EOF)') || e.message.contains('YamuxStreamState.closed') || e.message.contains('closed by remote') || e.message.contains('Stream is YamuxStreamState.reset'))) {
-
-             break;
-        }
-        if (e is StreamClosedException || (e is IOException && e.toString().contains('closed'))) { 
-
-          break;
-        }
-        _log.severe(' [READ-ALL-ID-MESSAGES-CHUNK-${i+1}-UNHANDLED] Unhandled error reading message chunk from peer=$peer: $e. Rethrowing.');
-        throw e;
-      }
-    }
-    
+    // Read a single varint-length-prefixed identify message.
+    // go-libp2p sends exactly one delimited protobuf message per identify exchange.
+    final buffer = BytesBuilder();
+    final msgBytes = await _readDelimitedMsg(stream, buffer);
     final totalReadTime = DateTime.now().difference(readStart);
 
-    return finalMsg;
+    if (msgBytes == null || msgBytes.isEmpty) {
+      _log.severe(' [READ-ALL-ID-MESSAGES] No identify message received from peer=$peer, duration=${totalReadTime.inMilliseconds}ms');
+      return Identify();
+    }
+
+    _log.fine(' [READ-ALL-ID-MESSAGES] Parsed identify from peer=$peer, ${msgBytes.length} bytes, duration=${totalReadTime.inMilliseconds}ms');
+    return Identify.fromBuffer(msgBytes);
+  }
+
+  /// Reads a single varint-length-prefixed message from the stream.
+  /// Uses [buffer] to accumulate partial reads and handle leftover bytes.
+  /// Returns null on EOF.
+  Future<Uint8List?> _readDelimitedMsg(P2PStream stream, BytesBuilder buffer) async {
+    while (true) {
+      final accumulated = buffer.toBytes();
+
+      // Try to decode varint length prefix from accumulated bytes
+      if (accumulated.isNotEmpty) {
+        try {
+          final (length, consumed) = MultiAddrCodec.decodeVarint(accumulated);
+          if (consumed > 0 && accumulated.length >= consumed + length) {
+            // We have the full message
+            final msgBytes = Uint8List.fromList(
+                accumulated.sublist(consumed, consumed + length));
+            // Put leftover bytes back in buffer
+            buffer.clear();
+            if (accumulated.length > consumed + length) {
+              buffer.add(accumulated.sublist(consumed + length));
+            }
+            return msgBytes;
+          }
+        } catch (e) {
+          // Incomplete varint, need more data
+          if (e is! RangeError) rethrow;
+        }
+      }
+
+      // Need more data from stream
+      try {
+        final chunk = await stream.read();
+        if (chunk.isEmpty) {
+          return null;
+        }
+        buffer.add(chunk);
+      } catch (e) {
+        if (accumulated.isNotEmpty) {
+          // Stream closed with data in buffer — try parsing as-is
+          // (fallback for Dart-to-Dart which may not use length framing yet)
+          buffer.clear();
+          return Uint8List.fromList(accumulated);
+        }
+        rethrow;
+      }
+    }
   }
 
   void _mergeIdentify(Identify target, Identify source) {
