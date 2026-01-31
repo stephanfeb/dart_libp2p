@@ -871,7 +871,12 @@ func runDHTFindProviders(targetStr, cidStr string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
+	kadDHT, err := dht.New(ctx, h,
+		dht.Mode(dht.ModeClient),
+		dht.AddressFilter(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			return addrs // Accept all addresses including loopback
+		}),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "DHT error: %v\n", err)
 		os.Exit(1)
@@ -901,6 +906,7 @@ func runDHTFindProviders(targetStr, cidStr string) {
 		os.Exit(1)
 	}
 
+	fmt.Fprintf(os.Stderr, "Searching for providers of CID: %s (multihash: %s)\n", c, c.Hash())
 	provChan := kadDHT.FindProvidersAsync(ctx, c, 20)
 	found := false
 	for prov := range provChan {
