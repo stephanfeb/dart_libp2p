@@ -253,5 +253,49 @@ void main() {
       expect(result.stdout.toString(), contains('Ping successful'));
       print('Go → Dart ping via BasicHost verified');
     }, timeout: Timeout(Duration(seconds: 30)));
+
+    test('Go identify push updates Dart peerstore', () async {
+      final keyPair = await crypto_ed25519.generateEd25519KeyPair();
+      final dartPeerId = await PeerId.fromPublicKey(keyPair.publicKey);
+
+      dartHost = await createHost(keyPair,
+          listenAddrs: [MultiAddr('/ip4/127.0.0.1/tcp/0')]);
+
+      if (dartHost!.addrs.isEmpty) {
+        throw Exception('Dart host failed to listen on any address');
+      }
+
+      final dartAddr = dartHost!.addrs.firstWhere(
+        (addr) => addr.toString().contains('/tcp/'),
+        orElse: () => throw Exception('Dart host not listening on TCP'),
+      );
+      print('Dart host listening on: $dartAddr');
+
+      final targetAddr = '$dartAddr/p2p/${dartPeerId.toBase58()}';
+      print('Go push-test target: $targetAddr');
+
+      // Go connects, identifies, then registers /test/push-verify/1.0.0
+      // which triggers an identify push to Dart
+      final result = await goProcess.runPushTest(targetAddr);
+      print('Go push-test stdout: ${result.stdout}');
+      print('Go push-test stderr: ${result.stderr}');
+
+      expect(result.exitCode, 0, reason: 'Go push-test should succeed');
+      expect(result.stdout.toString(), contains('Push test complete'));
+
+      // Extract Go peer ID from stdout
+      final stdout = result.stdout.toString();
+      final peerIdMatch = RegExp(r'PeerID: (\S+)').firstMatch(stdout);
+      expect(peerIdMatch, isNotNull, reason: 'Should find PeerID in output');
+      final goPeerId = PeerId.fromString(peerIdMatch!.group(1)!);
+
+      // Verify Dart's peerstore received the pushed protocol
+      final protocols =
+          await dartHost!.peerStore.protoBook.getProtocols(goPeerId);
+      print('Go peer protocols after push: $protocols');
+      expect(protocols, contains('/test/push-verify/1.0.0'),
+          reason: 'Identify push should have added the new protocol to peerstore');
+      print('Go → Dart identify push verified');
+    }, timeout: Timeout(Duration(seconds: 30)));
   });
 }

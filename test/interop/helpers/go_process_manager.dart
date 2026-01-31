@@ -98,6 +98,18 @@ class GoProcessManager {
     );
   }
 
+  /// Runs the Go peer in push-test mode.
+  /// Connects to target, completes identify, then registers a new protocol
+  /// to trigger an identify push notification.
+  Future<ProcessResult> runPushTest(String targetMultiaddr) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=push-test', '--target=$targetMultiaddr'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 30));
+  }
+
   /// Runs the Go peer in echo-client mode.
   Future<ProcessResult> runEchoClient(String targetMultiaddr, String message) async {
     return Process.run(

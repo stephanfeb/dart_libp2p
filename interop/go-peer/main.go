@@ -28,7 +28,7 @@ import (
 const echoProtocol = "/echo/1.0.0"
 
 func main() {
-	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client")
+	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
 	message := flag.String("message", "hello from go-libp2p", "Message to send in echo-client mode")
@@ -45,6 +45,8 @@ func main() {
 		runEchoServer(*port)
 	case "echo-client":
 		runEchoClient(*target, *message)
+	case "push-test":
+		runPushTest(*target)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -263,6 +265,52 @@ func runEchoServer(port int) {
 
 	printHostInfo(h)
 	waitForShutdown()
+}
+
+// push-test mode: connect to target, wait for identify, then register a new
+// protocol handler to trigger an identify push notification to the remote peer.
+func runPushTest(targetStr string) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+
+	h, err := createHost(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("PeerID: %s\n", h.ID())
+	fmt.Println("Connected")
+
+	// Wait for identify to complete
+	time.Sleep(2 * time.Second)
+
+	// Register a new protocol handler — this triggers identify push
+	const pushTestProto = "/test/push-verify/1.0.0"
+	h.SetStreamHandler(protocol.ID(pushTestProto), func(s network.Stream) {
+		s.Close()
+	})
+	fmt.Printf("Registered protocol: %s\n", pushTestProto)
+
+	// Give the push time to propagate
+	time.Sleep(3 * time.Second)
+	fmt.Println("Push test complete")
 }
 
 // echo-client mode: connect and send a message
