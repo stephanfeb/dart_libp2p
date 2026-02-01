@@ -24,6 +24,7 @@ import (
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	relayv2client "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	udxtransport "github.com/stephanfeb/go-libp2p-udx-transport"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/ipfs/go-cid"
@@ -44,21 +45,22 @@ func main() {
 	pkSelf := flag.Bool("pk-self", false, "For dht-put-value: store own public key as /pk/<self> record")
 	pkPeer := flag.String("pk-peer", "", "PeerId (base58) to construct /pk/<raw-id> key for get-value")
 	topic := flag.String("topic", "test-topic", "PubSub topic name")
+	transport := flag.String("transport", "tcp", "Transport: tcp or udx")
 	flag.Parse()
 
 	switch *mode {
 	case "server":
-		runServer(*port)
+		runServer(*port, *transport)
 	case "client":
-		runClient(*target)
+		runClient(*target, *transport)
 	case "ping":
-		runPing(*target)
+		runPing(*target, *transport)
 	case "echo-server":
-		runEchoServer(*port)
+		runEchoServer(*port, *transport)
 	case "echo-client":
-		runEchoClient(*target, *message)
+		runEchoClient(*target, *message, *transport)
 	case "push-test":
-		runPushTest(*target)
+		runPushTest(*target, *transport)
 	case "relay":
 		runRelay(*port)
 	case "relay-echo-server":
@@ -85,36 +87,51 @@ func main() {
 	}
 }
 
-func createHost(port int) (host.Host, error) {
+func transportOpts(transport string, port int) []libp2p.Option {
+	if transport == "udx" {
+		return []libp2p.Option{
+			libp2p.NoTransports,
+			libp2p.Transport(udxtransport.NewTransport),
+			libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/127.0.0.1/udp/%d/udx", port)),
+			libp2p.ResourceManager(&network.NullResourceManager{}),
+		}
+	}
+	return []libp2p.Option{
+		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port)),
+	}
+}
+
+func createHost(port int, transport string) (host.Host, error) {
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
 	}
 
-	return libp2p.New(
+	opts := []libp2p.Option{
 		libp2p.Identity(priv),
-		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port)),
-		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
 		libp2p.DisableRelay(),
-	)
+	}
+	opts = append(opts, transportOpts(transport, port)...)
+	return libp2p.New(opts...)
 }
 
-func createHostWithRelay(port int) (host.Host, error) {
+func createHostWithRelay(port int, transport string) (host.Host, error) {
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
 	}
 
-	return libp2p.New(
+	opts := []libp2p.Option{
 		libp2p.Identity(priv),
-		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port)),
-		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport),
 		libp2p.EnableRelay(),
-	)
+	}
+	opts = append(opts, transportOpts(transport, port)...)
+	return libp2p.New(opts...)
 }
 
 func printHostInfo(h host.Host) {
@@ -141,8 +158,8 @@ func waitForShutdown() {
 }
 
 // server mode: listen and accept connections, handle ping and identify automatically
-func runServer(port int) {
-	h, err := createHost(port)
+func runServer(port int, transport string) {
+	h, err := createHost(port, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -185,13 +202,13 @@ func runServer(port int) {
 }
 
 // client mode: connect to target peer
-func runClient(targetStr string) {
+func runClient(targetStr, transport string) {
 	if targetStr == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target required")
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -216,13 +233,13 @@ func runClient(targetStr string) {
 }
 
 // ping mode: connect and send pings
-func runPing(targetStr string) {
+func runPing(targetStr, transport string) {
 	if targetStr == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target required")
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -284,8 +301,8 @@ func runPing(targetStr string) {
 }
 
 // echo-server mode: listen and echo data back
-func runEchoServer(port int) {
-	h, err := createHost(port)
+func runEchoServer(port int, transport string) {
+	h, err := createHost(port, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -317,13 +334,13 @@ func runEchoServer(port int) {
 
 // push-test mode: connect to target, wait for identify, then register a new
 // protocol handler to trigger an identify push notification to the remote peer.
-func runPushTest(targetStr string) {
+func runPushTest(targetStr, transport string) {
 	if targetStr == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target required")
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -363,7 +380,7 @@ func runPushTest(targetStr string) {
 
 // relay mode: run a circuit relay v2 service
 func runRelay(port int) {
-	h, err := createHostWithRelay(port)
+	h, err := createHostWithRelay(port, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -398,7 +415,7 @@ func runRelayEchoServer(relayAddrStr string) {
 		os.Exit(1)
 	}
 
-	h, err := createHostWithRelay(0)
+	h, err := createHostWithRelay(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -509,7 +526,7 @@ func runRelayEchoClient(targetStr, message string) {
 		os.Exit(1)
 	}
 
-	h, err := createHostWithRelay(0)
+	h, err := createHostWithRelay(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -572,13 +589,13 @@ func runRelayEchoClient(targetStr, message string) {
 }
 
 // echo-client mode: connect and send a message
-func runEchoClient(targetStr, message string) {
+func runEchoClient(targetStr, message, transport string) {
 	if targetStr == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target required")
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -629,7 +646,7 @@ func runEchoClient(targetStr, message string) {
 
 // dht-server mode: run a Kademlia DHT server
 func runDHTServer(port int) {
-	h, err := createHost(port)
+	h, err := createHost(port, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -681,7 +698,7 @@ func runDHTPutValue(targetStr, key, value string, pkSelf bool) {
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -751,7 +768,7 @@ func runDHTGetValue(targetStr, key, pkPeerStr string) {
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -813,7 +830,7 @@ func runDHTProvide(targetStr, cidStr string) {
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -867,7 +884,7 @@ func runDHTFindProviders(targetStr, cidStr string) {
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -956,7 +973,7 @@ func (t *debugTracer) UndeliverableMessage(msg *pubsub.Message) {
 
 // pubsub-server mode: create GossipSub, subscribe to topic, print received messages
 func runPubSubServer(port int, topicName string) {
-	h, err := createHost(port)
+	h, err := createHost(port, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -1025,7 +1042,7 @@ func runPubSubClient(targetStr, topicName, message string) {
 		os.Exit(1)
 	}
 
-	h, err := createHost(0)
+	h, err := createHost(0, "tcp")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

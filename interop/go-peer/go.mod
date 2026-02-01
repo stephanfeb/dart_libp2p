@@ -2,12 +2,18 @@ module dart-libp2p-interop
 
 go 1.24.12
 
+replace (
+	github.com/stephanfeb/go-libp2p-udx-transport => ../../../go-libp2p-udx-transport
+	github.com/stephanfeb/go-udx => ../../../go-udx
+)
+
 require (
 	github.com/ipfs/go-cid v0.6.0
 	github.com/libp2p/go-libp2p v0.47.0
 	github.com/libp2p/go-libp2p-kad-dht v0.37.1
 	github.com/libp2p/go-libp2p-pubsub v0.15.0
 	github.com/multiformats/go-multiaddr v0.16.1
+	github.com/stephanfeb/go-libp2p-udx-transport v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -93,6 +99,7 @@ require (
 	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/quic-go/webtransport-go v0.10.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/stephanfeb/go-udx v0.0.0-00010101000000-000000000000 // indirect
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

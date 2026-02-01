@@ -54,13 +54,13 @@ class GoProcessManager {
   }
 
   /// Starts the Go peer in server mode on a random port.
-  Future<void> startServer({int port = 0}) async {
-    await _start(['--mode=server', '--port=$port']);
+  Future<void> startServer({int port = 0, String transport = 'tcp'}) async {
+    await _start(['--mode=server', '--port=$port', '--transport=$transport']);
   }
 
   /// Starts the Go peer in echo-server mode.
-  Future<void> startEchoServer({int port = 0}) async {
-    await _start(['--mode=echo-server', '--port=$port']);
+  Future<void> startEchoServer({int port = 0, String transport = 'tcp'}) async {
+    await _start(['--mode=echo-server', '--port=$port', '--transport=$transport']);
   }
 
   Future<void> _start(List<String> args) async {
@@ -91,28 +91,28 @@ class GoProcessManager {
   }
 
   /// Runs the Go peer in client mode (connects and exits).
-  Future<ProcessResult> runClient(String targetMultiaddr) async {
+  Future<ProcessResult> runClient(String targetMultiaddr, {String transport = 'tcp'}) async {
     return Process.run(
       binaryPath,
-      ['--mode=client', '--target=$targetMultiaddr'],
+      ['--mode=client', '--target=$targetMultiaddr', '--transport=$transport'],
     );
   }
 
   /// Runs the Go peer in ping mode.
-  Future<ProcessResult> runPing(String targetMultiaddr) async {
+  Future<ProcessResult> runPing(String targetMultiaddr, {String transport = 'tcp'}) async {
     return Process.run(
       binaryPath,
-      ['--mode=ping', '--target=$targetMultiaddr'],
+      ['--mode=ping', '--target=$targetMultiaddr', '--transport=$transport'],
     );
   }
 
   /// Runs the Go peer in push-test mode.
   /// Connects to target, completes identify, then registers a new protocol
   /// to trigger an identify push notification.
-  Future<ProcessResult> runPushTest(String targetMultiaddr) async {
+  Future<ProcessResult> runPushTest(String targetMultiaddr, {String transport = 'tcp'}) async {
     return Process.run(
       binaryPath,
-      ['--mode=push-test', '--target=$targetMultiaddr'],
+      ['--mode=push-test', '--target=$targetMultiaddr', '--transport=$transport'],
       stdoutEncoding: utf8,
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 30));
@@ -220,10 +220,10 @@ class GoProcessManager {
   }
 
   /// Runs the Go peer in echo-client mode.
-  Future<ProcessResult> runEchoClient(String targetMultiaddr, String message) async {
+  Future<ProcessResult> runEchoClient(String targetMultiaddr, String message, {String transport = 'tcp'}) async {
     return Process.run(
       binaryPath,
-      ['--mode=echo-client', '--target=$targetMultiaddr', '--message=$message'],
+      ['--mode=echo-client', '--target=$targetMultiaddr', '--message=$message', '--transport=$transport'],
     );
   }
 
