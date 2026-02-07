@@ -235,10 +235,16 @@ class MultistreamMuxer implements ProtocolSwitch {
 
   /// Injects any leftover bytes from multistream negotiation back into the stream's
   /// read buffer, so that application-level reads get the correct data.
+  ///
+  /// If injection fails (stream type does not support pushData), the leftover
+  /// is retained in [_leftoverMap] so the caller can retrieve it via [drainLeftover].
   void _injectLeftover(P2PStream<dynamic> stream) {
     final streamId = stream.id();
-    final leftover = _leftoverMap.remove(streamId);
-    if (leftover == null || leftover.isEmpty) return;
+    final leftover = _leftoverMap[streamId];
+    if (leftover == null || leftover.isEmpty) {
+      _leftoverMap.remove(streamId);
+      return;
+    }
 
     _log.fine('[multistreamMuxer] Injecting ${leftover.length} leftover bytes back into stream $streamId');
     // Navigate through SwarmStream wrapper to get the underlying YamuxStream
@@ -249,9 +255,27 @@ class MultistreamMuxer implements ProtocolSwitch {
     }
     if (target is YamuxStream) {
       target.pushData(leftover);
+      _leftoverMap.remove(streamId); // Only remove after successful injection
     } else {
-      _log.warning('[multistreamMuxer] Cannot inject leftover bytes: stream type ${target.runtimeType} does not support pushData');
+      // Retain in map so caller can retrieve via drainLeftover()
+      _log.warning('[multistreamMuxer] Cannot inject leftover bytes into stream type ${target.runtimeType}. '
+          'Retaining ${leftover.length} bytes in leftoverMap for drainLeftover().');
     }
+  }
+
+  /// Drains any leftover bytes accumulated during multistream negotiation
+  /// for the given [streamId]. Returns null if no leftover exists.
+  ///
+  /// Used by the connection upgrader to recover bytes that were read during
+  /// multistream-select but belong to the next protocol layer (e.g., Noise
+  /// handshake bytes that arrived in the same transport chunk as the final
+  /// multistream negotiation message).
+  Uint8List? drainLeftover(String streamId) {
+    final leftover = _leftoverMap.remove(streamId);
+    if (leftover != null && leftover.isNotEmpty) {
+      _log.fine('[multistreamMuxer] Drained ${leftover.length} leftover bytes for stream $streamId');
+    }
+    return leftover;
   }
 
   /// Selects one of the given protocols with the remote peer.

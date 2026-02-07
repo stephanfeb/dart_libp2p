@@ -65,9 +65,17 @@ class NoiseSecurity implements SecurityProtocol {
     final lengthBytes = await conn.read(2);
     if (lengthBytes.length < 2) throw NoiseProtocolException('Failed to read handshake message length prefix');
     final length = (lengthBytes[0] << 8) | lengthBytes[1];
+    if (length > 65535) {
+      final hexPrefix = lengthBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+      _log.severe('Noise handshake framing desync: length prefix bytes [0x$hexPrefix] decoded to $length (> 65535). '
+          'This likely means the multistream-select leftover bytes were lost and Noise is reading raw key material as a length prefix.');
+    }
     if (length == 0) return Uint8List(0);
     final data = await conn.read(length);
     if (data.length < length) {
+      final hexPrefix = lengthBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+      _log.severe('Noise short read: length prefix [0x$hexPrefix] = $length, but only got ${data.length} bytes. '
+          'Probable framing desync from lost multistream leftover bytes.');
       throw NoiseProtocolException('Short read on handshake message: expected $length, got ${data.length}');
     }
     return data;

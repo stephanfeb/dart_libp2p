@@ -218,6 +218,21 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     }
   }
 
+  /// Pushes data to the front of the read buffer so the next read() returns it.
+  /// Used to inject leftover bytes from multistream-select negotiation back
+  /// into the stream before the Noise handshake reads from this connection.
+  void pushBack(Uint8List data) {
+    if (data.isEmpty) return;
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] pushBack: ${data.length} bytes pushed to front of read buffer');
+    if (_pendingReadCompleter != null && !_pendingReadCompleter!.isCompleted) {
+      final completerToComplete = _pendingReadCompleter;
+      _pendingReadCompleter = null;
+      completerToComplete!.complete(data);
+    } else {
+      _readBuffer.insert(0, data);
+    }
+  }
+
   @override
   Future<void> write(List<int> data) async {
     _logger.fine('[UDXP2PStreamAdapter ${id()}] write called with ${data.length} bytes. isClosed: $_isClosed, isWriteClosed: $_isWriteClosed');

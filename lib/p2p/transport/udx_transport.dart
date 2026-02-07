@@ -872,6 +872,15 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     return result;
   }
 
+  /// Pushes data back to the front of the initial stream's read buffer.
+  /// Used to inject leftover bytes from multistream-select negotiation
+  /// before the Noise handshake reads from this connection.
+  void pushBack(Uint8List data) {
+    if (data.isEmpty) return;
+    _logger.fine('[UDXSessionConn $id] pushBack: ${data.length} bytes pushed back to initialP2PStream');
+    initialP2PStream.pushBack(data);
+  }
+
   @override
   Future<void> write(Uint8List data) async {
     // For negotiation purposes, write to the initial stream.

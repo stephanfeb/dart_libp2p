@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data'; // Added for Uint8List
 
+import 'package:logging/logging.dart';
+
 import '../../core/multiaddr.dart';
 import '../../core/network/connection_context.dart';
 import '../../core/network/transport_conn.dart';
@@ -27,6 +29,10 @@ import '../../core/crypto/keys.dart'; // For PublicKey
 // Corrected path for multiaddr protocol constants
 import '../../p2p/multiaddr/protocol.dart' as multiaddr_protocol;
 import '../protocol/circuitv2/client/conn.dart' show RelayedConn;
+import './udx_transport.dart' show UDXSessionConn;
+import './tcp_connection.dart' show TCPConnection;
+
+final _log = Logger('BasicUpgrader');
 
 
 // --- Helper: NegotiationStreamWrapper ---
@@ -251,6 +257,24 @@ class BasicUpgrader implements Upgrader {
 
   BasicUpgrader({required this.resourceManager});
 
+  /// Drains any leftover bytes from multistream negotiation and pushes them
+  /// back into the transport connection's read buffer. This prevents data loss
+  /// when multistream-select reads more bytes than needed (e.g., when protocol
+  /// negotiation and Noise handshake data arrive in the same transport chunk).
+  static void _drainAndPushBack(MultistreamMuxer mss, String streamId, dynamic connection) {
+    final leftover = mss.drainLeftover(streamId);
+    if (leftover == null || leftover.isEmpty) return;
+
+    _log.info('[BasicUpgrader] Draining ${leftover.length} leftover bytes from multistream and pushing back to connection');
+    if (connection is UDXSessionConn) {
+      connection.pushBack(leftover);
+    } else if (connection is TCPConnection) {
+      connection.pushBack(leftover);
+    } else {
+      _log.warning('[BasicUpgrader] Cannot push back ${leftover.length} leftover bytes to connection type ${connection.runtimeType}');
+    }
+  }
+
   @override
   Future<Conn> upgradeOutbound({
     required TransportConn connection,
@@ -278,11 +302,15 @@ class BasicUpgrader implements Upgrader {
 
       final chosenSecurityIdStr = await mssForSecurity.selectOneOf(negotiationSecStream, securityProtoIDs);
 
+      // Drain any leftover bytes from multistream negotiation and push them
+      // back into the raw connection before Noise handshake reads from it.
+      _drainAndPushBack(mssForSecurity, negotiationSecStream.id(), connection);
+
       if (chosenSecurityIdStr == null) {
         await connection.close();
         throw Exception("Failed to negotiate security protocol with $remotePeerId at $remoteAddr");
       }
-      final chosenSecurityId = chosenSecurityIdStr; 
+      final chosenSecurityId = chosenSecurityIdStr;
 
       final securityModule = config.securityProtocols.firstWhere(
         (s) => s.protocolId == chosenSecurityId,
@@ -295,11 +323,14 @@ class BasicUpgrader implements Upgrader {
       final negotiationMuxStream = NegotiationStreamWrapper(securedConn, '/mux-negotiator');
       final chosenMuxerIdStr = await mssForMuxers.selectOneOf(negotiationMuxStream, muxerProtoIDs);
 
+      // Drain muxer negotiation leftover (defensive; less likely over SecuredConnection)
+      _drainAndPushBack(mssForMuxers, negotiationMuxStream.id(), securedConn);
+
       if (chosenMuxerIdStr == null) {
         await securedConn.close();
         throw Exception("Failed to negotiate stream multiplexer with ${securedConn.remotePeer} at $remoteAddr");
       }
-      final chosenMuxerId = chosenMuxerIdStr; 
+      final chosenMuxerId = chosenMuxerIdStr;
 
       final muxerEntry = config.muxers.firstWhere(
         (m) => m.id == chosenMuxerId,
@@ -307,7 +338,7 @@ class BasicUpgrader implements Upgrader {
       );
 
       final p2p_mux.Multiplexer p2pMultiplexerInstance = muxerEntry.muxerFactory(
-        securedConn, 
+        securedConn,
         true, // isClient = true
       );
       
@@ -380,6 +411,11 @@ class BasicUpgrader implements Upgrader {
         });
       }
       await mssForSecurity.handle(negotiationSecStream);
+
+      // Drain any leftover bytes from multistream negotiation and push them
+      // back into the raw connection before Noise handshake reads from it.
+      _drainAndPushBack(mssForSecurity, negotiationSecStream.id(), connection);
+
       final chosenSecurityId = await securityProtoCompleter.future;
 
       final securityModule = config.securityProtocols.firstWhere(
@@ -404,6 +440,10 @@ class BasicUpgrader implements Upgrader {
       }
 
       await mssForMuxers.handle(negotiationMuxStream);
+
+      // Drain muxer negotiation leftover (defensive; less likely over SecuredConnection)
+      _drainAndPushBack(mssForMuxers, negotiationMuxStream.id(), securedConn);
+
       final chosenMuxerId = await muxerProtoCompleter.future;
 
       final muxerEntry = config.muxers.firstWhere(
