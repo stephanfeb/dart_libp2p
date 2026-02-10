@@ -162,9 +162,9 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
       try {
         // Wait for the existing read to complete (it will populate the buffer)
         await _pendingReadCompleter!.future.timeout(
-          const Duration(seconds: 35),
+          const Duration(seconds: 120),
           onTimeout: () {
-            throw TimeoutException('Timeout waiting for existing read on UDXP2PStreamAdapter', const Duration(seconds: 35));
+            throw TimeoutException('Timeout waiting for existing read on UDXP2PStreamAdapter', const Duration(seconds: 120));
           },
         );
       } catch (e) {
@@ -183,17 +183,11 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _pendingReadCompleter = Completer<Uint8List>();
 
     try {
-      final newData = await _pendingReadCompleter!.future.timeout(
-          const Duration(seconds: 35),
-          onTimeout: () {
-            final subscriptionActiveAtTimeout = _udxStreamDataSubscription != null;
-            _logger.warning('[UDXP2PStreamAdapter ${id()}] ⚠️ Read TIMEOUT after 35 seconds! No data arrived. isClosed=$_isClosed, subscriptionActive=$subscriptionActiveAtTimeout');
-            if (_pendingReadCompleter?.isCompleted == false) {
-              _pendingReadCompleter!.completeError(TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35)));
-            }
-            throw TimeoutException('Read timeout on UDXP2PStreamAdapter', const Duration(seconds: 35));
-          }
-      );
+      // No timeout here — yamux's keepalive (10s PING interval, 30s timeout/ping,
+      // close after 5 timeouts) handles liveness detection. A hardcoded timeout
+      // here competes with and pre-empts yamux's mechanism, killing long-lived
+      // transport connections prematurely.
+      final newData = await _pendingReadCompleter!.future;
 
       _logger.fine('[UDXP2PStreamAdapter ${id()}] ✅ pendingReadCompleter COMPLETED with ${newData.length} bytes');
       // Clear the completer after successful read

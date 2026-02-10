@@ -447,17 +447,8 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _initialStreamCloseSubscription = _initialStream.closeEvents.listen(
       (_) {
         _logger.fine('[UDXSessionConn $id] Initial stream closed event. Active streams: ${_activeStreams.length}');
-        
-        // Remove the initial stream from active streams
         _activeStreams.remove(_initialStream.id);
-        
-        // Only close the session if there are no other active streams
-        if (_activeStreams.isEmpty && !_isClosing && !_isClosed) {
-          _logger.fine('[UDXSessionConn $id] No other active streams. Closing session.');
-          close();
-        } else {
-          _logger.fine('[UDXSessionConn $id] Other streams still active (${_activeStreams.length}). Keeping session open.');
-        }
+        // Do NOT auto-close — the multiplexer (yamux) above controls lifecycle.
       },
       onError: (err, s) { 
         _logger.fine('[UDXSessionConn $id] Initial stream error event: $err. Closing session with error.');
@@ -753,12 +744,8 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _logger.fine('[UDXSessionConn $id] Stream $streamId closed. Active streams before removal: ${_activeStreams.length}');
     _activeStreams.remove(streamId);
     _logger.fine('[UDXSessionConn $id] Active streams after removal: ${_activeStreams.length}');
-    
-    // If no more active streams and we're not already closing, close the session
-    if (_activeStreams.isEmpty && !_isClosing && !_isClosed) {
-      _logger.fine('[UDXSessionConn $id] No active streams remaining. Closing session.');
-      close();
-    }
+    // Do NOT auto-close the session when streams drop to zero.
+    // The multiplexer (yamux) above controls connection lifecycle.
   }
 
   @override

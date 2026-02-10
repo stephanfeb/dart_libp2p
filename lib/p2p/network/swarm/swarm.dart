@@ -761,20 +761,14 @@ class Swarm implements Network {
             }
           }
           
-          // Remove from connections map without calling full removeConnection to avoid deadlock
-          final conns = _connections[peerIDStr] ?? [];
-          conns.remove(staleConn);
-          if (conns.isEmpty) {
-            _connections.remove(peerIDStr);
+          // Properly remove and close the stale connection so notifiees
+          // (identify, etc.) are informed and the old accept loop terminates.
+          try {
+            await removeConnection(staleConn);
+            await staleConn.close();
+          } catch (e) {
+            _logger.warning('Swarm.dialPeer: Error cleaning up stale connection ${staleConn.id}: $e');
           }
-          // Schedule cleanup without awaiting to avoid blocking
-          Future.microtask(() async {
-            try {
-              await staleConn.close();
-            } catch (e) {
-              _logger.warning('Swarm.dialPeer: Error closing stale connection ${staleConn.id}: $e');
-            }
-          });
         }
       }
       
