@@ -427,52 +427,56 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
     if (_closed || !canCreateStream) {
       _log.warning('$_logPrefix Cannot accept new stream ID ${frame.streamId}. Session closed: $_closed, Can create: $canCreateStream. Sending RESET.');
+      // Fire-and-forget: don't block read loop on rejected stream RST send.
       final rstFrame = YamuxFrame.reset(frame.streamId);
-      await _sendFrame(rstFrame).catchError((e) {
+      _sendFrame(rstFrame).catchError((e) {
         _log.warning('$_logPrefix Error sending RESET for unaccepted stream ${frame.streamId}: $e');
       });
       return;
     }
     
-    final ackFrame = YamuxFrame.synAckStream(frame.streamId);
-    try {
-      await _sendFrame(ackFrame); 
-    } catch (e) {
-      _log.severe('$_logPrefix _handleNewStream: FAILED to send SYN-ACK for stream ID ${frame.streamId}: $e. Aborting stream setup.'); // More specific message
-      return; 
-    }
-
+    // Create the stream FIRST so that subsequent frames for this stream ID
+    // (which arrive on the read loop) can be dispatched immediately.
     final initialWindow = _config.initialStreamWindowSize;
     final stream = YamuxStream(
       id: frame.streamId,
-      protocol: '', 
+      protocol: '',
       metadata: {},
-      initialWindowSize: initialWindow, 
+      initialWindowSize: initialWindow,
       sendFrame: _sendFrame,
-      parentConn: this, // Added parentConn
-      remotePeer: remotePeer, // For metrics reporting
-      maxFrameSize: _config.maxFrameSize, // Limit frame size for resilience
-      metricsObserver: metricsObserver, // For metrics reporting
+      parentConn: this,
+      remotePeer: remotePeer,
+      maxFrameSize: _config.maxFrameSize,
+      metricsObserver: metricsObserver,
       logPrefix: "$_logPrefix StreamID=${frame.streamId}",
     );
 
     _streams[frame.streamId] = stream;
-    
-    // DEBUG: Add session-level stream tracking for inbound streams
 
+    // Fire-and-forget SYN-ACK: don't block the read loop waiting for the
+    // write to complete. If the UDX congestion controller is stalled,
+    // _sendFrame() can block for up to 30s. During that time, no frames
+    // would be processed — the remote's multistream-select would timeout
+    // (10s) and the connection would appear dead. The yamux write lock
+    // still serializes sends, preserving Noise nonce ordering.
+    _sendFrame(YamuxFrame.synAckStream(frame.streamId)).catchError((e) {
+      _log.warning('$_logPrefix Error sending SYN-ACK for stream ${frame.streamId}: $e');
+    });
 
     try {
-      await stream.open(); 
+      // open() sends initial window update — also fire-and-forget via
+      // openIncoming() which doesn't block on the send.
+      await stream.openIncoming();
 
       // Notify metrics observer of incoming stream opened
       metricsObserver?.onStreamOpened(remotePeer, frame.streamId, stream.protocol());
-      
+
       // Check if there's a pending acceptStream() call waiting for a stream
       if (_pendingAcceptStreamCompleter != null && !_pendingAcceptStreamCompleter!.isCompleted) {
         _pendingAcceptStreamCompleter!.complete(stream);
         _pendingAcceptStreamCompleter = null;
       }
-      
+
       // Always add to controller for broadcast stream listeners
       _incomingStreamsController.add(stream);
 
@@ -483,11 +487,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
           stream.reset().catchError((_) {});
         });
       }
-    } catch (e, st) { // Added stackTrace
-      _log.severe('$_logPrefix _handleNewStream: Error during local stream open or handler setup for ID ${frame.streamId}: $e', st); // More specific message
+    } catch (e, st) {
+      _log.severe('$_logPrefix _handleNewStream: Error during local stream open or handler setup for ID ${frame.streamId}: $e', st);
       _streams.remove(frame.streamId);
-      await stream.reset().catchError((_) {}); 
-      // Do not rethrow here as it might kill the _readFrames loop unnecessarily if one stream handler fails.
+      await stream.reset().catchError((_) {});
     }
   }
 
@@ -506,9 +509,15 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       }
       return;
     }
-    // Ping request (SYN flag or no flags) — respond with ACK
+    // Ping request (SYN flag or no flags) — respond with ACK.
+    // Fire-and-forget: don't block the read loop waiting for the write to complete.
+    // The yamux write lock serializes the send with other writes, preserving order.
+    // If the send fails (e.g., congestion stall timeout), the remote will send
+    // another PING, and the stalled write will eventually complete or timeout.
     final response = YamuxFrame.ping(true, opaqueValue);
-    await _sendFrame(response);
+    _sendFrame(response).catchError((e) {
+      _log.warning('$_logPrefix Error sending PONG response for ping $opaqueValue: $e');
+    });
   }
 
   Future<void> _handleGoAway(YamuxFrame frame) async {

@@ -215,17 +215,34 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.warning('$_logPrefix open() called on stream not in init state: $_state');
       throw StateError('Stream is not in init state');
     }
-    // Note: Yamux doesn't have an explicit "open" frame like SYN.
-    // For an outbound stream, sending the first DATA frame effectively opens it.
-    // For an inbound stream, receiving the first DATA frame opens it.
-    // The session handles sending initial window updates when it establishes the stream.
     _state = YamuxStreamState.open;
-    _openedAt = DateTime.now(); // Record when stream opened for duration calculation
+    _openedAt = DateTime.now();
     _log.fine('$_logPrefix Stream opened. State: $_state. Sending initial window update.');
 
     // Send initial window update to the remote peer
     final frame = YamuxFrame.windowUpdate(streamId, _localReceiveWindow);
     await _sendFrame(frame);
+  }
+
+  /// Opens the stream for an incoming (remote-initiated) stream.
+  /// Unlike [open()], this fire-and-forgets the initial window update
+  /// so it doesn't block the yamux read loop when the UDX write path
+  /// is congestion-stalled.
+  Future<void> openIncoming() async {
+    _log.finer('$_logPrefix openIncoming() called. Current state: $_state');
+    if (_state != YamuxStreamState.init) {
+      _log.warning('$_logPrefix openIncoming() called on stream not in init state: $_state');
+      throw StateError('Stream is not in init state');
+    }
+    _state = YamuxStreamState.open;
+    _openedAt = DateTime.now();
+    _log.fine('$_logPrefix Stream opened (incoming). Sending initial window update (fire-and-forget).');
+
+    // Fire-and-forget: don't block the read loop on the window update send.
+    final frame = YamuxFrame.windowUpdate(streamId, _localReceiveWindow);
+    _sendFrame(frame).catchError((e) {
+      _log.warning('$_logPrefix Error sending initial window update: $e');
+    });
   }
 
   @override
@@ -822,11 +839,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // Respond to PING if it's a request (flag 0)
     if (frame.flags == 0) { // Ping request
       _log.finer('$_logPrefix Received PING request (flag 0), sending PONG (flag 1). Opaque value: ${frame.length}');
-      final pongFrame = YamuxFrame.ping(true, frame.length); 
-      await _sendFrame(pongFrame);
+      // Fire-and-forget: don't block the read loop on PONG send.
+      final pongFrame = YamuxFrame.ping(true, frame.length);
+      _sendFrame(pongFrame).catchError((e) {
+        _log.warning('$_logPrefix Error sending PONG response: $e');
+      });
     } else { // Ping response (flag 1)
       _log.finer('$_logPrefix Received PONG (PING response flag 1). Opaque value: ${frame.length}');
-      // TODO: Handle pong if we sent a ping and are waiting for response
     }
   }
 
@@ -882,13 +901,19 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _consumedBytesForLocalWindowUpdate += frame.data.length;
       _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-DATA-WINDOW] Consumed for local window: $_consumedBytesForLocalWindowUpdate');
       
-      // Send window update when threshold reached
+      // Send window update when threshold reached.
+      // Fire-and-forget: don't block the read loop waiting for the write to complete.
+      // Update local state immediately so we don't reject data that arrives
+      // while the window update send is queued on the write lock.
       if (_consumedBytesForLocalWindowUpdate >= _minWindowUpdateBytes) {
-        final updateFrame = YamuxFrame.windowUpdate(streamId, _consumedBytesForLocalWindowUpdate);
-        await _sendFrame(updateFrame);
-        _localReceiveWindow += _consumedBytesForLocalWindowUpdate; // We "give back" the window
-        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Sent window update for $_consumedBytesForLocalWindowUpdate bytes');
+        final bytesToUpdate = _consumedBytesForLocalWindowUpdate;
         _consumedBytesForLocalWindowUpdate = 0;
+        _localReceiveWindow += bytesToUpdate;
+        final updateFrame = YamuxFrame.windowUpdate(streamId, bytesToUpdate);
+        _sendFrame(updateFrame).catchError((e) {
+          _log.warning('$_logPrefix Error sending window update for $bytesToUpdate bytes: $e');
+        });
+        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Queued window update for $bytesToUpdate bytes');
       }
     }
 
