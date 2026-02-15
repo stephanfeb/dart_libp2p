@@ -3,14 +3,14 @@
 // Do not manually edit this file.
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
-import 'dart:async' as _i14;
+import 'dart:async' as _i15;
 import 'dart:typed_data' as _i21;
 
 import 'package:dart_libp2p/config/config.dart' as _i19;
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as _i6;
 import 'package:dart_libp2p/core/crypto/keys.dart' as _i23;
 import 'package:dart_libp2p/core/event/bus.dart' as _i7;
-import 'package:dart_libp2p/core/host/host.dart' as _i13;
+import 'package:dart_libp2p/core/host/host.dart' as _i14;
 import 'package:dart_libp2p/core/multiaddr.dart' as _i12;
 import 'package:dart_libp2p/core/network/conn.dart' as _i9;
 import 'package:dart_libp2p/core/network/context.dart' as _i16;
@@ -19,10 +19,11 @@ import 'package:dart_libp2p/core/network/notifiee.dart' as _i10;
 import 'package:dart_libp2p/core/network/rcmgr.dart' as _i11;
 import 'package:dart_libp2p/core/network/stream.dart' as _i8;
 import 'package:dart_libp2p/core/network/transport_conn.dart' as _i18;
-import 'package:dart_libp2p/core/peer/addr_info.dart' as _i15;
+import 'package:dart_libp2p/core/peer/addr_info.dart' as _i13;
 import 'package:dart_libp2p/core/peer/peer_id.dart' as _i2;
 import 'package:dart_libp2p/core/peerstore.dart' as _i3;
 import 'package:dart_libp2p/core/protocol/switch.dart' as _i5;
+import 'package:dart_libp2p/p2p/discovery/peer_info.dart' as _i24;
 import 'package:dart_libp2p/p2p/transport/connection_state.dart' as _i20;
 import 'package:dart_libp2p/p2p/transport/upgrader.dart' as _i17;
 import 'package:mockito/mockito.dart' as _i1;
@@ -194,10 +195,70 @@ class _FakeConnScope_14 extends _i1.SmartFake implements _i11.ConnScope {
         );
 }
 
+class _FakeAddrBook_15 extends _i1.SmartFake implements _i3.AddrBook {
+  _FakeAddrBook_15(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeKeyBook_16 extends _i1.SmartFake implements _i3.KeyBook {
+  _FakeKeyBook_16(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakePeerMetadata_17 extends _i1.SmartFake implements _i3.PeerMetadata {
+  _FakePeerMetadata_17(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeMetrics_18 extends _i1.SmartFake implements _i3.Metrics {
+  _FakeMetrics_18(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeProtoBook_19 extends _i1.SmartFake implements _i3.ProtoBook {
+  _FakeProtoBook_19(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeAddrInfo_20 extends _i1.SmartFake implements _i13.AddrInfo {
+  _FakeAddrInfo_20(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
 /// A class which mocks [Host].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockHost extends _i1.Mock implements _i13.Host {
+class MockHost extends _i1.Mock implements _i14.Host {
   MockHost() {
     _i1.throwOnMissingStub(this);
   }
@@ -263,8 +324,8 @@ class MockHost extends _i1.Mock implements _i13.Host {
       ) as _i7.EventBus);
 
   @override
-  _i14.Future<void> connect(
-    _i15.AddrInfo? pi, {
+  _i15.Future<void> connect(
+    _i13.AddrInfo? pi, {
     _i16.Context? context,
   }) =>
       (super.noSuchMethod(
@@ -273,9 +334,9 @@ class MockHost extends _i1.Mock implements _i13.Host {
           [pi],
           {#context: context},
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
   void setStreamHandler(
@@ -321,7 +382,7 @@ class MockHost extends _i1.Mock implements _i13.Host {
       );
 
   @override
-  _i14.Future<_i8.P2PStream<dynamic>> newStream(
+  _i15.Future<_i8.P2PStream<dynamic>> newStream(
     _i2.PeerId? p,
     List<String>? pids,
     _i16.Context? context,
@@ -336,7 +397,7 @@ class MockHost extends _i1.Mock implements _i13.Host {
           ],
         ),
         returnValue:
-            _i14.Future<_i8.P2PStream<dynamic>>.value(_FakeP2PStream_6<dynamic>(
+            _i15.Future<_i8.P2PStream<dynamic>>.value(_FakeP2PStream_6<dynamic>(
           this,
           Invocation.method(
             #newStream,
@@ -347,27 +408,27 @@ class MockHost extends _i1.Mock implements _i13.Host {
             ],
           ),
         )),
-      ) as _i14.Future<_i8.P2PStream<dynamic>>);
+      ) as _i15.Future<_i8.P2PStream<dynamic>>);
 
   @override
-  _i14.Future<void> close() => (super.noSuchMethod(
+  _i15.Future<void> close() => (super.noSuchMethod(
         Invocation.method(
           #close,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> start() => (super.noSuchMethod(
+  _i15.Future<void> start() => (super.noSuchMethod(
         Invocation.method(
           #start,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 }
 
 /// A class which mocks [Upgrader].
@@ -379,7 +440,7 @@ class MockUpgrader extends _i1.Mock implements _i17.Upgrader {
   }
 
   @override
-  _i14.Future<_i9.Conn> upgradeOutbound({
+  _i15.Future<_i9.Conn> upgradeOutbound({
     required _i18.TransportConn? connection,
     required _i2.PeerId? remotePeerId,
     required _i19.Config? config,
@@ -396,7 +457,7 @@ class MockUpgrader extends _i1.Mock implements _i17.Upgrader {
             #remoteAddr: remoteAddr,
           },
         ),
-        returnValue: _i14.Future<_i9.Conn>.value(_FakeConn_7(
+        returnValue: _i15.Future<_i9.Conn>.value(_FakeConn_7(
           this,
           Invocation.method(
             #upgradeOutbound,
@@ -409,10 +470,10 @@ class MockUpgrader extends _i1.Mock implements _i17.Upgrader {
             },
           ),
         )),
-      ) as _i14.Future<_i9.Conn>);
+      ) as _i15.Future<_i9.Conn>);
 
   @override
-  _i14.Future<_i9.Conn> upgradeInbound({
+  _i15.Future<_i9.Conn> upgradeInbound({
     required _i18.TransportConn? connection,
     required _i19.Config? config,
   }) =>
@@ -425,7 +486,7 @@ class MockUpgrader extends _i1.Mock implements _i17.Upgrader {
             #config: config,
           },
         ),
-        returnValue: _i14.Future<_i9.Conn>.value(_FakeConn_7(
+        returnValue: _i15.Future<_i9.Conn>.value(_FakeConn_7(
           this,
           Invocation.method(
             #upgradeInbound,
@@ -436,7 +497,7 @@ class MockUpgrader extends _i1.Mock implements _i17.Upgrader {
             },
           ),
         )),
-      ) as _i14.Future<_i9.Conn>);
+      ) as _i15.Future<_i9.Conn>);
 }
 
 /// A class which mocks [ConnManager].
@@ -516,14 +577,14 @@ class MockConnManager extends _i1.Mock implements _i6.ConnManager {
       )) as _i6.TagInfo?);
 
   @override
-  _i14.Future<void> trimOpenConns() => (super.noSuchMethod(
+  _i15.Future<void> trimOpenConns() => (super.noSuchMethod(
         Invocation.method(
           #trimOpenConns,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
   void protect(
@@ -581,14 +642,14 @@ class MockConnManager extends _i1.Mock implements _i6.ConnManager {
       )) as String?);
 
   @override
-  _i14.Future<void> close() => (super.noSuchMethod(
+  _i15.Future<void> close() => (super.noSuchMethod(
         Invocation.method(
           #close,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
   void registerConnection(_i18.TransportConn? conn) => super.noSuchMethod(
@@ -634,33 +695,33 @@ class MockConnManager extends _i1.Mock implements _i6.ConnManager {
       );
 
   @override
-  _i14.Future<void> dispose() => (super.noSuchMethod(
+  _i15.Future<void> dispose() => (super.noSuchMethod(
         Invocation.method(
           #dispose,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Stream<_i20.ConnectionStateChange>? getStateStream(
+  _i15.Stream<_i20.ConnectionStateChange>? getStateStream(
           _i18.TransportConn? conn) =>
       (super.noSuchMethod(Invocation.method(
         #getStateStream,
         [conn],
-      )) as _i14.Stream<_i20.ConnectionStateChange>?);
+      )) as _i15.Stream<_i20.ConnectionStateChange>?);
 
   @override
-  _i14.Future<void> closeConnection(_i18.TransportConn? conn) =>
+  _i15.Future<void> closeConnection(_i18.TransportConn? conn) =>
       (super.noSuchMethod(
         Invocation.method(
           #closeConnection,
           [conn],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 }
 
 /// A class which mocks [P2PStream].
@@ -732,14 +793,14 @@ class MockP2PStream<T> extends _i1.Mock implements _i8.P2PStream<T> {
       ) as String);
 
   @override
-  _i14.Future<void> setProtocol(String? id) => (super.noSuchMethod(
+  _i15.Future<void> setProtocol(String? id) => (super.noSuchMethod(
         Invocation.method(
           #setProtocol,
           [id],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
   _i8.StreamStats stat() => (super.noSuchMethod(
@@ -772,93 +833,93 @@ class MockP2PStream<T> extends _i1.Mock implements _i8.P2PStream<T> {
       ) as _i11.StreamManagementScope);
 
   @override
-  _i14.Future<_i21.Uint8List> read([int? maxLength]) => (super.noSuchMethod(
+  _i15.Future<_i21.Uint8List> read([int? maxLength]) => (super.noSuchMethod(
         Invocation.method(
           #read,
           [maxLength],
         ),
-        returnValue: _i14.Future<_i21.Uint8List>.value(_i21.Uint8List(0)),
-      ) as _i14.Future<_i21.Uint8List>);
+        returnValue: _i15.Future<_i21.Uint8List>.value(_i21.Uint8List(0)),
+      ) as _i15.Future<_i21.Uint8List>);
 
   @override
-  _i14.Future<void> write(_i21.Uint8List? data) => (super.noSuchMethod(
+  _i15.Future<void> write(_i21.Uint8List? data) => (super.noSuchMethod(
         Invocation.method(
           #write,
           [data],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> close() => (super.noSuchMethod(
+  _i15.Future<void> close() => (super.noSuchMethod(
         Invocation.method(
           #close,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> closeWrite() => (super.noSuchMethod(
+  _i15.Future<void> closeWrite() => (super.noSuchMethod(
         Invocation.method(
           #closeWrite,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> closeRead() => (super.noSuchMethod(
+  _i15.Future<void> closeRead() => (super.noSuchMethod(
         Invocation.method(
           #closeRead,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> reset() => (super.noSuchMethod(
+  _i15.Future<void> reset() => (super.noSuchMethod(
         Invocation.method(
           #reset,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> setDeadline(DateTime? time) => (super.noSuchMethod(
+  _i15.Future<void> setDeadline(DateTime? time) => (super.noSuchMethod(
         Invocation.method(
           #setDeadline,
           [time],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> setReadDeadline(DateTime? time) => (super.noSuchMethod(
+  _i15.Future<void> setReadDeadline(DateTime? time) => (super.noSuchMethod(
         Invocation.method(
           #setReadDeadline,
           [time],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<void> setWriteDeadline(DateTime? time) => (super.noSuchMethod(
+  _i15.Future<void> setWriteDeadline(DateTime? time) => (super.noSuchMethod(
         Invocation.method(
           #setWriteDeadline,
           [time],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 }
 
 /// A class which mocks [Conn].
@@ -879,11 +940,11 @@ class MockConn extends _i1.Mock implements _i9.Conn {
       ) as String);
 
   @override
-  _i14.Future<List<_i8.P2PStream<dynamic>>> get streams => (super.noSuchMethod(
+  _i15.Future<List<_i8.P2PStream<dynamic>>> get streams => (super.noSuchMethod(
         Invocation.getter(#streams),
-        returnValue: _i14.Future<List<_i8.P2PStream<dynamic>>>.value(
+        returnValue: _i15.Future<List<_i8.P2PStream<dynamic>>>.value(
             <_i8.P2PStream<dynamic>>[]),
-      ) as _i14.Future<List<_i8.P2PStream<dynamic>>>);
+      ) as _i15.Future<List<_i8.P2PStream<dynamic>>>);
 
   @override
   bool get isClosed => (super.noSuchMethod(
@@ -910,10 +971,10 @@ class MockConn extends _i1.Mock implements _i9.Conn {
       ) as _i2.PeerId);
 
   @override
-  _i14.Future<_i23.PublicKey?> get remotePublicKey => (super.noSuchMethod(
+  _i15.Future<_i23.PublicKey?> get remotePublicKey => (super.noSuchMethod(
         Invocation.getter(#remotePublicKey),
-        returnValue: _i14.Future<_i23.PublicKey?>.value(),
-      ) as _i14.Future<_i23.PublicKey?>);
+        returnValue: _i15.Future<_i23.PublicKey?>.value(),
+      ) as _i15.Future<_i23.PublicKey?>);
 
   @override
   _i9.ConnState get state => (super.noSuchMethod(
@@ -961,29 +1022,158 @@ class MockConn extends _i1.Mock implements _i9.Conn {
       ) as _i11.ConnScope);
 
   @override
-  _i14.Future<void> close() => (super.noSuchMethod(
+  _i15.Future<void> close() => (super.noSuchMethod(
         Invocation.method(
           #close,
           [],
         ),
-        returnValue: _i14.Future<void>.value(),
-        returnValueForMissingStub: _i14.Future<void>.value(),
-      ) as _i14.Future<void>);
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  _i14.Future<_i8.P2PStream<dynamic>> newStream(_i16.Context? context) =>
+  _i15.Future<_i8.P2PStream<dynamic>> newStream(_i16.Context? context) =>
       (super.noSuchMethod(
         Invocation.method(
           #newStream,
           [context],
         ),
         returnValue:
-            _i14.Future<_i8.P2PStream<dynamic>>.value(_FakeP2PStream_6<dynamic>(
+            _i15.Future<_i8.P2PStream<dynamic>>.value(_FakeP2PStream_6<dynamic>(
           this,
           Invocation.method(
             #newStream,
             [context],
           ),
         )),
-      ) as _i14.Future<_i8.P2PStream<dynamic>>);
+      ) as _i15.Future<_i8.P2PStream<dynamic>>);
+}
+
+/// A class which mocks [Peerstore].
+///
+/// See the documentation for Mockito's code generation for more information.
+class MockPeerstore extends _i1.Mock implements _i3.Peerstore {
+  MockPeerstore() {
+    _i1.throwOnMissingStub(this);
+  }
+
+  @override
+  _i3.AddrBook get addrBook => (super.noSuchMethod(
+        Invocation.getter(#addrBook),
+        returnValue: _FakeAddrBook_15(
+          this,
+          Invocation.getter(#addrBook),
+        ),
+      ) as _i3.AddrBook);
+
+  @override
+  _i3.KeyBook get keyBook => (super.noSuchMethod(
+        Invocation.getter(#keyBook),
+        returnValue: _FakeKeyBook_16(
+          this,
+          Invocation.getter(#keyBook),
+        ),
+      ) as _i3.KeyBook);
+
+  @override
+  _i3.PeerMetadata get peerMetadata => (super.noSuchMethod(
+        Invocation.getter(#peerMetadata),
+        returnValue: _FakePeerMetadata_17(
+          this,
+          Invocation.getter(#peerMetadata),
+        ),
+      ) as _i3.PeerMetadata);
+
+  @override
+  _i3.Metrics get metrics => (super.noSuchMethod(
+        Invocation.getter(#metrics),
+        returnValue: _FakeMetrics_18(
+          this,
+          Invocation.getter(#metrics),
+        ),
+      ) as _i3.Metrics);
+
+  @override
+  _i3.ProtoBook get protoBook => (super.noSuchMethod(
+        Invocation.getter(#protoBook),
+        returnValue: _FakeProtoBook_19(
+          this,
+          Invocation.getter(#protoBook),
+        ),
+      ) as _i3.ProtoBook);
+
+  @override
+  _i15.Future<void> close() => (super.noSuchMethod(
+        Invocation.method(
+          #close,
+          [],
+        ),
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
+
+  @override
+  _i15.Future<_i13.AddrInfo> peerInfo(_i2.PeerId? id) => (super.noSuchMethod(
+        Invocation.method(
+          #peerInfo,
+          [id],
+        ),
+        returnValue: _i15.Future<_i13.AddrInfo>.value(_FakeAddrInfo_20(
+          this,
+          Invocation.method(
+            #peerInfo,
+            [id],
+          ),
+        )),
+      ) as _i15.Future<_i13.AddrInfo>);
+
+  @override
+  _i15.Future<List<_i2.PeerId>> peers() => (super.noSuchMethod(
+        Invocation.method(
+          #peers,
+          [],
+        ),
+        returnValue: _i15.Future<List<_i2.PeerId>>.value(<_i2.PeerId>[]),
+      ) as _i15.Future<List<_i2.PeerId>>);
+
+  @override
+  _i15.Future<void> removePeer(_i2.PeerId? id) => (super.noSuchMethod(
+        Invocation.method(
+          #removePeer,
+          [id],
+        ),
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
+
+  @override
+  _i15.Future<void> addOrUpdatePeer(
+    _i2.PeerId? peerId, {
+    List<_i12.MultiAddr>? addrs,
+    List<String>? protocols,
+    Map<String, dynamic>? metadata,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #addOrUpdatePeer,
+          [peerId],
+          {
+            #addrs: addrs,
+            #protocols: protocols,
+            #metadata: metadata,
+          },
+        ),
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
+
+  @override
+  _i15.Future<_i24.PeerInfo?> getPeer(_i2.PeerId? peerId) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getPeer,
+          [peerId],
+        ),
+        returnValue: _i15.Future<_i24.PeerInfo?>.value(),
+      ) as _i15.Future<_i24.PeerInfo?>);
 }
