@@ -268,8 +268,11 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final frameBytesForParser = buffer.sublist(0, expectedTotalFrameLength);
         final frame = YamuxFrame.fromBytes(frameBytesForParser);
 
+        // [FRAME-TRACE] Log every frame received for diagnosing B→A data loss
+        _log.warning('$_logPrefix [FRAME-TRACE] #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
+
         final handleStartTime = DateTime.now();
-        
+
         try {
           await _handleFrame(frame);
           final handleDuration = DateTime.now().difference(handleStartTime);
