@@ -32,6 +32,7 @@ class AmbientAutoNATv2 {
   // State tracking
   Reachability _currentStatus = Reachability.unknown;
   int _confidence = 0;
+  bool _hasEmittedInitial = false;
   
   // Event emission
   late final Emitter _emitter;
@@ -265,6 +266,11 @@ class AmbientAutoNATv2 {
       } else if (_currentStatus != Reachability.unknown) {
         _log.info('Reachability changed from $_currentStatus to UNKNOWN');
         _currentStatus = observation;
+        _emitStatusChange();
+      } else if (!_hasEmittedInitial) {
+        // First probe confirmed unknown status — emit so AutoRelay can react
+        _log.info('Initial reachability confirmed as UNKNOWN, emitting event');
+        _hasEmittedInitial = true;
         _emitStatusChange();
       }
     }
