@@ -16,7 +16,9 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/util/prepended_stream.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/client.dart'; // For encodeVarint
+import 'package:dart_libp2p/core/network/network.dart' show Connectedness, EvtPeerConnectednessChanged;
 import 'package:fixnum/fixnum.dart';
+import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 
 import '../../../../core/host/host.dart';
@@ -25,6 +27,8 @@ import '../../../../core/network/context.dart';
 import '../../../../core/multiaddr.dart';
 import '../../../discovery/peer_info.dart';
 import 'relay_metrics_observer.dart';
+
+final _log = Logger('Relay');
 
 /// Relay implements the relay service for the p2p-circuit/v2 protocol.
 class Relay {
@@ -35,7 +39,8 @@ class Relay {
   final Map<String, String?> _sessionIds = {}; // Store session IDs for active connections
   Timer? _gcTimer;
   bool _closed = false;
-  
+  StreamSubscription? _peerDisconnectSub;
+
   /// Optional metrics observer for tracking relay server operations
   RelayServerMetricsObserver? metricsObserver;
 
@@ -46,6 +51,7 @@ class Relay {
   void start() {
     _host.setStreamHandler(CircuitV2Protocol.protoIDv2Hop, (stream, remotePeer) => _handleStream(stream));
     _startGarbageCollection();
+    _startPeerDisconnectMonitor();
   }
 
   /// Closes the relay service.
@@ -54,6 +60,7 @@ class Relay {
     _closed = true;
     _host.removeStreamHandler(CircuitV2Protocol.protoIDv2Hop);
     _gcTimer?.cancel();
+    await _peerDisconnectSub?.cancel();
   }
 
   /// Handles incoming streams for the relay protocol.
@@ -556,6 +563,26 @@ class Relay {
     _gcTimer = Timer.periodic(Duration(minutes: 1), (_) {
       _gc();
     });
+  }
+
+  /// Monitors peer disconnections and removes reservations for disconnected peers.
+  void _startPeerDisconnectMonitor() {
+    try {
+      final sub = _host.eventBus.subscribe(EvtPeerConnectednessChanged);
+      _peerDisconnectSub = sub.stream.listen((event) {
+        if (event is EvtPeerConnectednessChanged &&
+            event.connectedness == Connectedness.notConnected) {
+          final peerStr = event.peer.toString();
+          final hadReservation = _reservations.remove(peerStr) != null;
+          if (hadReservation) {
+            _log.warning('[RELAY] Peer $peerStr disconnected — removed reservation. Remaining reservations: ${_reservations.length}');
+            metricsObserver?.onReservationExpired(event.peer);
+          }
+        }
+      });
+    } catch (e) {
+      _log.warning('[RELAY] Failed to subscribe to peer disconnection events: $e');
+    }
   }
 
   /// Garbage collects expired reservations.
