@@ -454,7 +454,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   @override
   Future<void> reset() async {
-    _log.fine('$_logPrefix reset() called. Current state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] reset() called (LOCAL reset, will send RST to remote). Current state: $_state');
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.finer('$_logPrefix reset() called but stream already closed/reset. State: $_state. Doing nothing.');
       return;
@@ -782,7 +782,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     // Handle RST flag on any frame type
     if (frame.flags & YamuxFlags.rst != 0) {
-      _log.fine('$_logPrefix Received RST flag. Resetting stream.');
+      _log.warning('$_logPrefix [STREAM-RESET-DIAG] Received REMOTE RST flag on frame type=${frame.type}. Resetting stream from state $_state.');
       _state = YamuxStreamState.reset;
       await _cleanup();
       return;
@@ -1142,13 +1142,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// Forces the stream into reset state without sending frames (e.g., called by session on its own closure)
   Future<void> forceReset() async {
-    _log.fine('$_logPrefix forceReset() called. Current state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] forceReset() called (session cleanup). Current state: $_state');
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.finer('$_logPrefix forceReset() called but stream already closed/reset. State: $_state. Doing nothing.');
       return;
     }
     _state = YamuxStreamState.reset;
     await _cleanup();
-    _log.fine('$_logPrefix forceReset() completed. Final state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] forceReset() completed. Final state: $_state');
   }
 }
