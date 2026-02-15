@@ -241,6 +241,109 @@ void main() {
         verify(srcStream.close()).called(greaterThanOrEqualTo(1));
         verify(dstStream.close()).called(greaterThanOrEqualTo(1));
       });
+
+      test('should relay data bidirectionally on a single open connection', () async {
+        // This tests the real-world scenario:
+        // 1. A opens relay connection to B
+        // 2. A sends data to B (verified)
+        // 3. While connection is still open, B sends data back to A (verified)
+        //
+        // Both directions must work concurrently on the same relay.
+
+        final srcKeyPair = await generateEd25519KeyPair();
+        final dstKeyPair = await generateEd25519KeyPair();
+        final srcPeer = PeerId.fromPublicKey(srcKeyPair.publicKey);
+        final dstPeer = PeerId.fromPublicKey(dstKeyPair.publicKey);
+
+        final srcStream = MockP2PStream();
+        final dstStream = MockP2PStream();
+
+        // Data A sends to B
+        final aToBData = Uint8List.fromList([1, 2, 3, 4, 5]);
+        // Data B sends back to A
+        final bToAData = Uint8List.fromList([10, 20, 30, 40, 50]);
+
+        // Completer to coordinate: B's response comes after A's data is relayed
+        final aToBRelayed = Completer<void>();
+        final bToARelayed = Completer<void>();
+
+        // Source (A) reads: first read blocks waiting for B's response, then gets data, then EOF
+        var srcReadCount = 0;
+        when(srcStream.read()).thenAnswer((_) async {
+          srcReadCount++;
+          if (srcReadCount == 1) {
+            // First read: A sends data (return it immediately)
+            return aToBData;
+          }
+          // Subsequent reads: wait for B→A data to arrive, then EOF
+          await bToARelayed.future;
+          return Uint8List(0); // EOF
+          });
+
+        // Destination (B) reads: first waits for A's data to arrive, then sends response, then EOF
+        var dstReadCount = 0;
+        when(dstStream.read()).thenAnswer((_) async {
+          dstReadCount++;
+          if (dstReadCount == 1) {
+            // Wait for A→B relay to complete before B sends its data
+            await aToBRelayed.future;
+            return bToAData;
+          }
+          return Uint8List(0); // EOF
+        });
+
+        // Track writes to destination (A→B direction)
+        final dstWrites = <Uint8List>[];
+        when(dstStream.write(any)).thenAnswer((invocation) async {
+          final data = invocation.positionalArguments[0] as Uint8List;
+          dstWrites.add(Uint8List.fromList(data));
+          // Signal that A→B data has been relayed
+          if (!aToBRelayed.isCompleted) {
+            aToBRelayed.complete();
+          }
+        });
+
+        // Track writes to source (B→A direction)
+        final srcWrites = <Uint8List>[];
+        when(srcStream.write(any)).thenAnswer((invocation) async {
+          final data = invocation.positionalArguments[0] as Uint8List;
+          srcWrites.add(Uint8List.fromList(data));
+          // Signal that B→A data has been relayed
+          if (!bToARelayed.isCompleted) {
+            bToARelayed.complete();
+          }
+        });
+
+        // Mock closeWrite and close
+        when(srcStream.closeWrite()).thenAnswer((_) async {});
+        when(dstStream.closeWrite()).thenAnswer((_) async {});
+        when(srcStream.close()).thenAnswer((_) async {});
+        when(dstStream.close()).thenAnswer((_) async {});
+        when(srcStream.isClosed).thenReturn(false);
+        when(dstStream.isClosed).thenReturn(false);
+
+        // Act: Start relay
+        relay.relayDataForTesting(srcStream, dstStream, srcPeer, dstPeer);
+
+        // Wait for both directions to complete
+        await aToBRelayed.future.timeout(Duration(seconds: 5),
+            onTimeout: () => fail('A→B relay timed out'));
+        await bToARelayed.future.timeout(Duration(seconds: 5),
+            onTimeout: () => fail('B→A relay timed out'));
+
+        // Allow relay cleanup to finish
+        await Future.delayed(Duration(milliseconds: 200));
+
+        // Assert: A→B data was forwarded to destination
+        expect(dstWrites, isNotEmpty, reason: 'Destination should have received data from A');
+        expect(dstWrites.first, equals(aToBData),
+            reason: 'Data from A should arrive at B unchanged');
+
+        // Assert: B→A data was forwarded back to source
+        expect(srcWrites, isNotEmpty, reason: 'Source should have received data from B');
+        expect(srcWrites.first, equals(bToAData),
+            reason: 'Data from B should arrive at A unchanged');
+      });
     });
 
     group('Lifecycle', () {
