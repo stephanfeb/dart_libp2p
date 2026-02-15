@@ -269,7 +269,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final frame = YamuxFrame.fromBytes(frameBytesForParser);
 
         // [FRAME-TRACE] Log every frame received for diagnosing B→A data loss
-        _log.warning('$_logPrefix [FRAME-TRACE] #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
+        _log.fine('$_logPrefix [FRAME-TRACE] #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
 
         final handleStartTime = DateTime.now();
 
@@ -335,6 +335,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // Per go-yamux: SYN opens a stream, ACK (without SYN) accepts it.
       if (frame.flags & YamuxFlags.ack != 0 && frame.flags & YamuxFlags.syn == 0) {
         // ACK (no SYN): response to our outbound stream creation
+        _log.fine('$_logPrefix [ACK-DIAG] Received ACK for streamID=${frame.streamId}, pending=${_pendingStreams.containsKey(frame.streamId)}');
         final completer = _pendingStreams.remove(frame.streamId);
         if (completer != null && !completer.isCompleted) {
           completer.complete();
@@ -465,6 +466,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     // would be processed — the remote's multistream-select would timeout
     // (10s) and the connection would appear dead. The yamux write lock
     // still serializes sends, preserving Noise nonce ordering.
+    _log.fine('$_logPrefix [HANDLE-NEW-STREAM-DIAG] Received SYN for streamID=${frame.streamId}, sending ACK (fire-and-forget)');
     _sendFrame(YamuxFrame.synAckStream(frame.streamId)).catchError((e) {
       _log.warning('$_logPrefix Error sending SYN-ACK for stream ${frame.streamId}: $e');
     });
@@ -558,9 +560,18 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final bytes = frame.toBytes();
       }
       
+      // [FRAME-SEND] Log every frame sent for diagnosing B→A data loss
+      final frameBytes = frame.toBytes();
+      _log.fine('$_logPrefix [FRAME-SEND] type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data.length}" : ""} wireBytes=${frameBytes.length} lockWait=${lockAcquireDuration.inMilliseconds}ms');
+
       final writeStart = DateTime.now();
-      await _connection.write(frame.toBytes());
+      await _connection.write(frameBytes);
       final writeDuration = DateTime.now().difference(writeStart);
+
+      // Log write completion for DATA frames (the ones we're losing)
+      if (frame.type == YamuxFrameType.dataFrame) {
+        _log.fine('$_logPrefix [FRAME-SEND-DONE] streamID=${frame.streamId} dataLen=${frame.data.length} writeDuration=${writeDuration.inMilliseconds}ms');
+      }
     } catch (e) {
       _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
       if (!_closed) { // If not already closing due to this error, initiate closure.
@@ -704,10 +715,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       final frame = YamuxFrame.synStream(streamId);
       await _sendFrame(frame);
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId, waiting for ACK (timeout=${_config.streamWriteTimeout.inSeconds}s)');
 
       await completer.future.timeout(_config.streamWriteTimeout);
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
 
       await stream.open();
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');
 
       // Notify metrics observer of successful stream open
       metricsObserver?.onStreamOpened(remotePeer, streamId, stream.protocol());

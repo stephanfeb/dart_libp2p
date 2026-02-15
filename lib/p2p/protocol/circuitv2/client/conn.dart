@@ -19,6 +19,9 @@ import 'package:dart_libp2p/core/protocol/protocol.dart'; // For ProtocolID in C
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart';
 
 import '../../../../core/network/rcmgr.dart';
+import 'package:logging/logging.dart';
+
+final _log = Logger('RelayedConn');
 
 /// _RelayedConnStats implements ConnStats for a RelayedConn.
 class _RelayedConnStats implements ConnStats {
@@ -186,7 +189,9 @@ class RelayedConn implements TransportConn {
 
   @override
   Future<void> write(Uint8List data) async {
+    _log.fine('[RELAY-CONN-WRITE] Writing ${data.length} bytes to relay pipe stream ${_stream.id()} for peer ${_remotePeer.toBase58().substring(0, 16)}');
     await _stream.write(data);
+    _log.fine('[RELAY-CONN-WRITE-DONE] Wrote ${data.length} bytes to relay pipe stream ${_stream.id()}');
   }
 
   @override

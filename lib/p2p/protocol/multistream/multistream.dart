@@ -299,10 +299,13 @@ class MultistreamMuxer implements ProtocolSwitch {
     
     try {
       // 1. Send our multistream protocol ID
+      _log.fine('[MSS-DIAG] selectOneOf: BEFORE first _writeDelimited (multistream header) stream=$streamId peer=$peerInfo');
       await _writeDelimited(stream, utf8.encode(protocolID));
+      _log.fine('[MSS-DIAG] selectOneOf: AFTER first _writeDelimited, BEFORE _readNextToken stream=$streamId peer=$peerInfo');
 
       // 2. Read their multistream protocol ID
       final remoteProtoID = await _readNextToken(stream);
+      _log.fine('[MSS-DIAG] selectOneOf: AFTER _readNextToken got="$remoteProtoID" stream=$streamId peer=$peerInfo');
 
       if (remoteProtoID != protocolID) {
 

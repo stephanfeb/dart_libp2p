@@ -661,12 +661,14 @@ class IdentifyService implements IDService {
     final streamCreateStart = DateTime.now();
 
     try {
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: BEFORE conn.newStream() peer=$peerId proto=$protoIDString connAge=${connAge.inMilliseconds}ms');
       stream = await conn.newStream(Context());
       final streamCreateDuration = DateTime.now().difference(streamCreateStart);
-      _log.fine(' [IDENTIFY-STREAM-CREATE] peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString, duration=${streamCreateDuration.inMilliseconds}ms');
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: AFTER conn.newStream() peer=$peerId stream=${stream.id()} duration=${streamCreateDuration.inMilliseconds}ms');
 
       stream.setDeadline(DateTime.now().add(timeout));
 
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: BEFORE selectOneOf() peer=$peerId stream=${stream.id()} proto=$protoIDString');
       final protocolMuxer = host.mux as MultistreamMuxer;
       final selectedProtocol = await protocolMuxer.selectOneOf(stream, [protoIDString as ProtocolID]);
 
@@ -1750,7 +1752,7 @@ class _NetNotifiee implements Notifiee {
   @override
   Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     final peerId = conn.remotePeer;
-    _log.fine('Identify.Notifiee.connected: Connection established with $peerId. Conn ID: ${conn.id}, Direction: ${conn.stat.stats.direction}');
+    _log.fine('[IDENTIFY-DIAG] Notifiee.connected: peer=$peerId connID=${conn.id} direction=${conn.stat.stats.direction} transport=${conn.state.transport} security=${conn.state.security} mux=${conn.state.streamMultiplexer}');
     await _ids._connsMutex.synchronized(() async {
       _log.finer('Identify.Notifiee.connected: Acquired _connsMutex for $peerId.');
       _ids._addConnWithLock(conn); // Ensure entry exists
@@ -1760,7 +1762,25 @@ class _NetNotifiee implements Notifiee {
     // IDENTIFY PROTOCOL COORDINATION FIX:
     // Only the dialer (outbound connection initiator) should start identify protocol
     // to prevent bidirectional race conditions where both peers create identify streams simultaneously
-    if (conn.stat.stats.direction == Direction.outbound) {
+
+    // Skip identify for relay connections. The inbound side's counter-identify
+    // exchange fails (DATA frames don't arrive in time), causing a 30s timeout.
+    // Relay connections are already Noise-authenticated, so identify is not required.
+    final connTransport = conn.state.transport;
+    final isRelayConn = connTransport == 'circuit-relay';
+    if (isRelayConn) {
+      _log.fine('[IDENTIFY-COORDINATION] Relay connection to $peerId (${conn.stat.stats.direction}) — skipping identify');
+      // Mark identify as succeeded so identifyWait returns immediately
+      await _ids._connsMutex.synchronized(() async {
+        final entry = _ids._conns[conn];
+        if (entry != null) {
+          entry.identifySucceeded = true;
+          if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
+            entry.identifyWaitCompleter!.complete();
+          }
+        }
+      });
+    } else if (conn.stat.stats.direction == Direction.outbound) {
       _log.fine('🔧 [IDENTIFY-COORDINATION] Outbound connection to $peerId. This peer is the DIALER - initiating identify protocol.');
       // Don't await here to avoid blocking the notifiee callback.
       // identifyWait itself handles its asynchronous nature.

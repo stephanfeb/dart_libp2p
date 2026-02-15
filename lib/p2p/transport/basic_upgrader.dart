@@ -230,7 +230,13 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
 
   @override
   ConnState get state {
-    final transportProtocol = _extractTransportProtocol(_securedConn.remoteMultiaddr);
+    // Preserve transport from the underlying connection if it's already set
+    // (e.g., RelayedConn sets transport='circuit-relay' which SecuredConnection propagates).
+    // Only fall back to multiaddr extraction for direct connections.
+    final underlyingTransport = _securedConn.state.transport;
+    final transportProtocol = (underlyingTransport.isNotEmpty && underlyingTransport != 'unknown')
+        ? underlyingTransport
+        : _extractTransportProtocol(_securedConn.remoteMultiaddr);
     return ConnState(
       streamMultiplexer: _negotiatedMuxerProto,
       security: _negotiatedSecurityProto,

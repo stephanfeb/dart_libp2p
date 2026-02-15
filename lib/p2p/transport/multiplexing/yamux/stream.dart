@@ -248,7 +248,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   @override
   Future<void> write(List<int> data) async {
     final inputDataLength = data.length;
-    _log.fine('$_logPrefix YamuxStream.write: ENTERED. Requested to write $inputDataLength bytes. Current state: $_state, Our send window (remote receive): $_remoteReceiveWindow');
+    _log.fine('$_logPrefix [YAMUX-WRITE-DIAG] YamuxStream.write ENTERED: $inputDataLength bytes, state=$_state, sendWindow=$_remoteReceiveWindow');
     
     // Check deadline before starting write operation
     _checkDeadline();
