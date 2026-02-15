@@ -137,8 +137,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // Notify metrics observer
       metricsObserver?.onPingSent(remotePeer, pingId, now);
     } catch (e) {
-      _log.warning('$_logPrefix ❌ [YAMUX-KEEPALIVE] Error sending PING: $e. Session may be unhealthy.');
+      _log.warning('$_logPrefix ❌ [YAMUX-KEEPALIVE] Error sending PING: $e. Closing session.');
       _pendingPings.remove(pingId);
+      // Underlying connection is dead — close session to prevent zombie
+      _goAway(YamuxCloseReason.internalError);
     }
   }
 
@@ -558,9 +560,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
       if (!_closed) { // If not already closing due to this error, initiate closure.
         _log.warning('$_logPrefix Error sending frame indicates session issue. Initiating GO_AWAY. Error: $e.');
-        // Don't await _goAway here to avoid potential deadlocks if _goAway itself tries to send.
-        // The error will propagate up and likely cause _readFrames to terminate and cleanup.
-        // Or, if this sendFrame was called from _goAway, the finally block there will handle cleanup.
+        // Fire-and-forget — don't await to avoid deadlocks if _goAway itself tries to send.
+        _goAway(YamuxCloseReason.internalError);
       }
       rethrow; // Rethrow to allow caller to handle (e.g., stream reset)
     } finally {
