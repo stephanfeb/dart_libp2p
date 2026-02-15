@@ -194,12 +194,24 @@ Future<PingResult> _ping(P2PStream stream, Random randomReader) async {
     }
 
     final before = DateTime.now();
-    await stream.write(buffer);
+    try {
+      await stream.write(buffer);
+    } catch (e) {
+      _logger.warning('[PING-DIAG] stream.write() FAILED after ${DateTime.now().difference(before).inMilliseconds}ms on stream ${stream.id()}: $e');
+      rethrow;
+    }
+    final writeTime = DateTime.now().difference(before);
 
-    final responseBuffer = await stream.read(PingConstants.pingSize);
+    try {
+      final responseBuffer = await stream.read(PingConstants.pingSize);
 
-    if (!_bytesEqual(buffer, responseBuffer)) {
-      return PingResult(error: 'ping packet was incorrect');
+      if (!_bytesEqual(buffer, responseBuffer)) {
+        _logger.warning('[PING-DIAG] Ping data mismatch on stream ${stream.id()} after ${DateTime.now().difference(before).inMilliseconds}ms');
+        return PingResult(error: 'ping packet was incorrect');
+      }
+    } catch (e) {
+      _logger.warning('[PING-DIAG] stream.read() FAILED after ${DateTime.now().difference(before).inMilliseconds}ms (write took ${writeTime.inMilliseconds}ms) on stream ${stream.id()}: $e');
+      rethrow;
     }
 
     return PingResult(rtt: DateTime.now().difference(before));

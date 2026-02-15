@@ -531,7 +531,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     } catch (_) {
       reason = YamuxCloseReason.protocolError; // Default if unknown code
     }
-    await _goAway(reason); 
+    _log.warning('$_logPrefix [SESSION-DIAG] Received REMOTE GO_AWAY frame. Reason: ${reason.name} (code=${frame.length}). Active streams: ${_streams.length}. Session will close.');
+    await _goAway(reason);
   }
 
   Future<void> _sendFrame(YamuxFrame frame) async {
@@ -614,6 +615,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     if (_closed && _cleanupStarted) {
       return;
     }
+    _log.warning('$_logPrefix [SESSION-DIAG] _goAway() called. Reason: ${reason.name}. Already closed: $_closed. Active streams: ${_streams.length}.');
     if (_closed && !_cleanupStarted) {
         // _closed is true, so _sendFrame will only allow GO_AWAY if it's not already in cleanup.
         // This path implies _goAway might be called recursively or from different error paths.

@@ -457,7 +457,7 @@ class Swarm implements Network {
               
               // Close stale connections through the same relay
               for (final stale in staleRelayConns) {
-                _logger.info('Swarm: Closing stale relay connection ${stale.id} in favor of new connection ${swarmConn.id}');
+                _logger.warning('[CONN-DEDUP-DIAG] Closing stale relay connection ${stale.id} to peer $actualPeerIdStr via relay $relayId in favor of new connection ${swarmConn.id}');
                 existingConns.remove(stale);
                 Future.microtask(() => stale.close());
               }
