@@ -25,8 +25,7 @@ dependencies:
 
   base_x: ^2.0.0
 
-  dart_udx:
-    path: ../dart-udx
+  dart_udx: ^2.0.1
 
   dcid: ^1.0.0
 
@@ -40,10 +39,6 @@ dependencies:
   stack_trace: ^1.12.1
 
 dev_dependencies:
-  dart_libp2p_kad_dht:
-    path: ../dart-libp2p-kad-dht
-  dart_libp2p_pubsub:
-    path: ../dart-libp2p-pubsub
   mockito: ^5.4.5
   build_runner: ^2.4.15
   protoc_builder: ^0.4.1
