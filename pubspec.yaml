@@ -39,6 +39,8 @@ dependencies:
   stack_trace: ^1.12.1
 
 dev_dependencies:
+  dart_libp2p_kad_dht: ^1.2.0
+  dart_libp2p_pubsub: ^1.1.0
   mockito: ^5.4.5
   build_runner: ^2.4.15
   protoc_builder: ^0.4.1
