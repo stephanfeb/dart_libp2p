@@ -92,7 +92,7 @@ func transportOpts(transport string, port int) []libp2p.Option {
 		return []libp2p.Option{
 			libp2p.NoTransports,
 			libp2p.Transport(udxtransport.NewTransport),
-			libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/127.0.0.1/udp/%d/udx", port)),
+			libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/udp/%d/udx", port)),
 			libp2p.ResourceManager(&network.NullResourceManager{}),
 		}
 	}
