@@ -760,7 +760,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     // Phase 1.1: UDX Connection Lifecycle Analysis - State change logging
     _logger.fine('[UDXSessionConn $id] STATE_CHANGE: open -> closing, reason: normal_close');
-    _connManager.updateState(this, ConnectionState.closing, error: null); 
+    if (_connManager.getState(this) != null) {
+      _connManager.updateState(this, ConnectionState.closing, error: null);
+    }
 
     // Phase 1.3: Resource cleanup order logging
     _logger.fine('[UDXSessionConn $id] CLEANUP_ORDER: 1. Cancelling socket and initial stream subscriptions');
@@ -806,7 +808,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     // Phase 1.1: UDX Connection Lifecycle Analysis - State change logging
     _logger.fine('[UDXSessionConn $id] STATE_CHANGE: closing -> closed, reason: cleanup_complete');
-    _connManager.updateState(this, ConnectionState.closed, error: null); 
+    if (_connManager.getState(this) != null) {
+      _connManager.updateState(this, ConnectionState.closed, error: null);
+    }
     _onClosedCallback?.call(this);
 
     if (!_closedCompleter.isCompleted) {
@@ -821,7 +825,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   Future<void> closeWithError(dynamic error, [StackTrace? stackTrace]) async {
     _logger.fine('[UDXSessionConn $id] closeWithError called with error: $error');
     if (!_isClosed && !_isClosing) {
-        _connManager.updateState(this, ConnectionState.closing, error: error); 
+      if (_connManager.getState(this) != null) {
+        _connManager.updateState(this, ConnectionState.closing, error: error);
+      }
     }
     
     if (!_closedCompleter.isCompleted) {

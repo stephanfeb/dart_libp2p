@@ -56,7 +56,9 @@ class ConnectionManager implements ConnManager {
   void updateState(TransportConn connection, ConnectionState newState, {Object? error}) {
     final currentState = _connections[connection];
     if (currentState == null) {
-      throw StateError('Connection not registered with manager');
+      // Connection not yet registered (e.g., constructor threw before registration).
+      // Nothing to update — silently return.
+      return;
     }
 
     if (currentState == newState) {
