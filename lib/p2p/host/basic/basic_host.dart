@@ -1034,7 +1034,7 @@ class BasicHost implements Host {
     
     // Prevent self-dialing
     if (pi.id == id) {
-
+      _log.info('Preventing self-dial attempt to ${pi.id}');
       return;
     }
 

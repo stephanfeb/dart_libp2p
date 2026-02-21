@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dart_libp2p/p2p/host/basic/natmgr.dart';
 import 'package:dart_libp2p/p2p/host/host.dart';
@@ -14,21 +15,47 @@ import 'package:dart_libp2p/p2p/transport/transport.dart';
 import 'package:dart_libp2p/p2p/transport/transport_config.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
-import 'package:dart_libp2p/core/network/mux.dart' show Multiplexer, MuxedConn; // For NullMultiplexer
-import 'dart:io' show Socket; // For NullMultiplexer
+import 'package:dart_libp2p/core/network/mux.dart' show Multiplexer, MuxedConn;
 import 'package:test/test.dart';
 import 'package:dart_libp2p/p2p/nat/nat_behavior.dart';
 import 'package:dart_libp2p/p2p/nat/nat_traversal_strategy.dart';
-import 'package:dart_libp2p/config/config.dart'; // Added for Config
-import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart'; // Added for BasicUpgrader
-import 'package:dart_libp2p/core/crypto/ed25519.dart'; // For KeyPair generation
-import '../../../mocks/mock_host.dart'; // Added import for MockHost
+import 'package:dart_libp2p/p2p/nat/stun/stun_client_pool.dart';
+import 'package:dart_libp2p/p2p/nat/stun/stun_client.dart';
+import 'package:dart_libp2p/p2p/nat/nat_type.dart';
+import 'package:dart_libp2p/config/config.dart';
+import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
+import 'package:dart_libp2p/core/crypto/ed25519.dart';
+import '../../../mocks/mock_host.dart';
 
 // Define NullMultiplexer stub for tests
 class NullMultiplexer implements Multiplexer {
   @override
   Future<MuxedConn> newConn(Socket conn, bool isServer, PeerScope scope) async {
     throw UnimplementedError('NullMultiplexer.newConn not implemented');
+  }
+}
+
+/// Mock StunClientPool that returns deterministic results without network calls.
+class MockStunClientPool extends StunClientPool {
+  int _nextPort = 40000;
+
+  MockStunClientPool() : super(stunServers: const [(host: '127.0.0.1', port: 3478)]);
+
+  @override
+  Future<StunResponse> discover() async {
+    return StunResponse(
+      externalAddress: InternetAddress('203.0.113.1'),
+      externalPort: _nextPort++,
+      natType: NatType.fullCone,
+    );
+  }
+
+  @override
+  Future<NatBehavior> discoverNatBehavior() async {
+    return NatBehavior(
+      mappingBehavior: NatMappingBehavior.endpointIndependent,
+      filteringBehavior: NatFilteringBehavior.endpointIndependent,
+    );
   }
 }
 
@@ -42,10 +69,6 @@ void main() {
     // For simplicity, defining it directly in this file.
     // In a real project, this would be in a shared test mock/stub file.
     setUp(() async {
-      // Define NullMultiplexer if not already available from another import
-      // This is a simplified stub.
-      final nullMultiplexer = NullMultiplexer(); // Assuming NullMultiplexer is defined as in the other test file or imported
-      
       testTransport = TCPTransport(
         config: const TransportConfig(
           dialTimeout: Duration(seconds: 5),
@@ -79,7 +102,7 @@ void main() {
         upgrader: testUpgrader, // Added
         config: testConfig,      // Added
       );
-      natManager = newNATManager(network);
+      natManager = newNATManager(network, stunClientPool: MockStunClientPool());
     });
 
     tearDown(() async {

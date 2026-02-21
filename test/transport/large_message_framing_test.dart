@@ -147,9 +147,22 @@ void main() {
           await clientStream.write(testData);
           print('   Write completed');
 
-          // Read large message
-          final received = await serverStream.read();
-          print('   Read completed: ${received.length} bytes');
+          // Read large message - accumulate chunks since read() returns
+          // whatever is available (typically 16KB Yamux segments)
+          final chunks = <Uint8List>[];
+          int totalReceived = 0;
+          while (totalReceived < size) {
+            final chunk = await serverStream.read();
+            chunks.add(chunk);
+            totalReceived += chunk.length;
+          }
+          final received = Uint8List(totalReceived);
+          int offset = 0;
+          for (final chunk in chunks) {
+            received.setRange(offset, offset + chunk.length, chunk);
+            offset += chunk.length;
+          }
+          print('   Read completed: ${received.length} bytes (${chunks.length} chunks)');
 
           // Verify
           expect(received.length, equals(size),

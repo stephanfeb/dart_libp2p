@@ -180,7 +180,12 @@ class MockTransportConn implements TransportConn {
   @override
   Future<List<P2PStream>> get streams async => [];
   @override
-  ConnState get state => throw UnimplementedError();
+  ConnState get state => ConnState(
+    streamMultiplexer: '',
+    security: '',
+    transport: 'tcp',
+    usedEarlyMuxerNegotiation: false,
+  );
   @override
   ConnStats get stat => throw UnimplementedError();
   // TransportConn requires these, ensure MockTransportConn provides them or they are handled here.

@@ -6,6 +6,7 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
+import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/yamux_exceptions.dart';
 import 'package:dart_libp2p/core/network/context.dart' as core_context; // Added for Context
 import '../../../mocks/yamux_mock_connection.dart';
 
@@ -570,11 +571,14 @@ void main() {
       expect(stream1.isClosed, isTrue);
       print('Client stream closed');
 
-      print('Verifying server stream closure...');
-      await expectLater(
-        withTimeout(stream2.read(), 'stream2 read'),
-        throwsA(isA<StateError>()),
-      );
+      print('Verifying server stream receives EOF...');
+      final eofData = await withTimeout(stream2.read(), 'stream2 read');
+      expect(eofData, isEmpty, reason: 'Read after remote close should return empty (EOF)');
+      print('Server stream received EOF correctly');
+
+      // After receiving EOF, the stream should be closed
+      // Allow a brief moment for close propagation
+      await Future.delayed(Duration(milliseconds: 100));
       expect(stream2.isClosed, isTrue);
       print('Server stream closure verified');
     });
@@ -791,12 +795,12 @@ void main() {
         print('Verifying stream operations fail...');
         await expectLater(
           () => stream1.write(Uint8List.fromList([1])),
-          throwsA(isA<StateError>()),
+          throwsA(anyOf(isA<StateError>(), isA<YamuxStreamStateException>())),
           reason: 'Write operation should fail after connection close',
         );
         await expectLater(
           () => stream1.read(),
-          throwsA(isA<StateError>()),
+          throwsA(anyOf(isA<StateError>(), isA<YamuxStreamStateException>())),
           reason: 'Read operation should fail after connection close',
         );
         print('Stream operations verified to fail correctly');
@@ -853,13 +857,13 @@ void main() {
 
       await expectLater(
         () => withTimeout(stream2.read(), 'stream2 read after reset'),
-        throwsA(isA<StateError>()),
+        throwsA(anyOf(isA<StateError>(), isA<YamuxStreamStateException>())),
         reason: 'Reading from a reset stream should throw an error',
       );
-      
+
       await expectLater(
         () => withTimeout(stream2.write(Uint8List.fromList([1,2,3])), 'stream2 write after reset'),
-        throwsA(isA<StateError>()),
+        throwsA(anyOf(isA<StateError>(), isA<YamuxStreamStateException>())),
         reason: 'Writing to a reset stream should throw an error',
       );
 
@@ -902,11 +906,8 @@ void main() {
       print('Stream 1 read data successfully');
 
       // 5. stream2 reading should now get an EOF because stream1 sent FIN
-      await expectLater(
-        () => withTimeout(stream2.read(), 'stream2 read after stream1 closeWrite'),
-        throwsA(isA<StateError>()),
-        reason: 'Reading from stream2 should result in EOF/StateError after stream1 sent FIN',
-      );
+      final eofData = await withTimeout(stream2.read(), 'stream2 read after stream1 closeWrite');
+      expect(eofData, isEmpty, reason: 'Reading from stream2 should return empty (EOF) after stream1 sent FIN');
       print('Verified stream2 read gets EOF');
 
       // Cleanup

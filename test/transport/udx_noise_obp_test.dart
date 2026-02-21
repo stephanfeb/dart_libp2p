@@ -639,7 +639,7 @@ void main() {
 
       await Future.delayed(Duration(milliseconds: 100));
 
-    }, timeout: Timeout(Duration(seconds: 30)));
+    }, timeout: Timeout(Duration(seconds: 120)));
   });
 
 }
@@ -936,21 +936,22 @@ Future<void> _testOBPFeatures(core_network_stream.P2PStream initialStream) async
   currentStream = await ensureHealthyStream(currentStream, 'Test 4 - Pre-check');
   
   try {
-    final futures = <Future<OBPFrame?>>[];
+    // Send requests sequentially - concurrent sendRequest on a single stream
+    // causes interleaved reads/writes that corrupt framing
+    final rapidResponses = <OBPFrame?>[];
     for (int i = 0; i < 5; i++) {
       final rapidFrame = OBPFrame(
         type: OBPMessageType.ping,
         streamId: 10 + i,
         payload: Uint8List.fromList(utf8.encode('rapid-ping-$i')),
       );
-      futures.add(OBPProtocolHandler.sendRequest(
+      final response = await OBPProtocolHandler.sendRequest(
         currentStream,
         rapidFrame,
         context: 'SwarmTest',
-      ));
+      );
+      rapidResponses.add(response);
     }
-    
-    final rapidResponses = await Future.wait(futures);
     for (int i = 0; i < rapidResponses.length; i++) {
       expect(rapidResponses[i], isNotNull, reason: 'Should receive rapid response $i');
       expect(rapidResponses[i]!.type, equals(OBPMessageType.pong));

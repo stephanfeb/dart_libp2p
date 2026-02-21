@@ -99,14 +99,23 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test('read() throws TimeoutException if no data arrives', () async {
-      final readFuture = adapter.read();
-      
-      expect(
-        () async => await readFuture,
-        throwsA(isA<TimeoutException>()),
-      );
-    }, timeout: const Timeout(Duration(seconds: 40))); // Test timeout needs to be longer than read timeout
+    test('read() waits indefinitely if no data arrives (no timeout)', () async {
+      bool completed = false;
+      final readFuture = adapter.read().then((v) {
+        completed = true;
+        return v;
+      });
+
+      // Wait briefly - read should still be pending since there is no timeout
+      await Future.delayed(const Duration(milliseconds: 200));
+      expect(completed, isFalse,
+          reason: 'read() must not complete when no data arrives - '
+              'yamux keepalive handles liveness, not a read timeout');
+
+      // Clean up: unblock the pending read so tearDown does not hang
+      udxDataController.add(Uint8List.fromList([1, 2, 3]));
+      await readFuture;
+    }, timeout: const Timeout(Duration(seconds: 5)));
 
     test('write() sends data to udx stream', () async {
       final testData = Uint8List.fromList([7, 8, 9]);

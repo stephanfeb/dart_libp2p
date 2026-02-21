@@ -74,7 +74,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   final YamuxMetricsObserver? _metricsObserver;
   
   /// Remote peer ID for metrics reporting
-  final PeerId _remotePeer;
+  final PeerId? _remotePeer;
   
   /// When the stream was opened (for duration calculation)
   DateTime? _openedAt;
@@ -190,7 +190,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     required int initialWindowSize, // This is the initial window for both sides
     required Future<void> Function(YamuxFrame frame) sendFrame,
     required Conn parentConn, // Added parameter
-    required PeerId remotePeer, // For metrics reporting
+    PeerId? remotePeer, // For metrics reporting (null before security handshake)
     required int maxFrameSize, // Maximum DATA frame payload size
     YamuxMetricsObserver? metricsObserver, // For metrics reporting
     String? logPrefix,
@@ -470,7 +470,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.warning('$_logPrefix Error sending RESET frame during reset(): $e. Will proceed with local cleanup.');
     } finally {
       // Notify metrics observer before cleanup
-      if (_metricsObserver != null) {
+      if (_metricsObserver != null && _remotePeer != null) {
         try {
           _metricsObserver.onStreamReset(
             _remotePeer,
@@ -519,7 +519,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
           '$_logPrefix Error sending FIN frame during close(): $e. Proceeding to forceful cleanup (reset).');
     } finally {
       // Notify metrics observer before cleanup
-      if (_metricsObserver != null && _openedAt != null) {
+      if (_metricsObserver != null && _openedAt != null && _remotePeer != null) {
         try {
           final duration = DateTime.now().difference(_openedAt!);
           _metricsObserver.onStreamClosed(

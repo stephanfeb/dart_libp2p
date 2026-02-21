@@ -679,27 +679,28 @@ void main() {
             List.generate(size, (_) => random.nextInt(256))
           );
           
-          // Setup server echo handler
+          // Setup server echo handler (large-data aware: reads until EOF)
           late P2PStream serverStream;
           final serverAcceptFuture = ((serverConn as dynamic).conn as core_mux_types.MuxedConn)
               .acceptStream()
               .then((stream) {
             serverStream = stream as P2PStream;
-            return _handleEchoStream(serverStream);
+            return _handleEchoStreamLarge(serverStream);
           });
-          
-          // Client sends data
+
+          // Client sends data then signals EOF so server knows when to echo
           final clientStream = await ((clientConn as dynamic).conn as core_mux_types.MuxedConn)
               .openStream(Context()) as P2PStream;
-          
+
           await clientStream.write(testData);
+          await clientStream.closeWrite();
           print('Client sent ${testData.length} bytes');
-          
+
           // Wait for server to handle the stream
-          await serverAcceptFuture.timeout(Duration(seconds: 10));
-          
-          // Read echo response
-          final receivedData = await clientStream.read().timeout(Duration(seconds: 10));
+          await serverAcceptFuture.timeout(Duration(seconds: 30));
+
+          // Read echo response - accumulate chunks since Yamux fragments large writes
+          final receivedData = await _readAll(clientStream, timeout: Duration(seconds: 15));
           print('Client received ${receivedData.length} bytes');
           
           // Verify data integrity
@@ -911,7 +912,7 @@ Future<void> _performIndependentEchoTest({
   }
 }
 
-/// Handles echo functionality for a stream
+/// Handles echo functionality for a stream (single read, for small payloads)
 Future<void> _handleEchoStream(P2PStream stream) async {
   try {
     final data = await stream.read().timeout(Duration(seconds: 5));
@@ -919,6 +920,30 @@ Future<void> _handleEchoStream(P2PStream stream) async {
     await stream.write(data);
   } catch (e) {
     print('Error in echo handler for stream ${stream.id()}: $e');
+    rethrow;
+  }
+}
+
+/// Reads all data from a stream until EOF (empty read), accumulating chunks.
+Future<Uint8List> _readAll(P2PStream stream, {Duration timeout = const Duration(seconds: 15)}) async {
+  final buffer = <int>[];
+  while (true) {
+    final chunk = await stream.read().timeout(timeout);
+    if (chunk.isEmpty) break; // EOF
+    buffer.addAll(chunk);
+  }
+  return Uint8List.fromList(buffer);
+}
+
+/// Handles echo for large data: reads until EOF then echoes all received data.
+Future<void> _handleEchoStreamLarge(P2PStream stream) async {
+  try {
+    final data = await _readAll(stream, timeout: Duration(seconds: 15));
+    print('Server echoing ${data.length} bytes on stream ${stream.id()}');
+    await stream.write(data);
+    await stream.closeWrite();
+  } catch (e) {
+    print('Error in large echo handler for stream ${stream.id()}: $e');
     rethrow;
   }
 }

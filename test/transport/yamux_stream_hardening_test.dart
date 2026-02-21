@@ -122,28 +122,23 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test('read() handles state transitions gracefully', () async {
+   test('read() handles state transitions gracefully', () async {
       // Open the stream
       await stream.open();
-      
-      // Start a read operation and immediately set up expectation to handle the error
+
+      // Start a read operation
       final readFuture = stream.read();
-      final expectation = expectLater(
-        readFuture,
-        throwsA(isA<YamuxStreamStateException>()
-            .having((e) => e.currentState, 'currentState', 'reset')
-            .having((e) => e.requestedOperation, 'requestedOperation', 'read')
-            .having((e) => e.streamId, 'streamId', 1)),
-      );
-      
+
       // Give the read operation time to start waiting
       await Future.delayed(Duration(milliseconds: 10));
-      
+
       // Reset the stream while read is waiting
       await stream.reset();
-      
-      // Wait for the expectation to complete
-      await expectation;
+
+      // Read should return EOF (empty bytes) when stream transitions to reset
+      // during a pending read - this is graceful degradation behavior
+      final result = await readFuture;
+      expect(result, isEmpty);
     });
 
     test('multiple concurrent reads handle state changes safely', () async {
@@ -231,24 +226,19 @@ void main() {
         throwsA(isA<YamuxStreamStateException>()),
       );
       
-      // Open state should be valid for read (will timeout but not throw state error)
+      // Open state should be valid for read (will not throw state error)
       await stream.open();
       final readFuture = stream.read();
-      
-      // Immediately set up expectation to handle the error when it occurs
-      final expectation = expectLater(
-        readFuture,
-        throwsA(isA<YamuxStreamStateException>()),
-      );
-      
+
       // Give the read operation time to start waiting
       await Future.delayed(Duration(milliseconds: 10));
-      
-      // Cancel the read to avoid timeout
+
+      // Reset the stream to cancel the pending read
       await stream.reset();
-      
-      // Wait for the expectation to complete
-      await expectation;
+
+      // Read returns EOF (graceful degradation) when reset during pending read
+      final result = await readFuture;
+      expect(result, isEmpty);
     });
   });
 

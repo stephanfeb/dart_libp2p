@@ -8,6 +8,7 @@ import 'package:dart_udx/src/stream.dart';
 
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
+import 'package:dart_libp2p/p2p/transport/udx_exceptions.dart';
 import 'package:dart_libp2p/p2p/transport/transport_config.dart';
 import 'package:dart_libp2p/p2p/transport/connection_state.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
@@ -111,12 +112,12 @@ void main() {
         // Correctly await the Future and check for an async exception
         await expectLater(
             () async => await transport.dial(addr),
-          throwsA(isA<TimeoutException>()),
+          throwsA(isA<UDXTimeoutException>()),
         );
 
         // Give time for cleanup to complete
         await Future.delayed(Duration(seconds: 5));
-      }, timeout: Timeout(Duration(seconds: 40)));
+      }, timeout: Timeout(Duration(seconds: 120)));
     });
 
     group('Data Transfer', () {

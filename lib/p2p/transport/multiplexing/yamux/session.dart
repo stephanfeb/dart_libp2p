@@ -135,7 +135,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       await _sendFrame(frame);
 
       // Notify metrics observer
-      metricsObserver?.onPingSent(remotePeer, pingId, now);
+      final peer = _remotePeerOrNull;
+      if (peer != null) metricsObserver?.onPingSent(peer, pingId, now);
     } catch (e) {
       _log.warning('$_logPrefix ❌ [YAMUX-KEEPALIVE] Error sending PING: $e. Closing session.');
       _pendingPings.remove(pingId);
@@ -295,10 +296,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         _log.severe('$_logPrefix Error in _readFrames loop (session and conn not marked closed): $e', st);
 
         // Notify metrics observer of session error
-        try {
-          metricsObserver?.onSessionError(remotePeer, e.toString(), st);
-        } catch (observerError) {
-          _log.warning('$_logPrefix Error notifying metrics observer: $observerError');
+        final peer = _remotePeerOrNull;
+        if (peer != null) {
+          try {
+            metricsObserver?.onSessionError(peer, e.toString(), st);
+          } catch (observerError) {
+            _log.warning('$_logPrefix Error notifying metrics observer: $observerError');
+          }
         }
         
         await _goAway(YamuxCloseReason.internalError);
@@ -452,7 +456,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       initialWindowSize: initialWindow,
       sendFrame: _sendFrame,
       parentConn: this,
-      remotePeer: remotePeer,
+      remotePeer: _remotePeerOrNull,
       maxFrameSize: _config.maxFrameSize,
       metricsObserver: metricsObserver,
       logPrefix: "$_logPrefix StreamID=${frame.streamId}",
@@ -477,7 +481,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       await stream.openIncoming();
 
       // Notify metrics observer of incoming stream opened
-      metricsObserver?.onStreamOpened(remotePeer, frame.streamId, stream.protocol());
+      final peer = _remotePeerOrNull;
+      if (peer != null) metricsObserver?.onStreamOpened(peer, frame.streamId, stream.protocol());
 
       // Check if there's a pending acceptStream() call waiting for a stream
       if (_pendingAcceptStreamCompleter != null && !_pendingAcceptStreamCompleter!.isCompleted) {
@@ -513,7 +518,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final rtt = receivedTime.difference(removed);
 
         // Notify metrics observer
-        metricsObserver?.onPongReceived(remotePeer, opaqueValue, removed, receivedTime, rtt);
+        final peer = _remotePeerOrNull;
+        if (peer != null) metricsObserver?.onPongReceived(peer, opaqueValue, removed, receivedTime, rtt);
       }
       return;
     }
@@ -669,7 +675,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     _nextStreamId += 2;
     
     // Notify metrics observer of stream open start
-    metricsObserver?.onStreamOpenStart(remotePeer, streamId);
+    final peer = _remotePeerOrNull;
+    if (peer != null) metricsObserver?.onStreamOpenStart(peer, streamId);
     
     // YAMUX PROTOCOL COMPLIANCE: Validate stream ID assignment follows Yamux specification
     // Client should only create odd-numbered streams (1, 3, 5, ...)
@@ -697,7 +704,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       initialWindowSize: _config.initialStreamWindowSize, 
       sendFrame: _sendFrame,
       parentConn: this, // Added parentConn
-      remotePeer: remotePeer, // For metrics reporting
+      remotePeer: _remotePeerOrNull, // May be null before security handshake
       maxFrameSize: _config.maxFrameSize, // Limit frame size for resilience
       metricsObserver: metricsObserver, // For metrics reporting
       logPrefix: "$_logPrefix StreamID=$streamId",
@@ -724,7 +731,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');
 
       // Notify metrics observer of successful stream open
-      metricsObserver?.onStreamOpened(remotePeer, streamId, stream.protocol());
+      if (peer != null) metricsObserver?.onStreamOpened(peer, streamId, stream.protocol());
       
       return stream;
     } catch (e) {
@@ -910,6 +917,16 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   @override
   PeerId get localPeer => _connection.localPeer;
+
+  /// Safe accessor for remote peer ID that returns null instead of throwing
+  /// when the remote peer is not yet known (e.g., server-side before security handshake).
+  PeerId? get _remotePeerOrNull {
+    try {
+      return _connection.remotePeer;
+    } on StateError {
+      return null;
+    }
+  }
 
   @override
   PeerId get remotePeer => _connection.remotePeer;
