@@ -219,7 +219,7 @@ class MdnsDiscovery implements Discovery {
         domain: 'local',
         timeout: const Duration(seconds: 10), // Extended timeout for better discovery
         wantUnicastResponse: false,
-        reusePort: true,
+        reusePort: !Platform.isAndroid,
         reuseAddress: true,
         multicastHops: 1,
       );
