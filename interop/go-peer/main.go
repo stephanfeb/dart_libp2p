@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,15 @@ import (
 const echoProtocol = "/echo/1.0.0"
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 8192)
+			n := runtime.Stack(buf, true)
+			fmt.Fprintf(os.Stderr, "[UDX-DIAG] PANIC RECOVERED: %v\n%s\n", r, string(buf[:n]))
+			os.Exit(2)
+		}
+	}()
+
 	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers, pubsub-server, pubsub-client")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
