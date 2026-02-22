@@ -202,10 +202,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         frameCount++;
         framesInCurrentBatch++;
         _recentFrameCount++;
-        
+
         // Update volume mode detection
         _updateVolumeMode();
-        
+
 
         // Adaptive yielding based on batch processing and session stress
         if (framesInCurrentBatch >= _maxFramesPerBatch) {
@@ -215,18 +215,15 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
           // Minimal yield for event loop cooperation during normal processing
           await Future.delayed(Duration.zero);
         }
-        
         // Ensure we have enough bytes for at least a header
         while (buffer.length < headerSize) {
           if (_closed || _connection.isClosed) { // Check before read
              await _cleanupWithoutFrames(); return;
           }
-          
+
           final bytesNeeded = headerSize - buffer.length;
 
-          final readStartTime = DateTime.now();
           final chunk = await _connection.read(bytesNeeded);
-          final readDuration = DateTime.now().difference(readStartTime);
           
 
           if (chunk.isEmpty) { // Connection closed by peer
@@ -269,15 +266,14 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final frameBytesForParser = buffer.sublist(0, expectedTotalFrameLength);
         final frame = YamuxFrame.fromBytes(frameBytesForParser);
 
-        // [FRAME-TRACE] Log every frame received for diagnosing B→A data loss
-        _log.fine('$_logPrefix [FRAME-TRACE] #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
+        _log.fine('$_logPrefix Frame #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
 
         final handleStartTime = DateTime.now();
 
         try {
           await _handleFrame(frame);
           final handleDuration = DateTime.now().difference(handleStartTime);
-          
+
           // Record frame processing time for adaptive behavior
           _recordFrameProcessingTime(handleDuration);
 
@@ -286,7 +282,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
           _log.severe('$_logPrefix 🔧 [YAMUX-FRAME-READER-HANDLE-ERROR-$frameCount] Frame handling failed after ${handleDuration.inMilliseconds}ms: $e\n$st');
           rethrow;
         }
-        
+
         buffer = buffer.sublist(expectedTotalFrameLength);
         final loopDuration = DateTime.now().difference(loopStartTime);
       }

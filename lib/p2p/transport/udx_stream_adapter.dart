@@ -46,8 +46,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Constructor: udxStreamId=${udxStream.id}, direction=$_direction');
     _udxStreamDataSubscription = _udxStream.data.listen(
             (data) {
-          // DEBUG: Log ALL incoming data to trace server-side data reception
-          _logger.fine('[UDXP2PStreamAdapter ${id()}] 📨 DATA ARRIVED: ${data.length} bytes, hasPendingRead=${_pendingReadCompleter != null}, bufferSize=${_readBuffer.length}, isClosed=$_isClosed');
+          _logger.fine('[UDXP2PStreamAdapter ${id()}] Data arrived: ${data.length} bytes, hasPendingRead=${_pendingReadCompleter != null}, bufferSize=${_readBuffer.length}, isClosed=$_isClosed');
           
           // CRITICAL: Check and null out the completer atomically to prevent
           // race condition where UDX delivers multiple data events synchronously
@@ -130,9 +129,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
 
   @override
   Future<Uint8List> read([int? maxLength]) async {
-    // DEBUG: Detailed logging for tracing read flow - including subscription state
-    final subscriptionActive = _udxStreamDataSubscription != null;
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] 📖 read(maxLength=$maxLength) CALLED. bufferSize=${_readBuffer.length}, isClosed=$_isClosed, hasPendingRead=${_pendingReadCompleter != null}, subscriptionActive=$subscriptionActive');
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] read(maxLength=$maxLength) called. bufferSize=${_readBuffer.length}, isClosed=$_isClosed, hasPendingRead=${_pendingReadCompleter != null}');
 
     if (_isClosed && _readBuffer.isEmpty) {
       _logger.info('[UDXP2PStreamAdapter ${id()}] ⏹️ Stream closed and buffer empty. Returning EOF.');
@@ -142,7 +139,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     if (_readBuffer.isNotEmpty) {
       final currentChunk = _readBuffer.removeAt(0);
       if (maxLength == null || currentChunk.length <= maxLength) {
-        _logger.fine('[UDXP2PStreamAdapter ${id()}] ✅ RETURN FROM BUFFER: ${currentChunk.length} bytes, remainingBuffer=${_readBuffer.length}');
+        _logger.fine('[UDXP2PStreamAdapter ${id()}] Return from buffer: ${currentChunk.length} bytes, remainingBuffer=${_readBuffer.length}');
         return currentChunk;
       } else {
         final toReturn = currentChunk.sublist(0, maxLength);
@@ -158,7 +155,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     // If another read is already pending, wait for it to complete first,
     // then re-check the buffer instead of overwriting the completer
     if (_pendingReadCompleter != null && !_pendingReadCompleter!.isCompleted) {
-      _logger.warning('[UDXP2PStreamAdapter ${id()}] Another read already pending. Waiting for existing read to complete...');
+      _logger.fine('[UDXP2PStreamAdapter ${id()}] Another read already pending. Waiting for existing read to complete...');
       try {
         // Wait for the existing read to complete (it will populate the buffer)
         await _pendingReadCompleter!.future.timeout(
@@ -178,8 +175,7 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
       return read(maxLength);
     }
 
-    final subscriptionActiveBeforeWait = _udxStreamDataSubscription != null;
-    _logger.fine('[UDXP2PStreamAdapter ${id()}] ⏳ Buffer empty, creating _pendingReadCompleter and WAITING for data... subscriptionActive=$subscriptionActiveBeforeWait');
+    _logger.fine('[UDXP2PStreamAdapter ${id()}] Buffer empty, creating _pendingReadCompleter and waiting for data...');
     _pendingReadCompleter = Completer<Uint8List>();
 
     try {

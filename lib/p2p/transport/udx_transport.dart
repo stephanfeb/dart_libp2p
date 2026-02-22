@@ -850,17 +850,17 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     // For negotiation purposes, read from the initial stream.
     // The 'length' parameter for TransportConn.read is a suggestion,
     // P2PStream.read also takes an optional maxLength.
-    _logger.fine('[UDXSessionConn $id] read() delegating to initialP2PStream.read(length: $length). Stream isClosed: ${initialP2PStream.isClosed}, Session _isClosed: $_isClosed, _isClosing: $_isClosing');
-    
+    _logger.fine('[UDXSessionConn $id] read() delegating to initialP2PStream.read(length: $length)');
+
     // Fail fast if session is closing/closed
     if (_isClosed || _isClosing) {
-      _logger.warning('[UDXSessionConn $id] read() called on closing/closed session. Returning empty (EOF).');
+      _logger.fine('[UDXSessionConn $id] read() called on closing/closed session. Returning empty (EOF).');
       return Uint8List(0);
     }
-    
+
     final result = await initialP2PStream.read(length);
     if (result.isEmpty) {
-      _logger.warning('[UDXSessionConn $id] read() returned EMPTY DATA (EOF signal). Stream isClosed: ${initialP2PStream.isClosed}');
+      _logger.fine('[UDXSessionConn $id] read() returned empty data (EOF signal). Stream isClosed: ${initialP2PStream.isClosed}');
     }
     return result;
   }

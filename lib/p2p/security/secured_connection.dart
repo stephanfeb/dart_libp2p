@@ -237,9 +237,7 @@ class SecuredConnection implements TransportConn {
   @override
   Future<Uint8List> read([int? length]) async {
     // Acquire read lock to ensure message framing integrity
-    _log.fine('SecuredConnection.read: 🔒 ACQUIRING read lock for length=$length');
     await _acquireReadLock();
-    _log.fine('SecuredConnection.read: 🔒 READ LOCK ACQUIRED for length=$length');
     
     try {
       _log.finer('SecuredConnection.read: Called with length: $length, _decryptedBuffer.length: ${_decryptedBuffer.length}'); // ADDED
@@ -263,7 +261,7 @@ class SecuredConnection implements TransportConn {
     while (_decryptedBuffer.length < length) {
       Uint8List decryptedChunk;
       try {
-        _log.finer('SecuredConnection.read (length=$length): _decryptedBuffer.length (${_decryptedBuffer.length}) < requested ($length). Calling _readAndDecryptMessage().'); // ADDED
+        _log.finer('SecuredConnection.read (length=$length): _decryptedBuffer.length (${_decryptedBuffer.length}) < requested ($length). Calling _readAndDecryptMessage().');
         decryptedChunk = await _readAndDecryptMessage();
       } catch (e) {
         _log.finer('SecuredConnection.read (length=$length): Error in _readAndDecryptMessage: $e. Current _decryptedBuffer.length: ${_decryptedBuffer.length}'); // ADDED
@@ -328,15 +326,15 @@ class SecuredConnection implements TransportConn {
       
       final remaining = expectedLength - buffer.length;
       _log.fine('SecuredConnection: _readFullMessage attempt $readAttempts: need $remaining more bytes (have ${buffer.length}/$expectedLength)');
-      
+
       final chunk = await _connection.read(remaining);
-      
+
       if (chunk.isEmpty) {
         _log.fine('SecuredConnection: _readFullMessage got EOF after $readAttempts attempts. Expected: $expectedLength, Got: ${buffer.length}');
         break; // EOF - return what we have
       }
-      
-      _log.fine('SecuredConnection: _readFullMessage attempt $readAttempts: received ${chunk.length} bytes. First 4 bytes: ${chunk.take(4).toList()}');
+
+      _log.fine('SecuredConnection: _readFullMessage attempt $readAttempts: received ${chunk.length} bytes');
       
       // Efficiently append chunk to buffer
       final newBuffer = Uint8List(buffer.length + chunk.length);
@@ -359,9 +357,8 @@ class SecuredConnection implements TransportConn {
     // This method now encapsulates reading one full encrypted message and decrypting it.
     // It handles partial reads from the underlying transport robustly.
     // Uses 2-byte big-endian length prefix per libp2p Noise spec (max 65535 bytes per frame).
-    _log.finer('SecuredConnection: Reading length prefix (2 bytes)');
+    _log.finer('SecuredConnection: _readAndDecryptMessage: reading 2-byte length prefix...');
     final lengthBytes = await _readFullMessage(2);
-    _log.finer('SecuredConnection: Length prefix bytes: [${lengthBytes[0]}, ${lengthBytes[1]}]');
     _log.finer('SecuredConnection: FROM_UNDERLYING_READ (Length Prefix) - Bytes: ${hex.encode(lengthBytes)}');
 
     if (lengthBytes.isEmpty) {
@@ -374,13 +371,13 @@ class SecuredConnection implements TransportConn {
     }
 
     final dataLength = (lengthBytes[0] << 8) | lengthBytes[1];
-    _log.finer('SecuredConnection: Got length prefix: $dataLength');
+    _log.finer('SecuredConnection: _readAndDecryptMessage: parsed length=$dataLength, recvNonce=$_recvNonce');
 
     if (dataLength == 0) return Uint8List(0); // Valid empty message
 
-    _log.finer('SecuredConnection: Reading combined data of length $dataLength');
+    _log.finer('SecuredConnection: _readAndDecryptMessage: reading $dataLength bytes of encrypted data...');
     final combinedData = await _readFullMessage(dataLength);
-    _log.finer('SecuredConnection: FROM_UNDERLYING_READ (Message Body) - Length: ${combinedData.length}, Bytes: ${hex.encode(combinedData)}');
+    _log.finer('SecuredConnection: _readAndDecryptMessage: got ${combinedData.length} bytes of encrypted data');
 
     if (combinedData.length < dataLength) {
       _log.finer('SecuredConnection: Connection closed while reading message body. Expected: $dataLength, Got: ${combinedData.length}');
@@ -414,7 +411,7 @@ class SecuredConnection implements TransportConn {
         secretKey: _decryptionKey,
         aad: Uint8List(0),
       );
-      _log.fine('SecuredConnection: ✅ DECRYPTION SUCCESS for RECV NONCE=$nonceValue, got ${plaintext.length} bytes');
+      _log.fine('SecuredConnection: Decryption success nonce=$nonceValue, ${plaintext.length} bytes');
       return Uint8List.fromList(plaintext);
     } catch (e) {
       _log.severe('SecuredConnection: ❌ DECRYPTION FAILED for RECV NONCE=$nonceValue with error: $e');

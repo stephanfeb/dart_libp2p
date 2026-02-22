@@ -1240,9 +1240,20 @@ class Swarm implements Network {
     }
   }
   
-  /// Immediately removes a failed connection
+  /// Removes a failed connection, respecting protection tags.
+  /// Protected connections (e.g., Ricochet servers) get their health reset
+  /// instead of being removed, to prevent permanent loss of critical connections.
   Future<void> _removeFailedConnection(SwarmConn conn) async {
     try {
+      // Protected connections should not be permanently removed — reset health
+      // to give them another chance. This prevents the cascade where a timeout
+      // removes a server connection and addresses expire, making recovery impossible.
+      if (_host?.connManager.isProtected(conn.remotePeer, '') ?? false) {
+        _logger.warning('Swarm: Protected connection ${conn.id} to ${conn.remotePeer} has failed - resetting health instead of removing');
+        conn.healthMetrics.recordPathUpdate(); // resets consecutive errors and state to healthy
+        return;
+      }
+
       _logger.warning('Swarm: Removing failed connection ${conn.id} to ${conn.remotePeer}');
       await removeConnection(conn);
       await conn.close();

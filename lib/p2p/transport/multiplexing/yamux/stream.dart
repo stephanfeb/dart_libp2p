@@ -903,17 +903,22 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       
       // Send window update when threshold reached.
       // Fire-and-forget: don't block the read loop waiting for the write to complete.
-      // Update local state immediately so we don't reject data that arrives
-      // while the window update send is queued on the write lock.
+      // If the send fails, restore the consumed bytes so they're included in the
+      // next window update attempt — otherwise lost bytes permanently reduce the
+      // remote sender's credit and stall the stream.
       if (_consumedBytesForLocalWindowUpdate >= _minWindowUpdateBytes) {
         final bytesToUpdate = _consumedBytesForLocalWindowUpdate;
         _consumedBytesForLocalWindowUpdate = 0;
         _localReceiveWindow += bytesToUpdate;
         final updateFrame = YamuxFrame.windowUpdate(streamId, bytesToUpdate);
-        _sendFrame(updateFrame).catchError((e) {
-          _log.warning('$_logPrefix Error sending window update for $bytesToUpdate bytes: $e');
+        _sendFrame(updateFrame).then((_) {
+          _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Sent window update for $bytesToUpdate bytes');
+        }).catchError((e) {
+          // Restore consumed bytes so they'll be included in the next window update.
+          _consumedBytesForLocalWindowUpdate += bytesToUpdate;
+          _localReceiveWindow -= bytesToUpdate;
+          _log.warning('$_logPrefix Error sending window update for $bytesToUpdate bytes (will retry): $e');
         });
-        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Queued window update for $bytesToUpdate bytes');
       }
     }
 

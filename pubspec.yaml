@@ -25,7 +25,8 @@ dependencies:
 
   base_x: ^2.0.0
 
-  dart_udx: ^2.0.3
+  dart_udx:
+    path: ../dart-udx
 
   dcid: ^1.0.0
 
@@ -47,3 +48,7 @@ dev_dependencies:
   test: ^1.24.0
   protoc_plugin: ^21.1.2
   lints: ^2.1.0
+
+dependency_overrides:
+  dart_udx:
+    path: ../dart-udx
