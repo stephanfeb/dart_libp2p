@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-02-22
+
+### Fixed
+- **AutoNAT v2 go-libp2p interop** — Client and server now use varint-length-prefixed (delimited) message framing, matching go-libp2p's `pbio.NewDelimitedReader`/`Writer`. Previously raw protobuf bytes were written without length prefixes, causing `Message_Msg.notSet` parse errors when communicating with go-libp2p AutoNAT v2 servers.
+- **AutoNAT v2 probe spam** — AmbientAutoNATv2 now checks for available peers before attempting a probe, avoiding noisy `Exception: no valid peers for autonat v2` errors with full stack traces every 5 seconds during startup.
+- **AutoNAT v2 backoff** — When no AutoNAT v2 peers are available, probes now use exponential backoff (10s, 20s, 40s, 60s cap) instead of retrying at the fixed retry interval.
+- **AutoNAT v2 log levels** — Probe errors downgraded from `severe` (with stack trace) to `warning`; no-peers condition logged at `fine` level.
+
+### Added
+- `AutoNATv2.hasPeers` getter to check peer availability without throwing exceptions.
+- Initial `UNKNOWN` reachability event emitted on the no-peers path so AutoRelay can start even without AutoNAT v2 peers.
+
 ## [1.0.1] - 2026-02-21
 
 ### Added

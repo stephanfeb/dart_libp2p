@@ -88,6 +88,9 @@ class AutoNATv2Impl implements AutoNATv2 {
   }
 
   @override
+  bool get hasPeers => _peers._peers.isNotEmpty;
+
+  @override
   Future<Result> getReachability(List<Request> requests) async {
     // Check if addresses are public
     if (!allowPrivateAddrs) {

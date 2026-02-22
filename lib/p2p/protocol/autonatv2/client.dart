@@ -14,6 +14,7 @@ import '../../../core/multiaddr.dart';
 import '../../../core/network/context.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/network/stream.dart';
+import '../../../utils/protobuf_utils.dart';
 
 final _log = Logger('autonatv2.client');
 
@@ -97,15 +98,14 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
     _dialBackQueues[nonce] = completer;
 
     try {
-      // Create and send the dial request
+      // Create and send the dial request (varint-length-prefixed)
       final request = _createDialRequest(requests, nonce);
-      await stream.write(request.writeToBuffer());
+      await writeDelimited(stream, request);
 
-      // Read the response
+      // Read the response (varint-length-prefixed)
       Message response;
       try {
-        final responseData = await stream.read();
-        response = Message.fromBuffer(responseData);
+        response = await readDelimited(stream, Message.fromBuffer);
       } catch (e) {
         stream.reset();
         throw Exception('Dial message read failed: $e');
@@ -124,10 +124,9 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
           throw Exception('Invalid dial data request: $e');
         }
 
-        // Read the dial response after sending dial data
+        // Read the dial response after sending dial data (varint-length-prefixed)
         try {
-          final responseData = await stream.read();
-          response = Message.fromBuffer(responseData);
+          response = await readDelimited(stream, Message.fromBuffer);
         } catch (e) {
           stream.reset();
           throw Exception('Dial response read failed: $e');
@@ -226,7 +225,7 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
     await _sendDialData(stream, dialDataRequest.numBytes.toInt());
   }
 
-  /// Send dial data
+  /// Send dial data (varint-length-prefixed)
   Future<void> _sendDialData(P2PStream stream, int numBytes) async {
     int remain = numBytes;
     while (remain > 0) {
@@ -236,7 +235,7 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
       final response = Message()
         ..dialDataResponse = (DialDataResponse()..data = data);
 
-      await stream.write(response.writeToBuffer());
+      await writeDelimited(stream, response);
       remain -= dataSize;
     }
   }
@@ -302,11 +301,10 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
     // Set deadline
     stream.setDeadline(DateTime.now().add(dialBackStreamTimeout));
 
-    // Read the dial-back message
+    // Read the dial-back message (varint-length-prefixed)
     DialBack? dialBack;
     try {
-      final data = await stream.read();
-      dialBack = DialBack.fromBuffer(data);
+      dialBack = await readDelimited(stream, DialBack.fromBuffer);
     } catch (e) {
       _log.fine('Failed to read dialback msg from ${stream.conn.remoteMultiaddr}: $e');
       stream.reset();
@@ -332,10 +330,10 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
       return;
     }
 
-    // Send a response
+    // Send a response (varint-length-prefixed)
     try {
       final response = DialBackResponse()..status = DialBackResponse_DialBackStatus.OK;
-      await stream.write(response.writeToBuffer());
+      await writeDelimited(stream, response);
     } catch (e) {
       _log.fine('Failed to write dialback response: $e');
       stream.reset();
