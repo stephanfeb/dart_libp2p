@@ -96,7 +96,9 @@ Future<BasicHost> createHost(KeyPair keyPair, String relayServerAddr) async {
   ];
 
   final host = await p2p_config.Libp2p.new_(hostOptions) as BasicHost;
-  await host.start();
+  // DON'T start here — caller must start AFTER registering all protocol
+  // handlers (e.g., DHT).  Starting too early lets AutoRelay connect before
+  // DHT advertises /ipfs/kad/1.0.0, causing Go to mark us "peer stopped dht".
   return host;
 }
 
@@ -140,7 +142,6 @@ Future<void> main(List<String> arguments) async {
     stderr.writeln('Phase 1: Create host + Start DHT (matching production config)');
     try {
       host = await createHost(localKeyPair, targetAddrStr);
-      stderr.writeln('  Dart host listening on: ${host.addrs}');
 
       // DHT in client mode with production options (dht_actor.dart:81-107)
       final dhtOptions = <DHTOption>[
@@ -164,8 +165,15 @@ Future<void> main(List<String> arguments) async {
         bootstrapPeers([AddrInfo(targetPeerId, [connectAddr])]),
       ];
 
+      // Create and start DHT BEFORE starting the host.
+      // This ensures /ipfs/kad/1.0.0 is registered when AutoRelay
+      // connects to Go and triggers the first Identify exchange.
       dht = await DHT.new_(host, MemoryProviderStore(), dhtOptions);
       await dht.start();
+
+      // Now start the host — AutoRelay will connect with DHT advertised.
+      await host.start();
+      stderr.writeln('  Dart host listening on: ${host.addrs}');
       report('Host + DHT started (client mode)', true);
     } catch (e) {
       report('Host + DHT start', false, '$e');

@@ -61,11 +61,14 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   final _streams = <int, YamuxStream>{};
   int _nextStreamId;
   Future<void> Function(P2PStream stream)? _streamHandler;
-  // Using broadcast controller
-  final _incomingStreamsController = StreamController<P2PStream>.broadcast();
-  // Completer-based approach to prevent race condition where acceptStream()
-  // misses events if SYN arrives before .first listener attaches
-  Completer<P2PStream>? _pendingAcceptStreamCompleter;
+  // Buffered queue for incoming streams. Streams that arrive between
+  // acceptStream() calls are queued here instead of being lost.
+  // The previous broadcast controller dropped events when no listener
+  // was attached — causing Go's DHT streams to never be handled.
+  final _incomingStreamQueue = Queue<P2PStream>();
+  // Completer signalled when a new stream is added to the queue.
+  // acceptStream() awaits this when the queue is empty.
+  Completer<void>? _incomingStreamNotifier;
   bool _closed = false;
   bool _cleanupStarted = false; 
   final _initCompleter = Completer<void>();
@@ -79,10 +82,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   static const Duration _pingTimeout = Duration(seconds: 30);
   static const int _pingTimeoutThreshold = 5; // Close after this many timeouts
   
-  // Write lock to serialize frame writes and prevent Noise encryption nonce desync
-  // This ensures encryption operations complete sequentially to maintain nonce ordering
-  final Queue<Completer<void>> _writeLockQueue = Queue<Completer<void>>();
-  bool _writeLockHeld = false;
+  // Note: No write lock at this level. SecuredConnection handles serialization
+  // of encryption (nonce ordering) and UDX transmission via its async write queue.
+  // This allows yamux control frames (SYN-ACK, WINDOW_UPDATE, PING) to be
+  // encrypted and queued without waiting for slow data frame UDX transmission.
 
   YamuxSession(this._connection, this._config, this._isClient, [this._peerScope, this.metricsObserver])
       : _instanceId = _instanceCounter++, 
@@ -480,14 +483,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       final peer = _remotePeerOrNull;
       if (peer != null) metricsObserver?.onStreamOpened(peer, frame.streamId, stream.protocol());
 
-      // Check if there's a pending acceptStream() call waiting for a stream
-      if (_pendingAcceptStreamCompleter != null && !_pendingAcceptStreamCompleter!.isCompleted) {
-        _pendingAcceptStreamCompleter!.complete(stream);
-        _pendingAcceptStreamCompleter = null;
+      // Add to the buffered queue so no stream is ever lost.
+      _incomingStreamQueue.add(stream);
+      // Wake up any pending acceptStream() call.
+      if (_incomingStreamNotifier != null && !_incomingStreamNotifier!.isCompleted) {
+        _incomingStreamNotifier!.complete();
+        _incomingStreamNotifier = null;
       }
-
-      // Always add to controller for broadcast stream listeners
-      _incomingStreamsController.add(stream);
 
       // If there's a stream handler, invoke it
       if (_streamHandler != null) {
@@ -542,8 +544,15 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     await _goAway(reason);
   }
 
+  /// Sends a yamux frame to the underlying (secured) connection.
+  ///
+  /// No write lock at this level — SecuredConnection handles serialization of
+  /// encryption (nonce ordering) via its own write lock, and serialization of
+  /// UDX transmission via its async write queue. This means multiple yamux
+  /// frames can be encrypted concurrently (in nonce order) and queued for
+  /// transmission without blocking each other on UDX flow control.
   Future<void> _sendFrame(YamuxFrame frame) async {
-    if (_closed && !_cleanupStarted) { // Allow sending GO_AWAY even if _closed is true but cleanup hasn't started
+    if (_closed && !_cleanupStarted) {
         if (frame.type != YamuxFrameType.goAway) {
              throw StateError('Session is closing/closed, cannot send frame type ${frame.type}');
         }
@@ -551,80 +560,25 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         return; // Suppress send if cleanup fully started
     }
 
-    // Acquire write lock to serialize frame writes and prevent Noise encryption nonce desync
-    final lockAcquireStart = DateTime.now();
-    await _acquireWriteLock();
-    final lockAcquireDuration = DateTime.now().difference(lockAcquireStart);
-    
-    try {
-      // Detailed logging for outgoing frames, especially Identify SYN
-      if (frame.streamId == 1 && (frame.flags & YamuxFlags.syn != 0)) {
-        final bytes = frame.toBytes();
-      }
-      
-      // [FRAME-SEND] Log every frame sent for diagnosing B→A data loss
-      final frameBytes = frame.toBytes();
-      _log.fine('$_logPrefix [FRAME-SEND] type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data.length}" : ""} wireBytes=${frameBytes.length} lockWait=${lockAcquireDuration.inMilliseconds}ms');
+    final frameBytes = frame.toBytes();
+    _log.fine('$_logPrefix [FRAME-SEND] type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data.length}" : ""} wireBytes=${frameBytes.length}');
 
+    try {
       final writeStart = DateTime.now();
       await _connection.write(frameBytes);
       final writeDuration = DateTime.now().difference(writeStart);
 
-      // Log write completion for DATA frames (the ones we're losing)
       if (frame.type == YamuxFrameType.dataFrame) {
         _log.fine('$_logPrefix [FRAME-SEND-DONE] streamID=${frame.streamId} dataLen=${frame.data.length} writeDuration=${writeDuration.inMilliseconds}ms');
       }
     } catch (e) {
       _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
-      if (!_closed) { // If not already closing due to this error, initiate closure.
+      if (!_closed) {
         _log.warning('$_logPrefix Error sending frame indicates session issue. Initiating GO_AWAY. Error: $e.');
-        // Fire-and-forget — don't await to avoid deadlocks if _goAway itself tries to send.
         _goAway(YamuxCloseReason.internalError);
       }
-      rethrow; // Rethrow to allow caller to handle (e.g., stream reset)
-    } finally {
-      // Release write lock
-      _releaseWriteLock();
+      rethrow;
     }
-  }
-
-  /// Acquire write lock to serialize frame writes.
-  /// This prevents concurrent encryption operations which would cause
-  /// Noise encryption nonce desynchronization and MAC authentication errors.
-  /// 
-  /// The lock ensures that each frame:
-  /// 1. Gets its nonce assigned
-  /// 2. Completes encryption
-  /// 3. Is sent to the underlying connection
-  /// 4. THEN the next frame can start
-  /// 
-  /// Uses queue-first pattern to prevent race conditions where multiple callers
-  /// could pass the "lock available" check before any of them acquires it.
-  Future<void> _acquireWriteLock() async {
-    final completer = Completer<void>();
-    _writeLockQueue.add(completer);
-
-    // Try to grant lock immediately if available
-    _tryGrantWriteLock();
-
-    // Wait for our turn
-    await completer.future;
-  }
-
-  /// Attempts to grant the write lock to the next waiter if the lock is free.
-  /// This method is synchronous to ensure atomic check-and-grant.
-  void _tryGrantWriteLock() {
-    if (!_writeLockHeld && _writeLockQueue.isNotEmpty) {
-      _writeLockHeld = true;
-      final next = _writeLockQueue.removeFirst();
-      next.complete();
-    }
-  }
-
-  /// Release write lock, allowing the next queued write to proceed
-  void _releaseWriteLock() {
-    _writeLockHeld = false;
-    _tryGrantWriteLock();
   }
 
   Future<void> _goAway(YamuxCloseReason reason) async {
@@ -755,51 +709,34 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   @override
   Future<YamuxStream> acceptStream() async {
-    // Changed from AND to OR - if either is closed, we can't accept
-    if (_closed || _incomingStreamsController.isClosed) {
-        throw StateError('Session is closed, cannot accept new streams.');
+    if (_closed) {
+      throw StateError('Session is closed, cannot accept new streams.');
     }
-    
-    // Use completer-based approach to avoid race condition
-    _pendingAcceptStreamCompleter = Completer<P2PStream>();
-    
-    try {
-      // Race between the completer (set by _handleNewStream) and the stream listener
-      // This handles the race condition where a SYN arrives before .first attaches
-      final p2pStream = await Future.any([
-        _pendingAcceptStreamCompleter!.future,
-        incomingStreams.first.catchError((e) {
-          // If .first fails with StateError (no element), check if session is closed
-          if (e is StateError) {
-            if (_closed || _incomingStreamsController.isClosed) {
-              throw StateError('Session closed while waiting for stream');
-            }
-          }
-          throw e;
-        }),
-      ]);
-      
-      if (p2pStream is YamuxStream) {
-        return p2pStream;
-      } else {
-        throw StateError('Incoming stream is not a YamuxStream, which is unexpected.');
+
+    // Drain from the buffered queue. If empty, wait for notification.
+    while (_incomingStreamQueue.isEmpty) {
+      if (_closed) {
+        throw StateError('Session closed while waiting for stream');
       }
-    } catch (e) {
-      // Handle errors from both the completer and the stream
-      if (e is StateError) {
-        // Propagate StateError as is
-        rethrow;
-      }
-      // For other errors, wrap them
-      throw StateError('Error waiting for stream: $e');
-    } finally {
-      // Clean up the completer
-      _pendingAcceptStreamCompleter = null;
+      _incomingStreamNotifier = Completer<void>();
+      await _incomingStreamNotifier!.future;
+    }
+
+    final p2pStream = _incomingStreamQueue.removeFirst();
+    if (p2pStream is YamuxStream) {
+      return p2pStream;
+    } else {
+      throw StateError('Incoming stream is not a YamuxStream, which is unexpected.');
     }
   }
 
   @override
-  Stream<P2PStream> get incomingStreams => _incomingStreamsController.stream;
+  Stream<P2PStream> get incomingStreams {
+    // Legacy interface — callers should use acceptStream() instead.
+    // Returns an empty stream; the queue-based acceptStream() is the
+    // primary API for consuming incoming streams.
+    return const Stream<P2PStream>.empty();
+  }
 
   @override
   Future<void> close() async {
@@ -859,12 +796,13 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       }
     }
 
-    try {
-      if (!_incomingStreamsController.isClosed) {
-        await _incomingStreamsController.close();
-      }
-    } catch (e) {
-      _log.warning('$_logPrefix _cleanupWithoutFrames: Error closing incoming streams controller: $e');
+    // Clear any buffered incoming streams and wake up pending acceptStream().
+    _incomingStreamQueue.clear();
+    if (_incomingStreamNotifier != null && !_incomingStreamNotifier!.isCompleted) {
+      _incomingStreamNotifier!.completeError(
+        StateError('Session closed while waiting for stream'),
+      );
+      _incomingStreamNotifier = null;
     }
 
     try {

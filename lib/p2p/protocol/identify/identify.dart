@@ -310,8 +310,9 @@ class IdentifyService implements IDService {
     host.setStreamHandler(id, handleIdentifyRequest); 
     host.setStreamHandler(idPush, handlePush); 
 
-    // Update snapshot
-    _updateSnapshot();
+    // Update snapshot — must be awaited so the initial snapshot is built
+    // before any connections can trigger Identify exchanges.
+    await _updateSnapshot();
 
     // Mark setup as completed
     _setupCompleted.complete();
@@ -761,6 +762,11 @@ class IdentifyService implements IDService {
     }
 
     try {
+      // Force a snapshot refresh to ensure we advertise all registered
+      // protocols.  The event-driven update (EvtLocalProtocolsUpdated) can
+      // be missed if the event bus subscription's async addSink hasn't
+      // completed when the event is emitted.
+      await _updateSnapshot();
       _log.finer('IdentifyService.sendIdentifyResp: Acquiring current snapshot for $peer.');
       final snapshot = await _currentSnapshotMutex.synchronized( () => _currentSnapshot);
       _log.fine('IdentifyService.sendIdentifyResp: Sending snapshot to $peer: seq=${snapshot._seq}, protocols=${snapshot.protocols.length}, addrs=${snapshot.addrs.length}');

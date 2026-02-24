@@ -90,6 +90,13 @@ class _DecryptedDataBuffer {
   }
 }
 
+/// A pending encrypted write waiting for UDX transmission.
+class _PendingEncryptedWrite {
+  final Uint8List encryptedData;
+  final Completer<void> completer;
+  _PendingEncryptedWrite(this.encryptedData, this.completer);
+}
+
 /// A connection secured by a security protocol
 class SecuredConnection implements TransportConn {
   final TransportConn _connection;
@@ -109,11 +116,19 @@ class SecuredConnection implements TransportConn {
   final Queue<Completer<void>> _readLockQueue = Queue<Completer<void>>();
   bool _readLockHeld = false;
   
-  // Write lock to serialize write operations and prevent data interleaving
-  // Without this, multiple concurrent writes can interleave their chunks,
-  // causing the reader to see mixed encrypted data from different messages.
+  // Write lock to serialize ENCRYPTION operations and prevent nonce desync.
+  // This lock only covers nonce assignment + encryption (microseconds), NOT
+  // the underlying UDX transmission (which can block for seconds on flow control).
+  // Encrypted frames are enqueued to _pendingWrites and drained asynchronously.
   final Queue<Completer<void>> _writeLockQueue = Queue<Completer<void>>();
   bool _writeLockHeld = false;
+
+  // Async write queue: encrypted frames are enqueued under the write lock,
+  // then transmitted by a single writer loop without holding any lock.
+  // This prevents UDX flow control stalls from blocking yamux control frames
+  // (SYN-ACK, WINDOW_UPDATE, PING) behind slow data frame transmissions.
+  final Queue<_PendingEncryptedWrite> _pendingWrites = Queue<_PendingEncryptedWrite>();
+  bool _writeLoopActive = false;
 
   SecuredConnection(
       this._connection,
@@ -426,12 +441,14 @@ class SecuredConnection implements TransportConn {
     }
   }
 
-  /// Writes a single Noise transport frame: 2-byte big-endian length + encrypted data + MAC.
-  Future<void> _writeFrame(Uint8List plaintext) async {
+  /// Encrypts a single Noise transport frame (nonce assignment + ChaCha20-Poly1305).
+  /// Returns the wire-format bytes: 2-byte big-endian length + ciphertext + MAC.
+  /// MUST be called under the write lock to preserve nonce ordering.
+  Future<Uint8List> _encryptFrame(Uint8List plaintext) async {
     final algorithm = crypto.Chacha20.poly1305Aead();
     final nonceValue = _sendNonce++;
     final nonce = _getNonce(nonceValue);
-    _log.fine('SecuredConnection: 🔑 ENCRYPTING with SEND NONCE=$nonceValue');
+    _log.fine('SecuredConnection: ENCRYPTING with SEND NONCE=$nonceValue');
 
     final secretBox = await algorithm.encrypt(
       plaintext,
@@ -441,45 +458,103 @@ class SecuredConnection implements TransportConn {
     );
 
     final dataLength = secretBox.cipherText.length + secretBox.mac.bytes.length;
-    _log.finer('SecuredConnection: Writing frame: $dataLength bytes (plaintext was ${plaintext.length})');
+    _log.finer('SecuredConnection: Encrypted frame: $dataLength bytes (plaintext was ${plaintext.length})');
 
     // 2-byte big-endian length prefix per libp2p Noise spec
-    final combinedData = Uint8List(2 + dataLength)
+    return Uint8List(2 + dataLength)
       ..[0] = (dataLength >> 8) & 0xFF
       ..[1] = dataLength & 0xFF
       ..setAll(2, secretBox.cipherText)
       ..setAll(2 + secretBox.cipherText.length, secretBox.mac.bytes);
+  }
 
-    _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${combinedData.length}');
-    await _connection.write(combinedData);
+  /// Starts the write loop if not already running.
+  /// The write loop drains _pendingWrites FIFO, transmitting encrypted frames
+  /// to the underlying connection WITHOUT holding the encryption write lock.
+  void _startWriteLoop() {
+    if (_writeLoopActive) return;
+    _writeLoopActive = true;
+    _drainPendingWrites();
+  }
+
+  /// Drains the pending write queue, sending each encrypted frame to the
+  /// underlying transport. Runs without any lock held, so encryption of
+  /// new frames can proceed concurrently with UDX transmission.
+  Future<void> _drainPendingWrites() async {
+    while (_pendingWrites.isNotEmpty) {
+      final pw = _pendingWrites.removeFirst();
+      try {
+        _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${pw.encryptedData.length}');
+        await _connection.write(pw.encryptedData);
+        if (!pw.completer.isCompleted) {
+          pw.completer.complete();
+        }
+      } catch (e) {
+        if (!pw.completer.isCompleted) {
+          pw.completer.completeError(e);
+        }
+        // Fail all remaining writes in the queue — the connection is broken
+        while (_pendingWrites.isNotEmpty) {
+          final remaining = _pendingWrites.removeFirst();
+          if (!remaining.completer.isCompleted) {
+            remaining.completer.completeError(e);
+          }
+        }
+        break;
+      }
+    }
+    _writeLoopActive = false;
+    // Check if more writes were enqueued while we were draining
+    if (_pendingWrites.isNotEmpty) {
+      _startWriteLoop();
+    }
   }
 
   @override
   Future<void> write(Uint8List data) async {
-    // Acquire write lock to ensure writes are atomic and don't interleave
+    _log.finer('SecuredConnection.write: Plaintext data received (length: ${data.length}, first 20 bytes: ${data.take(20).toList()})');
+
+    // libp2p Noise spec: 2-byte length prefix, max 65535 bytes per frame.
+    // Max plaintext per frame = 65535 - 16 (MAC) = 65519 bytes.
+    const maxPlaintextPerFrame = 65535 - 16;
+
+    // Phase 1: Encrypt all chunks under the write lock (fast — microseconds).
+    // The lock only covers nonce assignment + ChaCha20 encryption, NOT the
+    // slow UDX transmission. This prevents yamux control frames (SYN-ACK,
+    // WINDOW_UPDATE) from being blocked behind data frame UDX flow control.
+    final encryptedChunks = <Uint8List>[];
     await _acquireWriteLock();
-    
     try {
-      _log.finer('SecuredConnection.write: Plaintext data received (length: ${data.length}, first 20 bytes: ${data.take(20).toList()})');
-
-      // libp2p Noise spec: 2-byte length prefix, max 65535 bytes per frame.
-      // Max plaintext per frame = 65535 - 16 (MAC) = 65519 bytes.
-      const maxPlaintextPerFrame = 65535 - 16;
-
-      // Chunk data if it exceeds max plaintext per frame
       var offset = 0;
       do {
         final chunkEnd = (offset + maxPlaintextPerFrame < data.length)
             ? offset + maxPlaintextPerFrame
             : data.length;
         final chunk = data.sublist(offset, chunkEnd);
-        await _writeFrame(chunk);
+        encryptedChunks.add(await _encryptFrame(chunk));
         offset = chunkEnd;
       } while (offset < data.length);
     } finally {
-      // Always release the write lock, even if an exception occurs
       _releaseWriteLock();
     }
+
+    // Phase 2: Enqueue encrypted chunks for async transmission.
+    // The write loop sends them in FIFO order (matching nonce order)
+    // without holding any lock that would block other encryptions.
+    final completer = Completer<void>();
+    // Only the LAST chunk's pending write gets the caller's completer;
+    // intermediate chunks get their own completers for error propagation.
+    for (var i = 0; i < encryptedChunks.length; i++) {
+      final isLast = i == encryptedChunks.length - 1;
+      _pendingWrites.add(_PendingEncryptedWrite(
+        encryptedChunks[i],
+        isLast ? completer : Completer<void>(),
+      ));
+    }
+    _startWriteLoop();
+
+    // Wait for all chunks to be transmitted (backpressure to caller).
+    await completer.future;
   }
 
   @override
