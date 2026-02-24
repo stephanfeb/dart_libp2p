@@ -1,0 +1,120 @@
+# Docker Compose for reproducing DHT stream failure after relay reservation over UDX
+#
+# Architecture:
+#   go-server (10.10.3.10) ←→ nat-gateway (10.10.1.10 / 192.168.1.10) ←→ dart-client (192.168.1.100)
+#
+# Netem (delay, jitter, loss) is applied directly on both endpoint containers
+# (go-server eth0 and dart-client eth0) for guaranteed bidirectional degradation.
+# Docker's bridge routing can bypass the nat-gateway's network stack, so applying
+# netem on the endpoints is the only reliable approach.
+# The NAT gateway still handles iptables MASQUERADE for realistic NAT simulation.
+#
+# Usage:
+#   NETEM_DELAY=150ms NETEM_JITTER=40ms NETEM_LOSS=1% \
+#     docker compose up --build --abort-on-container-exit
+
+networks:
+  public_net:
+    driver: bridge
+    name: udx_netem_public
+    ipam:
+      config:
+        - subnet: 10.10.0.0/16
+          gateway: 10.10.0.1
+
+  nat_client_net:
+    driver: bridge
+    name: udx_netem_nat_client
+    # NOT internal — Docker needs to route between bridges via the NAT gateway container
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+
+volumes:
+  shared_data:
+
+services:
+  go-server:
+    build:
+      context: ../../../../../  # agentic/ root directory (for path deps)
+      dockerfile: dart-libp2p/test/integration/udx_dht_relay_netem/containers/go-server/Dockerfile
+    container_name: go-server
+    networks:
+      public_net:
+        ipv4_address: 10.10.3.10
+    cap_add:
+      - NET_ADMIN  # Needed for tc netem
+    environment:
+      - YAMUX_KEEPALIVE_INTERVAL=${YAMUX_KEEPALIVE_INTERVAL:-3}
+      - YAMUX_WRITE_TIMEOUT=${YAMUX_WRITE_TIMEOUT:-10}
+      - LISTEN_PORT=${GO_LISTEN_PORT:-4001}
+      - NETEM_DELAY=${NETEM_DELAY:-0ms}
+      - NETEM_JITTER=${NETEM_JITTER:-0ms}
+      - NETEM_LOSS=${NETEM_LOSS:-0%}
+    volumes:
+      - shared_data:/shared
+    healthcheck:
+      test: ["CMD", "test", "-f", "/shared/peer_id"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  nat-gateway:
+    build:
+      context: ../../holepunch_network/containers/nat-gateway
+    container_name: nat-gateway
+    networks:
+      public_net:
+        ipv4_address: 10.10.1.10
+      nat_client_net:
+        ipv4_address: 192.168.1.10
+    environment:
+      - NAT_TYPE=cone
+      - INTERNAL_SUBNET=192.168.1.0/24
+      - EXTERNAL_INTERFACE=eth0
+      - INTERNAL_INTERFACE=eth1
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    privileged: true
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.route_localnet=1
+    entrypoint: ["/netem-entrypoint.sh"]
+    volumes:
+      - ../containers/nat-gateway/entrypoint.sh:/netem-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/gateway-ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    depends_on:
+      - go-server
+
+  dart-client:
+    build:
+      context: ../../../../../  # agentic/ root directory (for path deps)
+      dockerfile: dart-libp2p/test/integration/udx_dht_relay_netem/containers/dart-client/Dockerfile
+    container_name: dart-client
+    networks:
+      nat_client_net:
+        ipv4_address: 192.168.1.100
+    cap_add:
+      - NET_ADMIN  # Needed for route manipulation
+    environment:
+      - GO_SERVER_ADDR=10.10.3.10
+      - GO_SERVER_PORT=${GO_LISTEN_PORT:-4001}
+      - NAT_GATEWAY=192.168.1.10
+      - PUBLIC_NET_SUBNET=10.10.0.0/16
+      - TEST_WAIT_SECS=${TEST_WAIT_SECS:-15}
+      - NETEM_DELAY=${NETEM_DELAY:-0ms}
+      - NETEM_JITTER=${NETEM_JITTER:-0ms}
+      - NETEM_LOSS=${NETEM_LOSS:-0%}
+    volumes:
+      - shared_data:/shared:ro
+    depends_on:
+      nat-gateway:
+        condition: service_healthy
+      go-server:
+        condition: service_healthy

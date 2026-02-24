@@ -14,6 +14,7 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart' as pb; //
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
+import 'package:logging/logging.dart';
 
 const Duration reserveTimeout = Duration(minutes: 1);
 
@@ -139,11 +140,15 @@ extension ReservationExtension on CircuitV2Client { // Changed from Client to Ci
       }
 
       final addrs = <MultiAddr>[];
+      final _resLog = Logger('Reservation');
+      _resLog.warning('Reservation: parsing ${rsvpData.addrs.length} addresses from relay');
       for (final addrBytes in rsvpData.addrs) {
         try {
           final addr = MultiAddr.fromBytes(Uint8List.fromList(addrBytes));
+          _resLog.warning('Reservation: parsed addr: $addr');
           addrs.add(addr);
         } catch (e) {
+          _resLog.warning('Reservation: ❌ failed to parse addr bytes (${addrBytes.length} bytes): $e');
         }
       }
 

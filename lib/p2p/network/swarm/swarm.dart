@@ -975,8 +975,21 @@ class Swarm implements Network {
       throw Exception('No transport found for address: $addr');
     }
     
+    // For circuit addresses, append /p2p/<destPeerId> so the circuit transport
+    // can identify the destination peer. This mirrors go-libp2p where the swarm
+    // passes peer.ID to Transport.Dial(ctx, addr, peerID).
+    var dialAddr = addr;
+    if (addr.toString().contains('/p2p-circuit')) {
+      final addrStr = addr.toString();
+      final peerIdStr = peerId.toString();
+      if (!addrStr.endsWith('/p2p/$peerIdStr')) {
+        dialAddr = addr.encapsulate(Protocols.p2p.name, peerIdStr);
+        _logger.fine('Swarm._dialSingleAddr: Appended dest peer ID to circuit address: $dialAddr');
+      }
+    }
+
     // Dial the address
-    final transportConn = await transport.dial(addr);
+    final transportConn = await transport.dial(dialAddr);
     
     // Upgrade the connection
     final upgradedConn = await _upgrader.upgradeOutbound(

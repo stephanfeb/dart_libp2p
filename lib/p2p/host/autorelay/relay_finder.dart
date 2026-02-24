@@ -355,23 +355,28 @@ class RelayFinder {
   }
 
   Future<bool> _tryNode(AddrInfo addrInfo) async {
+    _log.warning('RelayFinder: _tryNode: checking ${addrInfo.id.toBase58()}');
     try {
       await host.connect(addrInfo);
     } catch (e) {
+      _log.warning('RelayFinder: _tryNode: failed to connect to ${addrInfo.id.toBase58()}: $e');
       throw Exception('Error connecting to potential relay ${addrInfo.id.toString()}: $e');
     }
 
     final conns = host.network.connsToPeer(addrInfo.id);
     for (Conn conn in conns) {
       if (isRelayAddress(conn.remoteMultiaddr)) {
+        _log.warning('RelayFinder: _tryNode: ${addrInfo.id.toBase58()} is a relay address, skipping');
         throw Exception('Not a public node (is a relay address)');
       }
     }
 
     final supportedProtocols = await host.peerStore.protoBook.supportsProtocols(addrInfo.id, [CircuitV2Protocol.protoIDv2Hop]);
     if (supportedProtocols.isEmpty) {
+        _log.warning('RelayFinder: _tryNode: ${addrInfo.id.toBase58()} does NOT support ${CircuitV2Protocol.protoIDv2Hop}');
         throw _ProtocolNotSupportedException("Doesn't speak circuit v2 hop (${CircuitV2Protocol.protoIDv2Hop})");
     }
+    _log.warning('RelayFinder: _tryNode: ${addrInfo.id.toBase58()} supports relay v2 ✅');
     return true;
   }
 
@@ -386,18 +391,32 @@ class RelayFinder {
 
   Future<void> _maybeConnectToRelay() async {
     int numActiveRelays = await _relayMx.synchronized(() => _relays.length);
-    if (numActiveRelays >= config.desiredRelays) return;
+    if (numActiveRelays >= config.desiredRelays) {
+      _log.warning('RelayFinder: _maybeConnectToRelay: already have enough relays ($numActiveRelays >= ${config.desiredRelays})');
+      return;
+    }
 
     bool canConnect = await _candidateMx.synchronized(() {
-      if (_relays.isEmpty && _candidates.length < config.minCandidates && config.clock.since(_bootTime) < config.bootDelay) {
+      final candidateCount = _candidates.length;
+      final timeSinceBoot = config.clock.since(_bootTime);
+      if (_relays.isEmpty && candidateCount < config.minCandidates && timeSinceBoot < config.bootDelay) {
+        _log.warning('RelayFinder: _maybeConnectToRelay: waiting for boot delay '
+            '(candidates: $candidateCount < ${config.minCandidates}, '
+            'timeSinceBoot: $timeSinceBoot < ${config.bootDelay})');
         return false;
       }
-      return _candidates.isNotEmpty;
+      if (_candidates.isEmpty) {
+        _log.warning('RelayFinder: _maybeConnectToRelay: no candidates available');
+        return false;
+      }
+      _log.warning('RelayFinder: _maybeConnectToRelay: proceeding with $candidateCount candidates');
+      return true;
     });
 
     if (!canConnect) return;
 
     List<Candidate> selectedCandidates = await _candidateMx.synchronized(() => _selectCandidates());
+    _log.warning('RelayFinder: _maybeConnectToRelay: selected ${selectedCandidates.length} candidates to try');
 
     for (var cand in selectedCandidates) {
       PeerId id = cand.addrInfo.id;
@@ -410,6 +429,11 @@ class RelayFinder {
 
       try {
         final rsvp = await _connectToRelay(cand).timeout(const Duration(seconds: 15));
+        _log.warning('RelayFinder: ✅ Reservation succeeded for relay ${id.toBase58()}, '
+            'addrs: ${rsvp.addrs.length}, expire: ${rsvp.expire}');
+        for (var addr in rsvp.addrs) {
+          _log.warning('RelayFinder:   relay addr: $addr');
+        }
         await _relayMx.synchronized(() {
           _relays[id] = rsvp;
           numActiveRelays = _relays.length;
@@ -421,6 +445,7 @@ class RelayFinder {
 
         if (numActiveRelays >= config.desiredRelays) break;
       } catch (e) {
+        _log.warning('RelayFinder: ❌ Reservation failed for relay ${id.toBase58()}: $e');
         _notifyMaybeNeedNewCandidates();
         metricsTracer.reservationRequestFinished(false, e is Exception ? e : Exception(e.toString()));
       }
@@ -654,8 +679,19 @@ class RelayFinder {
                 }
                 
                 // Build circuit address: relayAddr/p2p/relayPeerID/p2p-circuit/p2p/ownPeerID
-                var circuitAddr = relayAddr
-                    .encapsulate(Protocols.p2p.name, peerId.toString())
+                // The relay may already include /p2p/<relayID> in reservation addresses
+                // (Go relay's makeReservationMsg encapsulates the relay's peer ID).
+                // Check before adding to avoid duplication.
+                final addrComponents = relayAddr.components;
+                final alreadyHasRelayP2p = addrComponents.isNotEmpty &&
+                    addrComponents.last.$1.code == Protocols.p2p.code &&
+                    addrComponents.last.$2 == peerId.toString();
+
+                var circuitAddr = relayAddr;
+                if (!alreadyHasRelayP2p) {
+                  circuitAddr = circuitAddr.encapsulate(Protocols.p2p.name, peerId.toString());
+                }
+                circuitAddr = circuitAddr
                     .encapsulate(Protocols.circuit.name, '')
                     .encapsulate(Protocols.p2p.name, host.id.toString());
                 raddrs.add(circuitAddr);
@@ -667,7 +703,10 @@ class RelayFinder {
         }
       });
 
-      _log.fine('RelayFinder: Built ${raddrs.length} total addresses (private + circuit)');
+      _log.warning('RelayFinder: Built ${raddrs.length} total addresses (private + circuit), relay count: ${_relays.length}');
+      for (var addr in raddrs) {
+        _log.warning('RelayFinder:   addr: $addr');
+      }
       _cachedAddrs = List<MultiAddr>.from(raddrs);
       _cachedAddrsExpiry = config.clock.now().add(const Duration(seconds: 30));
       metricsTracer.relayAddressCount(relayAddrCountForMetrics);

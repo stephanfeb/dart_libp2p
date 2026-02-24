@@ -468,7 +468,10 @@ class BasicHost implements Host {
           .stream
           .listen((event) async {
         if (event is EvtAutoRelayAddrsUpdated) {
-          _log.fine('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          _log.warning('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          for (var addr in event.advertisableAddrs) {
+            _log.warning('[BasicHost]   updated addr: $addr');
+          }
           _autoRelayAddrs = List.from(event.advertisableAddrs);
           
           // Regenerate signed peer record with new circuit addresses
@@ -929,8 +932,13 @@ class BasicHost implements Host {
     // 4. Add circuit relay addresses from AutoRelay
     // These are addresses where we can be reached via a relay server
     if (_autoRelay != null && _autoRelayAddrs.isNotEmpty) {
-      _log.fine('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      _log.warning('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      for (var addr in _autoRelayAddrs) {
+        _log.warning('[BasicHost allAddrs]   circuit addr: $addr');
+      }
       finalAddrs.addAll(_autoRelayAddrs);
+    } else if (_autoRelay != null) {
+      _log.warning('[BasicHost allAddrs] AutoRelay active but _autoRelayAddrs is EMPTY');
     }
     
     // If after all this, finalAddrs is empty, but we had original listen addresses,

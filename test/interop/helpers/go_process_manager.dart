@@ -15,6 +15,7 @@ class GoProcessManager {
   final List<String> _output = [];
   final _outputController = StreamController<String>.broadcast();
   bool _ready = false;
+  File? _configFile;
 
   GoProcessManager({required this.binaryPath});
 
@@ -54,13 +55,57 @@ class GoProcessManager {
   }
 
   /// Starts the Go peer in server mode on a random port.
-  Future<void> startServer({int port = 0, String transport = 'tcp'}) async {
-    await _start(['--mode=server', '--port=$port', '--transport=$transport']);
+  Future<void> startServer({
+    int port = 0,
+    String transport = 'tcp',
+    Duration? yamuxKeepAliveInterval,
+    Duration? yamuxWriteTimeout,
+  }) async {
+    final configArg = await _writeConfigIfNeeded(
+        yamuxKeepAliveInterval: yamuxKeepAliveInterval,
+        yamuxWriteTimeout: yamuxWriteTimeout);
+    await _start([
+      '--mode=server', '--port=$port', '--transport=$transport',
+      if (configArg != null) configArg,
+    ]);
   }
 
   /// Starts the Go peer in echo-server mode.
-  Future<void> startEchoServer({int port = 0, String transport = 'tcp'}) async {
-    await _start(['--mode=echo-server', '--port=$port', '--transport=$transport']);
+  Future<void> startEchoServer({
+    int port = 0,
+    String transport = 'tcp',
+    Duration? yamuxKeepAliveInterval,
+    Duration? yamuxWriteTimeout,
+  }) async {
+    final configArg = await _writeConfigIfNeeded(
+        yamuxKeepAliveInterval: yamuxKeepAliveInterval,
+        yamuxWriteTimeout: yamuxWriteTimeout);
+    await _start([
+      '--mode=echo-server', '--port=$port', '--transport=$transport',
+      if (configArg != null) configArg,
+    ]);
+  }
+
+  /// Writes a temp YAML config file if yamux params are provided.
+  /// Returns the `--config=<path>` arg string, or null if no config needed.
+  Future<String?> _writeConfigIfNeeded({
+    Duration? yamuxKeepAliveInterval,
+    Duration? yamuxWriteTimeout,
+  }) async {
+    if (yamuxKeepAliveInterval == null && yamuxWriteTimeout == null) return null;
+
+    final buf = StringBuffer('yamux:\n');
+    if (yamuxKeepAliveInterval != null) {
+      buf.writeln('  keepalive_interval: ${yamuxKeepAliveInterval.inSeconds}');
+    }
+    if (yamuxWriteTimeout != null) {
+      buf.writeln('  connection_write_timeout: ${yamuxWriteTimeout.inSeconds}');
+    }
+
+    final tempDir = await Directory.systemTemp.createTemp('go_peer_config_');
+    _configFile = File('${tempDir.path}/config.yaml');
+    await _configFile!.writeAsString(buf.toString());
+    return '--config=${_configFile!.path}';
   }
 
   Future<void> _start(List<String> args) async {
@@ -142,6 +187,22 @@ class GoProcessManager {
   /// Starts the Go peer in dht-server mode.
   Future<void> startDHTServer({int port = 0}) async {
     await _start(['--mode=dht-server', '--port=$port']);
+  }
+
+  /// Starts the Go peer in dht-relay-server mode (DHT server + relay service).
+  Future<void> startDHTRelayServer({
+    int port = 0,
+    String transport = 'tcp',
+    Duration? yamuxKeepAliveInterval,
+    Duration? yamuxWriteTimeout,
+  }) async {
+    final configArg = await _writeConfigIfNeeded(
+        yamuxKeepAliveInterval: yamuxKeepAliveInterval,
+        yamuxWriteTimeout: yamuxWriteTimeout);
+    await _start([
+      '--mode=dht-relay-server', '--port=$port', '--transport=$transport',
+      if (configArg != null) configArg,
+    ]);
   }
 
   /// Runs the Go peer in dht-put-value mode.
@@ -269,5 +330,14 @@ class GoProcessManager {
     _circuitAddr = null;
     _ready = false;
     _output.clear();
+
+    if (_configFile != null) {
+      try {
+        final dir = _configFile!.parent;
+        await _configFile!.delete();
+        await dir.delete();
+      } catch (_) {}
+      _configFile = null;
+    }
   }
 }
