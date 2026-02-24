@@ -191,8 +191,13 @@ class ScoredAddress {
 
 /// Priority ranker that considers local network capabilities
 class CapabilityAwarePriorityRanker {
-  static const directTimeout = Duration(seconds: 5);
-  static const relayTimeout = Duration(seconds: 10);
+  final Duration directTimeout;
+  final Duration relayTimeout;
+
+  CapabilityAwarePriorityRanker({
+    this.directTimeout = const Duration(seconds: 15),
+    this.relayTimeout = const Duration(seconds: 30),
+  });
   
   /// Rank addresses by priority based on local capabilities
   List<ScoredAddress> rank(

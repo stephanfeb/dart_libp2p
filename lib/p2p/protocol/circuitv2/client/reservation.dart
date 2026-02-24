@@ -16,7 +16,11 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
 import 'package:logging/logging.dart';
 
+final Logger _reserveLog = Logger('ReservationExtension');
+
 const Duration reserveTimeout = Duration(minutes: 1);
+const int _maxReservationRetries = 2;
+const List<Duration> _retryBackoffs = [Duration(seconds: 1), Duration(seconds: 2)];
 
 // Custom error class for reservation failures
 class ReservationError implements Exception {
@@ -34,52 +38,77 @@ class ReservationError implements Exception {
 
 /// Extension methods for the CircuitV2Client class to handle reservations.
 extension ReservationExtension on CircuitV2Client { // Changed from Client to CircuitV2Client
-  /// Reserves a slot on a relay.
+  /// Reserves a slot on a relay, with retry for transient failures.
   Future<Reservation> reserve(PeerId relayPeerId) async {
     // Notify metrics observer that reservation is starting
     final reservationStartTime = DateTime.now();
     metricsObserver?.onReservationRequested(relayPeerId, reservationStartTime);
-    
-    try {
-      // Open a stream to the relay using Hop protocol
-      // 'this.host' or simply 'host' refers to the host field of CircuitV2Client
-      final stream = await host.newStream(relayPeerId, [CircuitV2Protocol.protoIDv2Hop], Context());
 
-      // Set deadline for the entire operation, including stream opening, write, and read.
-      // Dart's newStream doesn't have a per-operation deadline like Go's s.SetDeadline.
-      // We'll rely on the timeout for the Future.
-      final reservation = await _reserveStream(stream, relayPeerId).timeout(reserveTimeout, onTimeout: () {
-        stream.close(); // Ensure stream is closed on timeout
-        throw ReservationError(status: pb.Status.CONNECTION_FAILED, reason: 'reservation timed out');
-      });
-      
-      // Notify metrics observer of successful reservation
-      final reservationCompleteTime = DateTime.now();
-      final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
-      metricsObserver?.onReservationCompleted(
-        relayPeerId,
-        reservationStartTime,
-        reservationCompleteTime,
-        reservationDuration,
-        true,
-        null,
-      );
-      
-      return reservation;
-    } catch (e) {
-      // Notify metrics observer of failed reservation
-      final reservationCompleteTime = DateTime.now();
-      final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
-      metricsObserver?.onReservationCompleted(
-        relayPeerId,
-        reservationStartTime,
-        reservationCompleteTime,
-        reservationDuration,
-        false,
-        e.toString(),
-      );
-      rethrow;
+    Object? lastError;
+
+    for (int attempt = 0; attempt <= _maxReservationRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          final backoff = _retryBackoffs[attempt - 1];
+          _reserveLog.info('Reservation retry $attempt/$_maxReservationRetries for relay ${relayPeerId.toBase58().substring(0, 6)} after ${backoff.inSeconds}s backoff');
+          await Future.delayed(backoff);
+        }
+
+        final stream = await host.newStream(relayPeerId, [CircuitV2Protocol.protoIDv2Hop], Context());
+
+        final reservation = await _reserveStream(stream, relayPeerId).timeout(reserveTimeout, onTimeout: () {
+          stream.close();
+          throw ReservationError(status: pb.Status.CONNECTION_FAILED, reason: 'reservation timed out');
+        });
+
+        // Notify metrics observer of successful reservation
+        final reservationCompleteTime = DateTime.now();
+        final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
+        metricsObserver?.onReservationCompleted(
+          relayPeerId,
+          reservationStartTime,
+          reservationCompleteTime,
+          reservationDuration,
+          true,
+          attempt > 0 ? 'succeeded after $attempt retries' : null,
+        );
+
+        return reservation;
+      } catch (e) {
+        lastError = e;
+
+        // Don't retry protocol rejections (relay explicitly refused)
+        if (e is ReservationError &&
+            e.status != pb.Status.CONNECTION_FAILED &&
+            e.cause == null) {
+          _reserveLog.warning('Reservation rejected by relay (${e.status.name}), not retrying');
+          break;
+        }
+
+        if (attempt < _maxReservationRetries) {
+          _reserveLog.warning('Reservation attempt ${attempt + 1} failed for relay ${relayPeerId.toBase58().substring(0, 6)}: $e');
+        }
+      }
     }
+
+    // All attempts failed — notify metrics and rethrow
+    final reservationCompleteTime = DateTime.now();
+    final reservationDuration = reservationCompleteTime.difference(reservationStartTime);
+    metricsObserver?.onReservationCompleted(
+      relayPeerId,
+      reservationStartTime,
+      reservationCompleteTime,
+      reservationDuration,
+      false,
+      lastError.toString(),
+    );
+
+    if (lastError is ReservationError) throw lastError;
+    throw ReservationError(
+      status: pb.Status.CONNECTION_FAILED,
+      reason: 'reservation failed after ${_maxReservationRetries + 1} attempts',
+      cause: lastError is Exception ? lastError : Exception(lastError.toString()),
+    );
   }
 
   Future<Reservation> _reserveStream(P2PStream stream, PeerId relayPeerId) async {

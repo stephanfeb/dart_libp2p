@@ -36,7 +36,7 @@ ip route show | sed 's/^/     /'
 
 # Read Go server peer ID from shared volume
 GO_SERVER_ADDR=${GO_SERVER_ADDR:-10.10.3.10}
-GO_SERVER_PORT=${GO_SERVER_PORT:-4001}
+GO_SERVER_PORT=${GO_SERVER_PORT:-55223}
 
 echo "Waiting for Go server peer ID..."
 TIMEOUT=60

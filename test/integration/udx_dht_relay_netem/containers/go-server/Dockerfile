@@ -1,36 +1,29 @@
-# Multi-stage Go build for the DHT + relay server
-# Build context must be the agentic/ root directory to include path dependencies
+# Ricochet server for DHT + relay netem test
+# Uses the pre-built .deb package instead of building from source.
+# Build context must be the agentic/ root directory.
 
-FROM golang:1.24 AS builder
-
-WORKDIR /build
-
-# Copy Go UDX transport and its dependency (path deps in go.mod)
-COPY go-udx/ ./go-udx/
-COPY go-libp2p-udx-transport/ ./go-libp2p-udx-transport/
-
-# Copy the Go peer application
-COPY dart-libp2p/interop/go-peer/ ./go-peer/
-
-WORKDIR /build/go-peer
-
-# Fixup go.mod replace directives for Docker build context layout
-# In-repo: ../../../go-udx → Docker: ../../go-udx
-RUN sed -i 's|=> ../../../go-libp2p-udx-transport|=> ../go-libp2p-udx-transport|' go.mod && \
-    sed -i 's|=> ../../../go-udx|=> ../go-udx|' go.mod
-
-RUN go mod download
-RUN CGO_ENABLED=0 go build -o /go-peer .
-
-# Runtime image
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y iproute2 && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /go-peer /usr/local/bin/go-peer
+# Install the pre-built ricochet-server .deb (amd64)
+COPY go-ricochet/build/dist/ricochet-server_1.0.0.deb /tmp/
+RUN dpkg -i /tmp/ricochet-server_1.0.0.deb || true && \
+    apt-get update && apt-get install -f -y && \
+    rm /tmp/ricochet-server_1.0.0.deb && \
+    test -x /opt/ricochet/ricochet_server
+
+# Create required directories
+RUN mkdir -p /var/lib/ricochet/sf_storage /var/log/ricochet /shared
+
+# Copy entrypoint
 COPY dart-libp2p/test/integration/udx_dht_relay_netem/containers/go-server/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 4001/udp
+EXPOSE 55223/udp
 
 ENTRYPOINT ["/entrypoint.sh"]

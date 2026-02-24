@@ -13,8 +13,6 @@
 # Environment variable overrides:
 #   NETEM_DELAY, NETEM_JITTER, NETEM_LOSS - Direct netem params
 #   TEST_WAIT_SECS - How long to wait during idle phase (default: 15)
-#   YAMUX_KEEPALIVE_INTERVAL - Yamux keepalive in seconds (default: 3)
-#   YAMUX_WRITE_TIMEOUT - Yamux write timeout in seconds (default: 10)
 
 set -e
 

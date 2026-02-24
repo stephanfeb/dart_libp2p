@@ -23,6 +23,7 @@ class BufferedP2PStreamReader {
   final ByteDataReader _buffer = ByteDataReader();
   bool _eof = false;
   bool _closed = false;
+  Object? _lastError;
   
   BufferedP2PStreamReader(this._stream);
   
@@ -54,7 +55,8 @@ class BufferedP2PStreamReader {
     }
     
     if (_buffer.remainingLength == 0) {
-      throw Exception('Unexpected EOF while reading byte');
+      throw Exception('Unexpected EOF while reading byte'
+          '${_lastError != null ? ' (cause: $_lastError)' : ''}');
     }
     
     return _buffer.readUint8();
@@ -131,6 +133,7 @@ class BufferedP2PStreamReader {
       } catch (e) {
         // Stream error or closed
         _eof = true;
+        _lastError = e;
         rethrow;
       }
     }

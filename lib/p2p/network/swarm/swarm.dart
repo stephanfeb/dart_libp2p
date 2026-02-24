@@ -859,7 +859,10 @@ class Swarm implements Network {
     _logger.fine('Swarm.dialPeer: After circuit dedup: ${dialableAddrs.length} addresses');
 
     // 5. Rank by priority, with preference for relay if peer connected via relay
-    final ranker = CapabilityAwarePriorityRanker();
+    final ranker = CapabilityAwarePriorityRanker(
+      directTimeout: _config.dialTimeout,
+      relayTimeout: _config.relayDialTimeout,
+    );
     var scoredAddrs = ranker.rank(dialableAddrs, capability);
     
     // FIX: Prefer relay addresses for peers that connected via relay

@@ -35,7 +35,26 @@ volumes:
   shared_data:
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netem-postgres
+    networks:
+      public_net:
+        ipv4_address: 10.10.2.10
+    environment:
+      POSTGRES_USER: ricochet
+      POSTGRES_PASSWORD: ricochet_test
+      POSTGRES_DB: ricochet_test
+    volumes:
+      - ../../../../../go-ricochet/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ricochet -d ricochet_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
   go-server:
+    platform: linux/amd64  # .deb is amd64-only; QEMU emulates on Apple Silicon
     build:
       context: ../../../../../  # agentic/ root directory (for path deps)
       dockerfile: dart-libp2p/test/integration/udx_dht_relay_netem/containers/go-server/Dockerfile
@@ -46,9 +65,13 @@ services:
     cap_add:
       - NET_ADMIN  # Needed for tc netem
     environment:
-      - YAMUX_KEEPALIVE_INTERVAL=${YAMUX_KEEPALIVE_INTERVAL:-3}
-      - YAMUX_WRITE_TIMEOUT=${YAMUX_WRITE_TIMEOUT:-10}
-      - LISTEN_PORT=${GO_LISTEN_PORT:-4001}
+      - LISTEN_PORT=${GO_LISTEN_PORT:-55223}
+      - EXTERNAL_IP=10.10.3.10
+      - PG_HOST=10.10.2.10
+      - PG_PORT=5432
+      - PG_DB=ricochet_test
+      - PG_USER=ricochet
+      - PG_PASS=ricochet_test
       - NETEM_DELAY=${NETEM_DELAY:-0ms}
       - NETEM_JITTER=${NETEM_JITTER:-0ms}
       - NETEM_LOSS=${NETEM_LOSS:-0%}
@@ -58,7 +81,10 @@ services:
       test: ["CMD", "test", "-f", "/shared/peer_id"]
       interval: 1s
       timeout: 2s
-      retries: 30
+      retries: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   nat-gateway:
     build:
@@ -104,7 +130,7 @@ services:
       - NET_ADMIN  # Needed for route manipulation
     environment:
       - GO_SERVER_ADDR=10.10.3.10
-      - GO_SERVER_PORT=${GO_LISTEN_PORT:-4001}
+      - GO_SERVER_PORT=${GO_LISTEN_PORT:-55223}
       - NAT_GATEWAY=192.168.1.10
       - PUBLIC_NET_SUBNET=10.10.0.0/16
       - TEST_WAIT_SECS=${TEST_WAIT_SECS:-15}

@@ -110,6 +110,10 @@ class Config {
   // Relay metrics observer (for instrumentation)
   RelayMetricsObserver? relayMetricsObserver;
 
+  // Dial timeout configuration
+  Duration dialTimeout = const Duration(seconds: 15);
+  Duration relayDialTimeout = const Duration(seconds: 30);
+
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
   Future<void> apply(List<Option> opts) async {
@@ -365,6 +369,16 @@ extension ConfigOptions on Config {
     enableHolePunching = enabled;
   }
   
+  /// Configures the dial timeout for direct connections.
+  Future<void> withDialTimeout(Duration timeout) async {
+    dialTimeout = timeout;
+  }
+
+  /// Configures the dial timeout for relay connections.
+  Future<void> withRelayDialTimeout(Duration timeout) async {
+    relayDialTimeout = timeout;
+  }
+
   /// Configures relay servers to automatically connect to during startup
   Future<void> withRelayServers(List<String> servers) async {
     relayServers = servers;
@@ -510,6 +524,16 @@ class Libp2p {
     return (config) => config.withAutoNAT(enabled);
   }
   
+  /// Configures the dial timeout for direct connections.
+  static Option dialTimeout(Duration timeout) {
+    return (config) => config.withDialTimeout(timeout);
+  }
+
+  /// Configures the dial timeout for relay connections.
+  static Option relayDialTimeout(Duration timeout) {
+    return (config) => config.withRelayDialTimeout(timeout);
+  }
+
   static Option relayServers(List<String> servers) {
     return (config) => config.withRelayServers(servers);
   }
