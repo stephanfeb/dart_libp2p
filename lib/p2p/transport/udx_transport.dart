@@ -235,6 +235,7 @@ class UDXTransport implements Transport {
       await UDXExceptionUtils.safeCloseAll({
         'initialStream': () async => await initialStream?.close(),
         'multiplexer': () async => multiplexer?.close(),
+        'rawSocket': () async => rawSocket?.close(),
       });
       
       rethrow; // Let UDXExceptionHandler handle the retry logic

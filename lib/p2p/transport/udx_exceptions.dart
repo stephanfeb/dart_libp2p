@@ -252,6 +252,7 @@ class UDXExceptionHandler {
     
     // Network unreachable, connection refused, etc. might be transient
     return message.contains('network unreachable') ||
+           message.contains('no route to host') ||
            message.contains('connection refused') ||
            message.contains('connection reset') ||
            message.contains('connection timed out') ||
@@ -260,11 +261,14 @@ class UDXExceptionHandler {
   
   /// Determines if an OSError is transient
   static bool _isTransientOSError(OSError error) {
-    // Common transient OS errors
+    // Common transient OS errors (Linux and macOS/Darwin errno values)
     switch (error.errorCode) {
-      case 111: // Connection refused
-      case 113: // No route to host
-      case 110: // Connection timed out
+      case 111: // Connection refused (Linux)
+      case 61:  // Connection refused (macOS)
+      case 113: // No route to host (Linux)
+      case 65:  // No route to host (macOS)
+      case 110: // Connection timed out (Linux)
+      case 60:  // Connection timed out (macOS)
         return true;
       default:
         return false;
