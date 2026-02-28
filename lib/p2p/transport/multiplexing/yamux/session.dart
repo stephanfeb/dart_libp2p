@@ -338,13 +338,14 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // Per go-yamux: SYN opens a stream, ACK (without SYN) accepts it.
       if (frame.flags & YamuxFlags.ack != 0 && frame.flags & YamuxFlags.syn == 0) {
         // ACK (no SYN): response to our outbound stream creation
-        _log.fine('$_logPrefix [ACK-DIAG] Received ACK for streamID=${frame.streamId}, pending=${_pendingStreams.containsKey(frame.streamId)}');
+        _log.fine('$_logPrefix Received ACK for streamID=${frame.streamId}, pending=${_pendingStreams.containsKey(frame.streamId)}');
         final completer = _pendingStreams.remove(frame.streamId);
         if (completer != null && !completer.isCompleted) {
           completer.complete();
         }
       } else if (frame.flags & YamuxFlags.syn != 0) {
         // SYN: new incoming stream from remote
+        _log.fine('$_logPrefix Received SYN for streamID=${frame.streamId}');
         await _handleNewStream(frame);
       }
 
@@ -469,7 +470,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     // would be processed — the remote's multistream-select would timeout
     // (10s) and the connection would appear dead. The yamux write lock
     // still serializes sends, preserving Noise nonce ordering.
-    _log.fine('$_logPrefix [HANDLE-NEW-STREAM-DIAG] Received SYN for streamID=${frame.streamId}, sending ACK (fire-and-forget)');
+    _log.fine('$_logPrefix Sending SYN-ACK for streamID=${frame.streamId}');
     _sendFrame(YamuxFrame.synAckStream(frame.streamId)).catchError((e) {
       _log.warning('$_logPrefix Error sending SYN-ACK for stream ${frame.streamId}: $e');
     });
