@@ -534,14 +534,28 @@ class Swarm implements Network {
         managementScope: streamManagementScope,
       );
 
-      // Use the host's MultistreamMuxer to handle the incoming stream and negotiate the protocol
-      // The host's mux is an instance of MultistreamMuxer and implements ProtocolSwitch.
-      // The handle method performs the negotiation and dispatches to the correct handler.
+      // Set a negotiation deadline on the inbound stream so that stalled
+      // protocol negotiations don't hang forever.
+      final negTimeout = _config.negotiationTimeout ?? const Duration(seconds: 10);
+      final hasTimeout = negTimeout > Duration.zero;
+      if (hasTimeout) {
+        await swarmStream.setDeadline(DateTime.now().add(negTimeout));
+      }
+
+      // Use handle() rather than negotiate() directly — handle() injects
+      // leftover bytes from the negotiation back into the stream, which is
+      // critical when the remote sends protocol negotiation + application
+      // data in the same segment (e.g. relay STOP messages from Go peers).
       try {
         await _host?.mux.handle(swarmStream);
       } catch (e, s) {
         _logger.warning('Error handling incoming stream from ${conn.remotePeer} with multistream muxer: $e\n$s');
         await swarmStream.reset(); // Reset the SwarmStream, which closes scope
+      } finally {
+        // Clear the deadline so protocol handlers are not constrained.
+        if (hasTimeout) {
+          await swarmStream.setDeadline(null);
+        }
       }
     };
 
