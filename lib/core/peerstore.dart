@@ -210,13 +210,13 @@ abstract class ProtoBook {
   Future<List<ProtocolID>> getProtocols(PeerId id);
 
   /// AddProtocols adds the given protocols to the peer.
-  void addProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> addProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// SetProtocols sets the protocols for the given peer (replacing any previously stored protocols).
-  void setProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> setProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// RemoveProtocols removes the given protocols from the peer.
-  void removeProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> removeProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// SupportsProtocols returns the set of protocols the peer supports from among the given protocols.
   /// If the returned error is not null, the result is indeterminate.

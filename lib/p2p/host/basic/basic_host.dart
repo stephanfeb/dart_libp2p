@@ -204,7 +204,6 @@ class BasicHost implements Host {
       // metricsTracer: config.identifyMetricsTracer, // If added to Config
     );
     _idService = IdentifyService(this, options: identifyOpts);
-    _idService.start();
 
     // Initialize PingService if enabled in Config
     if (config.enablePing) {
@@ -273,41 +272,31 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] No listenAddrs configured in host config. Skipping explicit _network.listen() call from BasicHost.start().');
     }
 
-    // Start IDService
-    _log.fine('[BasicHost start] Before _idService.start. Current network.listenAddresses: ${_network.listenAddresses}');
-    // await _idService.start();
-    _log.fine('[BasicHost start] After _idService.start. Current network.listenAddresses: ${_network.listenAddresses}');
-
     // Persist a signed peer record for self to the peerstore if enabled.
-    // This ensures that when IdentifyService requests our own record, it's available.
+    // This must happen BEFORE _idService.start() so the initial snapshot
+    // includes the signed record.
     if (!(_config.disableSignedPeerRecord ?? false)) {
       _log.fine('Attempting to create and persist self signed peer record.');
       if (peerStore.addrBook is CertifiedAddrBook) {
         final cab = peerStore.addrBook as CertifiedAddrBook;
-        final selfId = id; // Host's own PeerId
+        final selfId = id;
         final privKey = await peerStore.keyBook.privKey(selfId);
 
         if (privKey == null) {
           _log.fine('Unable to access host private key for selfId $selfId; cannot create self signed record.');
         } else {
-          final currentAddrs = addrs; // Uses the host's addrs getter, which should be up-to-date
+          final currentAddrs = addrs;
           if (currentAddrs.isEmpty) {
             _log.fine('Host has no addresses at the moment of self-record creation; record will reflect this.');
           }
-          
+
           try {
-            // Create PeerRecord payload
-            // Note: The actual structure of PeerRecord and how it's created from AddrInfo
-            // or directly might differ slightly from Go. This assumes a Dart equivalent.
-            // The key is to get PeerId, sequence number, and addresses into a signable format.
             final recordPayload = peer_record.PeerRecord(
-              peerId: selfId, // Corrected: expects PeerId object
-              seq: DateTime.now().millisecondsSinceEpoch, // Using timestamp for sequence number
-              addrs: currentAddrs, // Corrected: expects List<MultiAddr> and param name is 'addrs'
+              peerId: selfId,
+              seq: DateTime.now().millisecondsSinceEpoch,
+              addrs: currentAddrs,
             );
-            
-            // Create and sign the Envelope
-            // Envelope.seal should handle marshalling the recordPayload and signing
+
             final envelope = await Envelope.seal(recordPayload, privKey);
 
             if (envelope != null) {
@@ -324,6 +313,12 @@ class BasicHost implements Host {
         _log.fine('Peerstore AddrBook is not a CertifiedAddrBook; cannot persist self signed record.');
       }
     }
+
+    // Start IDService after self-record is persisted so the initial snapshot
+    // includes the signed peer record.
+    _log.fine('[BasicHost start] Starting _idService. Current network.listenAddresses: ${_network.listenAddresses}');
+    await _idService.start();
+    _log.fine('[BasicHost start] _idService started. Current network.listenAddresses: ${_network.listenAddresses}');
 
     // PingService is started implicitly by its constructor registering a handler.
 
@@ -1355,7 +1350,7 @@ class BasicHost implements Host {
       // Note: The go-libp2p implementation adds this *after* the stream handler returns,
       // but it seems more robust to add it as soon as negotiation succeeds.
       // This ensures that even if the handler has issues, we've recorded the protocol.
-      peerStore.protoBook.addProtocols(p, [selectedProtocol]);
+      await peerStore.protoBook.addProtocols(p, [selectedProtocol]);
       
       final setupTime = DateTime.now().difference(setupStartTime);
       final negotiationTime = DateTime.now().difference(negotiationStartTime);

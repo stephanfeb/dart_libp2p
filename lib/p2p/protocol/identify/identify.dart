@@ -99,7 +99,7 @@ class IdentifySnapshot {
   final List<MultiAddr> addrs;
 
   /// Signed peer record
-  final dynamic record;
+  final Envelope? record;
 
   /// Creates a new identify snapshot
   IdentifySnapshot({
@@ -111,55 +111,23 @@ class IdentifySnapshot {
 
   /// Returns true if this snapshot is equal to another snapshot
   Future<bool> equals(IdentifySnapshot other) async {
-    final currentRecord = record is Future ? await record : record;
-    final otherRecord = other.record is Future ? await other.record : other.record;
-
-    final hasRecord = currentRecord != null;
-    final otherHasRecord = otherRecord != null;
-
-    if (hasRecord != otherHasRecord) {
+    if ((record != null) != (other.record != null)) {
       return false;
     }
 
-    if (hasRecord) {
-      // Assuming Envelope has an 'equals' method or can be compared directly
-      // If Envelope.equals is also async, it needs to be awaited.
-      // For now, assuming it's synchronous or direct comparison is valid.
-      bool recordsAreEqual;
-      if (currentRecord is Envelope && otherRecord is Envelope) {
-        // If Envelope has a proper 'equals' method:
-        // recordsAreEqual = currentRecord.equals(otherRecord); 
-        // For now, let's assume direct comparison or a placeholder if no .equals()
-        // This might need further refinement based on Envelope's actual API
-        // For a simple placeholder, if they are not the same instance, assume not equal
-        // A proper deep comparison or hash comparison would be better.
-        // Let's assume Envelope has a synchronous .equals() for now.
-        // If not, this part needs to be adapted.
-        // Based on core/record/envelope.dart, Envelope does not have an equals method.
-        // We might need to compare marshalled bytes or specific fields.
-        // For now, to fix the immediate Future.equals error, we'll compare marshalled bytes.
-        try {
-          final currentRecordBytes = await currentRecord.marshal();
-          final otherRecordBytes = await otherRecord.marshal();
-          if (currentRecordBytes.length != otherRecordBytes.length) {
-            recordsAreEqual = false;
-          } else {
-            recordsAreEqual = true;
-            for (int i = 0; i < currentRecordBytes.length; i++) {
-              if (currentRecordBytes[i] != otherRecordBytes[i]) {
-                recordsAreEqual = false;
-                break;
-              }
-            }
-          }
-        } catch (e) {
-          // If marshalling fails, consider them not equal
-          recordsAreEqual = false;
+    if (record != null && other.record != null) {
+      try {
+        final currentRecordBytes = await record!.marshal();
+        final otherRecordBytes = await other.record!.marshal();
+        if (currentRecordBytes.length != otherRecordBytes.length) {
+          return false;
         }
-      } else {
-        recordsAreEqual = (currentRecord == otherRecord); // Fallback for non-Envelope or if one is null
-      }
-      if (!recordsAreEqual) {
+        for (int i = 0; i < currentRecordBytes.length; i++) {
+          if (currentRecordBytes[i] != otherRecordBytes[i]) {
+            return false;
+          }
+        }
+      } catch (e) {
         return false;
       }
     }
@@ -394,11 +362,11 @@ class IdentifyService implements IDService {
     final trimmedAddrs = _trimHostAddrList(addrs, maxOwnIdentifyMsgSize - usedSpace - 256); // 256 bytes of buffer
 
     // Create new snapshot
-    dynamic record;
+    Envelope? record;
     if (!disableSignedPeerRecord) {
       final cab = host.peerStore.addrBook as CertifiedAddrBook?;
       if (cab != null) {
-        record = cab.getPeerRecord(host.id);
+        record = await cab.getPeerRecord(host.id);
       }
     }
 
@@ -407,7 +375,7 @@ class IdentifyService implements IDService {
         seq: 0, // Temporary seq, will be updated
         protocols: protocols,
         addrs: trimmedAddrs,
-        record: record, // This is a Future<Envelope?>
+        record: record,
       );
 
       // Await the comparison since 'equals' is now async
@@ -855,35 +823,20 @@ class IdentifyService implements IDService {
     return mes;
   }
 
-  // Change to async and await the record
-  Future<Uint8List?> _getSignedRecord(IdentifySnapshot snapshot) async { // Made async, returns Future<Uint8List?>
-    _log.finer('IdentifyService._getSignedRecord: Attempting to get signed record. DisableSignedPeerRecord: $disableSignedPeerRecord, Snapshot record type: ${snapshot.record.runtimeType}');
+  Future<Uint8List?> _getSignedRecord(IdentifySnapshot snapshot) async {
+    _log.finer('IdentifyService._getSignedRecord: Attempting to get signed record. DisableSignedPeerRecord: $disableSignedPeerRecord, record is null: ${snapshot.record == null}');
     if (disableSignedPeerRecord) {
       _log.finer('IdentifyService._getSignedRecord: Signed peer record disabled.');
       return null;
     }
 
-    // Await the record if it's a Future
-    final actualRecord = snapshot.record is Future ? await snapshot.record : snapshot.record;
-
-    if (actualRecord == null) {
-      _log.finer('IdentifyService._getSignedRecord: Actual record is null after await.');
+    if (snapshot.record == null) {
+      _log.finer('IdentifyService._getSignedRecord: Record is null.');
       return null;
     }
 
-    // At this point, actualRecord should be an Envelope
-    if (actualRecord is! Envelope) {
-        _log.warning('IdentifyService._getSignedRecord: Record is not an Envelope. Type: ${actualRecord.runtimeType}');
-        return null;
-    }
-
     try {
-      // Now actualRecord is confirmed to be an Envelope
-      final marshalledRecord = await actualRecord.marshal(); // Envelope.marshal() is async
-      if (marshalledRecord == null) { // Check if marshal itself returned null
-          _log.warning('IdentifyService._getSignedRecord: Marshalled record is null.');
-          return null;
-      }
+      final marshalledRecord = await snapshot.record!.marshal();
       _log.finer('IdentifyService._getSignedRecord: Marshalled signed record successfully (${marshalledRecord.length} bytes).');
       return marshalledRecord;
     } catch (e, st) {
@@ -1109,7 +1062,7 @@ class IdentifyService implements IDService {
 
     final (added, removed) = _diff(supported, mesProtocols);
     _log.fine('IdentifyService._consumeMessage: For peer $p - Added protocols: ${added.length}, Removed protocols: ${removed.length}');
-    host.peerStore.protoBook.setProtocols(p, mesProtocols);
+    await host.peerStore.protoBook.setProtocols(p, mesProtocols);
 
     if (isPush) {
       _log.fine('IdentifyService._consumeMessage: Emitting EvtPeerProtocolsUpdated for $p due to PUSH.');

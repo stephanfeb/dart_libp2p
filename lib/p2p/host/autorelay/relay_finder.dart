@@ -371,6 +371,8 @@ class RelayFinder {
       }
     }
 
+    final allProtocols = await host.peerStore.protoBook.getProtocols(addrInfo.id);
+    _log.warning('RelayFinder: _tryNode: ${addrInfo.id.toBase58()} has ${allProtocols.length} protocols in protoBook: $allProtocols');
     final supportedProtocols = await host.peerStore.protoBook.supportsProtocols(addrInfo.id, [CircuitV2Protocol.protoIDv2Hop]);
     if (supportedProtocols.isEmpty) {
         _log.warning('RelayFinder: _tryNode: ${addrInfo.id.toBase58()} does NOT support ${CircuitV2Protocol.protoIDv2Hop}');
