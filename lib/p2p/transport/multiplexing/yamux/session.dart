@@ -673,10 +673,23 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       final frame = YamuxFrame.synStream(streamId);
       await _sendFrame(frame);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId, waiting for ACK (timeout=${_config.streamWriteTimeout.inSeconds}s)');
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId');
 
-      await completer.future.timeout(_config.streamWriteTimeout);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      // Don't block on ACK. The yamux spec allows the initiator to send
+      // data immediately after SYN. Some implementations (rust-libp2p)
+      // send ACK lazily — piggybacked on the first data/window-update
+      // frame rather than as a standalone ACK. Blocking here causes a
+      // deadlock when the remote only ACKs after reading our first data.
+      //
+      // We still track the ACK via the completer so _handleFrame can
+      // resolve it when/if it arrives, and we log if it never comes.
+      // If the remote rejects the stream (RST), the stream will be
+      // reset through the normal RST handling path.
+      completer.future.then((_) {
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      }).catchError((e) {
+        _log.warning('$_logPrefix [OPEN-STREAM-DIAG] ACK error for streamID=$streamId: $e');
+      });
 
       await stream.open();
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');
