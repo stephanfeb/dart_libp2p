@@ -47,13 +47,30 @@ class RsaPublicKey implements p2pkeys.PublicKey {
   /// Creates an RsaPublicKey from raw bytes (DER encoded)
   factory RsaPublicKey.fromRawBytes(Uint8List bytes) {
     final parser = pc.ASN1Parser(bytes);
-    final asn1Sequence = parser.nextObject() as pc.ASN1Sequence;
-    final publicKey = RSAPublicKey(
-      (asn1Sequence.elements?[0] as pc.ASN1Integer).integer!,
-      (asn1Sequence.elements?[1] as pc.ASN1Integer).integer!,
-    );
-    
-    return RsaPublicKey(publicKey);
+    final topLevel = parser.nextObject() as pc.ASN1Sequence;
+    final elements = topLevel.elements!;
+
+    // Handle both PKCS#1 (modulus, exponent) and SPKI (algorithmId, bitString) formats.
+    if (elements[0] is pc.ASN1Integer) {
+      // PKCS#1: sequence of [modulus, exponent]
+      final publicKey = RSAPublicKey(
+        (elements[0] as pc.ASN1Integer).integer!,
+        (elements[1] as pc.ASN1Integer).integer!,
+      );
+      return RsaPublicKey(publicKey);
+    } else {
+      // SPKI: sequence of [algorithmIdentifier, bitString(PKCS#1 key)]
+      final bitString = elements[1] as pc.ASN1BitString;
+      // stringValues is the bit string content without the unused-bits byte
+      final keyBytes = Uint8List.fromList(bitString.stringValues!);
+      final innerParser = pc.ASN1Parser(keyBytes);
+      final innerSeq = innerParser.nextObject() as pc.ASN1Sequence;
+      final publicKey = RSAPublicKey(
+        (innerSeq.elements![0] as pc.ASN1Integer).integer!,
+        (innerSeq.elements![1] as pc.ASN1Integer).integer!,
+      );
+      return RsaPublicKey(publicKey);
+    }
   }
 
   factory RsaPublicKey.unmarshal(Uint8List bytes){
