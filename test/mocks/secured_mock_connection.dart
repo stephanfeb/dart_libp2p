@@ -149,12 +149,14 @@ class SecuredMockConnection implements TransportConn {
       }
 
       // Wait until we have enough data
+      // Note: Data is added to _buffer by the stream listener (see createPair),
+      // so we just wait for the _incomingData event as a signal
       while (_buffer.length < length) {
-        final data = await _incomingData.stream.first.timeout(
+        await _incomingData.stream.first.timeout(
           Duration(seconds: 5),
           onTimeout: () => throw TimeoutException('Read timed out'),
         );
-        _buffer.addAll(data);
+        // Don't add to _buffer here - the listener already did it
       }
 
       // Return exactly the requested number of bytes

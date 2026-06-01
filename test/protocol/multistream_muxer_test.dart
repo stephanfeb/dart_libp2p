@@ -320,6 +320,9 @@ class MockP2PStream implements P2PStream<Uint8List> {
   bool get isClosed => _localCloseCompleter.isCompleted && _remoteCloseCompleter.isCompleted;
 
   @override
+  bool get isWritable => !_localCloseCompleter.isCompleted;
+
+  @override
   Conn get conn => _mockConn;
 }
 

@@ -7,6 +7,7 @@ import 'package:dart_libp2p/core/host/host.dart'; // Needed for CircuitV2Client.
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/common.dart'; // For ScopeStat, ResourceScopeSpan if needed by ConnScope
 import 'package:dart_libp2p/core/network/conn.dart';
+import 'package:dart_libp2p/core/network/connection_context.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
@@ -18,6 +19,9 @@ import 'package:dart_libp2p/core/protocol/protocol.dart'; // For ProtocolID in C
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart';
 
 import '../../../../core/network/rcmgr.dart';
+import 'package:logging/logging.dart';
+
+final _log = Logger('RelayedConn');
 
 /// _RelayedConnStats implements ConnStats for a RelayedConn.
 class _RelayedConnStats implements ConnStats {
@@ -51,7 +55,14 @@ class RelayedConn implements TransportConn {
   final MultiAddr _localMultiaddr;
   final MultiAddr _remoteMultiaddr; // Multiaddr of the remote peer, potentially a circuit addr
   final _RelayedConnStats _connStats;
+  final void Function()? _onClose; // Callback for cleanup when connection closes
   // final bool _isInitiator; // Captured by _stream.stat().direction
+  
+  /// Diagnostic session ID for cross-node correlation
+  final String? diagnosticSessionId;
+
+  /// Connection context for event correlation across layers
+  ConnectionContext? _context;
 
   RelayedConn({
     required P2PStream<Uint8List> stream,
@@ -60,6 +71,11 @@ class RelayedConn implements TransportConn {
     required PeerId remotePeer,
     required MultiAddr localMultiaddr,
     required MultiAddr remoteMultiaddr,
+    void Function()? onClose,
+    this.diagnosticSessionId,
+    String? outerConnectionId,
+    String? relayPeerId,
+    int? hopStreamId,
     // required bool isInitiator, // isInitiator can be derived from stream.stat().direction
   })  : _stream = stream,
         _transport = transport,
@@ -67,13 +83,40 @@ class RelayedConn implements TransportConn {
         _remotePeer = remotePeer,
         _localMultiaddr = localMultiaddr,
         _remoteMultiaddr = remoteMultiaddr,
+        _onClose = onClose,
         // _isInitiator = isInitiator,
-        _connStats = _RelayedConnStats(stream.stat());
+        _connStats = _RelayedConnStats(stream.stat()) {
+    // Generate connection context for relay inner connection
+    if (outerConnectionId != null && relayPeerId != null) {
+      _context = ConnectionContext.relayInner(
+        remotePeerId: remotePeer.toBase58(),
+        outerConnectionId: outerConnectionId,
+        relayPeerId: relayPeerId,
+        sessionId: diagnosticSessionId,
+        hopStreamId: hopStreamId,
+      );
+    }
+  }
 
   // == Conn Methods ==
   @override
   Future<void> close() async {
     await _stream.close();
+    // Notify the transport to remove this connection from tracking
+    _onClose?.call();
+  }
+
+  /// Closes the write side of the relayed connection (half-close support)
+  /// This allows the remote peer to finish sending data while signaling
+  /// that we won't send any more data.
+  Future<void> closeWrite() async {
+    await _stream.closeWrite();
+  }
+
+  /// Closes the read side of the relayed connection (half-close support)
+  /// This signals that we won't read any more data from the remote peer.
+  Future<void> closeRead() async {
+    await _stream.closeRead();
   }
 
   @override
@@ -116,6 +159,9 @@ class RelayedConn implements TransportConn {
   @override
   ConnScope get scope => _stream.conn.scope;
 
+  /// Gets the connection context for event correlation
+  ConnectionContext? get context => _context;
+
   @override
   Future<P2PStream<dynamic>> newStream(Context context) {
     // A RelayedConn represents a single logical channel.
@@ -143,7 +189,9 @@ class RelayedConn implements TransportConn {
 
   @override
   Future<void> write(Uint8List data) async {
+    _log.fine('[RELAY-CONN-WRITE] Writing ${data.length} bytes to relay pipe stream ${_stream.id()} for peer ${_remotePeer.toBase58().substring(0, 16)}');
     await _stream.write(data);
+    _log.fine('[RELAY-CONN-WRITE-DONE] Wrote ${data.length} bytes to relay pipe stream ${_stream.id()}');
   }
 
   @override

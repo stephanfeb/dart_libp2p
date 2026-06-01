@@ -116,6 +116,9 @@ class TimeoutMockStream implements P2PStream<Uint8List> {
 
   @override
   bool get isClosed => _isClosed;
+
+  @override
+  bool get isWritable => !_isClosed;
 }
 
 void main() {

@@ -22,6 +22,7 @@ import 'package:dart_libp2p/config/config.dart'; // Added Config import
 import 'package:dart_libp2p/core/crypto/keys.dart'; // Import PrivateKey
 
 import 'package:dart_libp2p/core/network/rcmgr.dart'; // Import ResourceManager
+import 'package:dart_libp2p/core/network/common.dart'; // Direction
 
 // Generate mocks for dependencies
 @GenerateMocks([
@@ -37,6 +38,14 @@ import 'package:dart_libp2p/core/network/rcmgr.dart'; // Import ResourceManager
   PrivateKey, // Added PrivateKey
 ])
 import 'basic_host_test.mocks.dart';
+
+class _TestConnStats implements ConnStats {
+  @override
+  final Stats stats;
+  @override
+  final int numStreams;
+  _TestConnStats({required this.stats, this.numStreams = 0});
+}
 
 void main() {
   group('BasicHost Tests', () {
@@ -230,10 +239,19 @@ void main() {
       when(mockConn.remotePeer).thenReturn(remotePeerId); 
       when(mockConn.id).thenReturn('mock-conn-id'); 
       when(mockConn.isClosed).thenReturn(false); // Stub isClosed
+      when(mockConn.stat).thenReturn(_TestConnStats(
+        stats: Stats(direction: Direction.outbound, opened: DateTime.now()),
+      ));
       when(network.connectedness(remotePeerId)).thenReturn(Connectedness.notConnected);
       when(network.dialPeer(any, remotePeerId)).thenAnswer((_) async => mockConn);
 
-      await host.connect(AddrInfo(remotePeerId, [remoteAddr]));
+      // connect() will throw because identify can't succeed on a bare mock conn,
+      // but we only care that dialPeer was invoked.
+      try {
+        await host.connect(AddrInfo(remotePeerId, [remoteAddr]));
+      } catch (_) {
+        // Expected: identify fails on mock connection
+      }
 
       verify(network.dialPeer(any, remotePeerId)).called(1);
     });

@@ -44,6 +44,13 @@ class UDXTransport implements Transport {
   final Set<UDXSessionConn> _activeDialerConns = {};
   // static int _nextDialStreamIdPairBase = 1; // Removed static counter
 
+  /// Optional metrics observer for UDX transport events
+  UdxMetricsObserver? metricsObserver;
+  
+  /// Callback when a connection is established with a peer.
+  /// Provides the local connection ID and peer ID for metrics tracking.
+  void Function(ConnectionId localCid, PeerId peerId)? onConnectionEstablished;
+
   @visibleForTesting
   ConnManager get connectionManager => _connManager;
 
@@ -108,7 +115,7 @@ class UDXTransport implements Transport {
 
       // Create multiplexer with exception handling
       multiplexer = await UDXExceptionHandler.handleUDXOperation(
-        () async => UDXMultiplexer(rawSocket!),
+        () async => UDXMultiplexer(rawSocket!, metricsObserver: metricsObserver),
         'UDXMultiplexer.create',
       );
       _logger.fine('[UDXTransport._performDial] UDXMultiplexer created');
@@ -152,18 +159,54 @@ class UDXTransport implements Transport {
       // Phase 1.2: UDX Socket Health Monitoring - Handshake timing
       _logger.fine('[UDXTransport._performDial] Handshake start for $host:$port');
       final handshakeStart = DateTime.now();
-      await UDXExceptionHandler.handleUDXOperation(
-        () => UDXExceptionUtils.withTimeout(
-          udpSocket!.handshakeComplete,
-          effectiveTimeout,
+      
+      try {
+        await UDXExceptionHandler.handleUDXOperation(
+          () => UDXExceptionUtils.withTimeout(
+            udpSocket!.handshakeComplete,
+            effectiveTimeout,
+            'UDPSocket.handshakeComplete($host:$port)',
+          ),
           'UDPSocket.handshakeComplete($host:$port)',
-        ),
-        'UDPSocket.handshakeComplete($host:$port)',
-      );
-      final handshakeDuration = DateTime.now().difference(handshakeStart);
-      _logger.fine('[UDXTransport._performDial] Handshake completed for $host:$port, duration: ${handshakeDuration.inMilliseconds}ms');
+        );
+        final handshakeDuration = DateTime.now().difference(handshakeStart);
+        _logger.fine('[UDXTransport._performDial] Handshake completed for $host:$port, duration: ${handshakeDuration.inMilliseconds}ms');
+      } catch (e) {
+        final handshakeError = e.toString();
+        final handshakeDuration = DateTime.now().difference(handshakeStart);
+        _logger.warning('[UDXTransport._performDial] Handshake failed for $host:$port after ${handshakeDuration.inMilliseconds}ms: $e');
+        
+        // Notify metrics observer of handshake failure
+        if (metricsObserver != null && udpSocket != null) {
+          try {
+            metricsObserver!.onHandshakeComplete(
+              udpSocket!.cids.localCid,
+              handshakeDuration,
+              false,
+              handshakeError,
+            );
+          } catch (observerError) {
+            _logger.warning('[UDXTransport._performDial] Error notifying metrics observer of handshake failure: $observerError');
+          }
+        }
+        
+        rethrow;
+      }
 
-      final localMa = MultiAddr('/ip4/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      // Register connection-to-peer mapping for metrics tracking
+      final peerIdStr = addr.valueForProtocol('p2p');
+      if (peerIdStr != null && onConnectionEstablished != null) {
+        try {
+          final peerId = PeerId.fromString(peerIdStr);
+          onConnectionEstablished!(udpSocket!.cids.localCid, peerId);
+          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket!.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
+        } catch (e) {
+          _logger.warning('[UDXTransport._performDial] Failed to register connection-peer mapping: $e');
+        }
+      }
+
+      final localProtocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final localMa = MultiAddr('/$localProtocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       final remoteMa = addr;
 
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
@@ -192,6 +235,7 @@ class UDXTransport implements Transport {
       await UDXExceptionUtils.safeCloseAll({
         'initialStream': () async => await initialStream?.close(),
         'multiplexer': () async => multiplexer?.close(),
+        'rawSocket': () async => rawSocket?.close(),
       });
       
       rethrow; // Let UDXExceptionHandler handle the retry logic
@@ -214,7 +258,6 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport.listen] Creating RawDatagramSocket for $host:$port');
       
       // Create raw UDP socket and bind it
-      final isIPv6 = UDX.getAddressFamily(host) == 6;
       final bindAddress = host == '0.0.0.0' ? InternetAddress.anyIPv4 :
                          host == '::' ? InternetAddress.anyIPv6 :
                          InternetAddress(host);
@@ -223,10 +266,11 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport.listen] RawDatagramSocket bound to: ${rawSocket.address.address}:${rawSocket.port}');
 
       // Create multiplexer
-      multiplexer = UDXMultiplexer(rawSocket);
+      multiplexer = UDXMultiplexer(rawSocket, metricsObserver: metricsObserver);
       _logger.fine('[UDXTransport.listen] UDXMultiplexer created');
 
-      final boundMa = MultiAddr('/ip4/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      final protocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       _logger.fine('[UDXTransport.listen] Creating UDXListener for $boundMa');
       final listener = UDXListener(
         listeningSocket: multiplexer,
@@ -403,8 +447,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _logger.fine('[UDXSessionConn $id] Subscribing to initialStream closeEvents.');
     _initialStreamCloseSubscription = _initialStream.closeEvents.listen(
       (_) {
-        _logger.fine('[UDXSessionConn $id] Initial stream closed event. Closing session.');
-        close(); 
+        _logger.fine('[UDXSessionConn $id] Initial stream closed event. Active streams: ${_activeStreams.length}');
+        _activeStreams.remove(_initialStream.id);
+        // Do NOT auto-close — the multiplexer (yamux) above controls lifecycle.
       },
       onError: (err, s) { 
         _logger.fine('[UDXSessionConn $id] Initial stream error event: $err. Closing session with error.');
@@ -676,6 +721,34 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   @override
   Socket get socket => throw UnimplementedError("UDX connections operate over UDPSocket, not a direct dart:io.Socket.");
 
+  /// Ping the remote peer to verify connection liveness.
+  /// Uses UDX's native PING frame (1 byte) for minimal overhead.
+  /// 
+  /// This is a lightweight, non-intrusive way to check if the connection
+  /// is still alive, suitable for health monitoring and keepalive checks.
+  /// 
+  /// Returns true if the peer responds (ACK received), false on timeout or error.
+  Future<bool> ping({Duration timeout = const Duration(seconds: 5)}) async {
+    if (_isClosed) return false;
+    try {
+      return await _udpSocket.ping(timeout: timeout);
+    } catch (e) {
+      _logger.fine('[UDXSessionConn $id] Ping failed: $e');
+      return false;
+    }
+  }
+
+  /// Called by UDXP2PStreamAdapter when a stream closes.
+  /// Removes the stream from active streams and potentially closes the session
+  /// if no active streams remain.
+  void notifyStreamClosed(int streamId) {
+    _logger.fine('[UDXSessionConn $id] Stream $streamId closed. Active streams before removal: ${_activeStreams.length}');
+    _activeStreams.remove(streamId);
+    _logger.fine('[UDXSessionConn $id] Active streams after removal: ${_activeStreams.length}');
+    // Do NOT auto-close the session when streams drop to zero.
+    // The multiplexer (yamux) above controls connection lifecycle.
+  }
+
   @override
   Future<void> close() async {
     // Phase 1.3: Connection Resource Cleanup Analysis - Enhanced close logging
@@ -688,7 +761,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     // Phase 1.1: UDX Connection Lifecycle Analysis - State change logging
     _logger.fine('[UDXSessionConn $id] STATE_CHANGE: open -> closing, reason: normal_close');
-    _connManager.updateState(this, ConnectionState.closing, error: null); 
+    if (_connManager.getState(this) != null) {
+      _connManager.updateState(this, ConnectionState.closing, error: null);
+    }
 
     // Phase 1.3: Resource cleanup order logging
     _logger.fine('[UDXSessionConn $id] CLEANUP_ORDER: 1. Cancelling socket and initial stream subscriptions');
@@ -734,7 +809,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     // Phase 1.1: UDX Connection Lifecycle Analysis - State change logging
     _logger.fine('[UDXSessionConn $id] STATE_CHANGE: closing -> closed, reason: cleanup_complete');
-    _connManager.updateState(this, ConnectionState.closed, error: null); 
+    if (_connManager.getState(this) != null) {
+      _connManager.updateState(this, ConnectionState.closed, error: null);
+    }
     _onClosedCallback?.call(this);
 
     if (!_closedCompleter.isCompleted) {
@@ -749,7 +826,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   Future<void> closeWithError(dynamic error, [StackTrace? stackTrace]) async {
     _logger.fine('[UDXSessionConn $id] closeWithError called with error: $error');
     if (!_isClosed && !_isClosing) {
-        _connManager.updateState(this, ConnectionState.closing, error: error); 
+      if (_connManager.getState(this) != null) {
+        _connManager.updateState(this, ConnectionState.closing, error: error);
+      }
     }
     
     if (!_closedCompleter.isCompleted) {
@@ -773,13 +852,40 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     // The 'length' parameter for TransportConn.read is a suggestion,
     // P2PStream.read also takes an optional maxLength.
     _logger.fine('[UDXSessionConn $id] read() delegating to initialP2PStream.read(length: $length)');
-    return initialP2PStream.read(length);
+
+    // Fail fast if session is closing/closed
+    if (_isClosed || _isClosing) {
+      _logger.fine('[UDXSessionConn $id] read() called on closing/closed session. Returning empty (EOF).');
+      return Uint8List(0);
+    }
+
+    final result = await initialP2PStream.read(length);
+    if (result.isEmpty) {
+      _logger.fine('[UDXSessionConn $id] read() returned empty data (EOF signal). Stream isClosed: ${initialP2PStream.isClosed}');
+    }
+    return result;
+  }
+
+  /// Pushes data back to the front of the initial stream's read buffer.
+  /// Used to inject leftover bytes from multistream-select negotiation
+  /// before the Noise handshake reads from this connection.
+  void pushBack(Uint8List data) {
+    if (data.isEmpty) return;
+    _logger.fine('[UDXSessionConn $id] pushBack: ${data.length} bytes pushed back to initialP2PStream');
+    initialP2PStream.pushBack(data);
   }
 
   @override
   Future<void> write(Uint8List data) async {
     // For negotiation purposes, write to the initial stream.
-    _logger.fine('[UDXSessionConn $id] write() delegating to initialP2PStream.write() data length: ${data.length}');
+    _logger.fine('[UDXSessionConn $id] write() delegating to initialP2PStream.write() data length: ${data.length}. Session _isClosed: $_isClosed, _isClosing: $_isClosing');
+    
+    // Fail fast if session is closing/closed to prevent hanging on writes to closed streams
+    if (_isClosed || _isClosing) {
+      _logger.warning('[UDXSessionConn $id] write() called on closing/closed session. Throwing StateError.');
+      throw StateError('Session is closing or closed, cannot write');
+    }
+    
     return initialP2PStream.write(data);
   }
 

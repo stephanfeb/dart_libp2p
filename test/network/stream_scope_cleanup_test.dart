@@ -167,6 +167,9 @@ class MockP2PStream implements P2PStream<Uint8List> {
   bool get isClosed => _isClosed;
 
   @override
+  bool get isWritable => !_isClosed;
+
+  @override
   StreamStats stat() => StreamStats(
     direction: Direction.outbound,
     opened: DateTime.now(),

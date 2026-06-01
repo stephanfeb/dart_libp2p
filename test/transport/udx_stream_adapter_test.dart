@@ -33,6 +33,7 @@ void main() {
       when(mockUdxStream.id).thenReturn(1);
       when(mockUdxStream.data).thenAnswer((_) => udxDataController.stream);
       when(mockUdxStream.closeEvents).thenAnswer((_) => udxCloseController.stream);
+      when(mockUdxStream.closeWrite()).thenAnswer((_) async {});
       when(mockParentConn.notifyActivity()).thenAnswer((_) {});
 
       adapter = UDXP2PStreamAdapter(
@@ -98,14 +99,23 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test('read() throws TimeoutException if no data arrives', () async {
-      final readFuture = adapter.read();
-      
-      expect(
-        () async => await readFuture,
-        throwsA(isA<TimeoutException>()),
-      );
-    }, timeout: const Timeout(Duration(seconds: 31))); // Test timeout needs to be longer than read timeout
+    test('read() waits indefinitely if no data arrives (no timeout)', () async {
+      bool completed = false;
+      final readFuture = adapter.read().then((v) {
+        completed = true;
+        return v;
+      });
+
+      // Wait briefly - read should still be pending since there is no timeout
+      await Future.delayed(const Duration(milliseconds: 200));
+      expect(completed, isFalse,
+          reason: 'read() must not complete when no data arrives - '
+              'yamux keepalive handles liveness, not a read timeout');
+
+      // Clean up: unblock the pending read so tearDown does not hang
+      udxDataController.add(Uint8List.fromList([1, 2, 3]));
+      await readFuture;
+    }, timeout: const Timeout(Duration(seconds: 5)));
 
     test('write() sends data to udx stream', () async {
       final testData = Uint8List.fromList([7, 8, 9]);
@@ -159,6 +169,53 @@ void main() {
       await adapter.onClose;
 
       expect(adapter.isClosed, isTrue);
+    });
+
+    test('closeWrite() prevents further writes', () async {
+      await adapter.closeWrite();
+
+      expect(
+        () async => await adapter.write([1, 2, 3]),
+        throwsStateError,
+      );
+    });
+
+    test('closeWrite() allows continued reads', () async {
+      await adapter.closeWrite();
+
+      // Should still be able to read data
+      final testData = Uint8List.fromList([10, 11, 12]);
+      udxDataController.add(testData);
+      await Future.delayed(Duration.zero);
+
+      final result = await adapter.read();
+      expect(result, equals(testData));
+    });
+
+    test('closeWrite() delegates to UDX stream', () async {
+      await adapter.closeWrite();
+
+      verify(mockUdxStream.closeWrite()).called(1);
+    });
+
+    test('closeWrite() is idempotent', () async {
+      await adapter.closeWrite();
+      await adapter.closeWrite();
+      await adapter.closeWrite();
+
+      // Should only call UDX closeWrite once
+      verify(mockUdxStream.closeWrite()).called(1);
+    });
+
+    test('full close() after closeWrite() completes successfully', () async {
+      when(mockUdxStream.close()).thenAnswer((_) async {});
+      
+      await adapter.closeWrite();
+      await adapter.close();
+
+      expect(adapter.isClosed, isTrue);
+      verify(mockUdxStream.closeWrite()).called(1);
+      verify(mockUdxStream.close()).called(1);
     });
   });
 

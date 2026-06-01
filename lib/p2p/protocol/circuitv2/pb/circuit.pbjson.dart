@@ -45,6 +45,7 @@ const HopMessage$json = {
     {'1': 'reservation', '3': 3, '4': 1, '5': 11, '6': '.circuit.pb.Reservation', '9': 2, '10': 'reservation', '17': true},
     {'1': 'limit', '3': 4, '4': 1, '5': 11, '6': '.circuit.pb.Limit', '9': 3, '10': 'limit', '17': true},
     {'1': 'status', '3': 5, '4': 1, '5': 14, '6': '.circuit.pb.Status', '9': 4, '10': 'status', '17': true},
+    {'1': 'diagnostic_session_id', '3': 6, '4': 1, '5': 12, '9': 5, '10': 'diagnosticSessionId', '17': true},
   ],
   '4': [HopMessage_Type$json],
   '8': [
@@ -53,6 +54,7 @@ const HopMessage$json = {
     {'1': '_reservation'},
     {'1': '_limit'},
     {'1': '_status'},
+    {'1': '_diagnostic_session_id'},
   ],
 };
 
@@ -72,9 +74,11 @@ final $typed_data.Uint8List hopMessageDescriptor = $convert.base64Decode(
     'gAUgR0eXBliAEBEikKBHBlZXIYAiABKAsyEC5jaXJjdWl0LnBiLlBlZXJIAVIEcGVlcogBARI+'
     'CgtyZXNlcnZhdGlvbhgDIAEoCzIXLmNpcmN1aXQucGIuUmVzZXJ2YXRpb25IAlILcmVzZXJ2YX'
     'Rpb26IAQESLAoFbGltaXQYBCABKAsyES5jaXJjdWl0LnBiLkxpbWl0SANSBWxpbWl0iAEBEi8K'
-    'BnN0YXR1cxgFIAEoDjISLmNpcmN1aXQucGIuU3RhdHVzSARSBnN0YXR1c4gBASIsCgRUeXBlEg'
-    'sKB1JFU0VSVkUQABILCgdDT05ORUNUEAESCgoGU1RBVFVTEAJCBwoFX3R5cGVCBwoFX3BlZXJC'
-    'DgoMX3Jlc2VydmF0aW9uQggKBl9saW1pdEIJCgdfc3RhdHVz');
+    'BnN0YXR1cxgFIAEoDjISLmNpcmN1aXQucGIuU3RhdHVzSARSBnN0YXR1c4gBARI3ChVkaWFnbm'
+    '9zdGljX3Nlc3Npb25faWQYBiABKAxIBVITZGlhZ25vc3RpY1Nlc3Npb25JZIgBASIsCgRUeXBl'
+    'EgsKB1JFU0VSVkUQABILCgdDT05ORUNUEAESCgoGU1RBVFVTEAJCBwoFX3R5cGVCBwoFX3BlZX'
+    'JCDgoMX3Jlc2VydmF0aW9uQggKBl9saW1pdEIJCgdfc3RhdHVzQhgKFl9kaWFnbm9zdGljX3Nl'
+    'c3Npb25faWQ=');
 
 @$core.Deprecated('Use stopMessageDescriptor instead')
 const StopMessage$json = {
@@ -84,6 +88,7 @@ const StopMessage$json = {
     {'1': 'peer', '3': 2, '4': 1, '5': 11, '6': '.circuit.pb.Peer', '9': 1, '10': 'peer', '17': true},
     {'1': 'limit', '3': 3, '4': 1, '5': 11, '6': '.circuit.pb.Limit', '9': 2, '10': 'limit', '17': true},
     {'1': 'status', '3': 4, '4': 1, '5': 14, '6': '.circuit.pb.Status', '9': 3, '10': 'status', '17': true},
+    {'1': 'diagnostic_session_id', '3': 5, '4': 1, '5': 12, '9': 4, '10': 'diagnosticSessionId', '17': true},
   ],
   '4': [StopMessage_Type$json],
   '8': [
@@ -91,6 +96,7 @@ const StopMessage$json = {
     {'1': '_peer'},
     {'1': '_limit'},
     {'1': '_status'},
+    {'1': '_diagnostic_session_id'},
   ],
 };
 
@@ -108,9 +114,10 @@ final $typed_data.Uint8List stopMessageDescriptor = $convert.base64Decode(
     'CgtTdG9wTWVzc2FnZRI1CgR0eXBlGAEgASgOMhwuY2lyY3VpdC5wYi5TdG9wTWVzc2FnZS5UeX'
     'BlSABSBHR5cGWIAQESKQoEcGVlchgCIAEoCzIQLmNpcmN1aXQucGIuUGVlckgBUgRwZWVyiAEB'
     'EiwKBWxpbWl0GAMgASgLMhEuY2lyY3VpdC5wYi5MaW1pdEgCUgVsaW1pdIgBARIvCgZzdGF0dX'
-    'MYBCABKA4yEi5jaXJjdWl0LnBiLlN0YXR1c0gDUgZzdGF0dXOIAQEiHwoEVHlwZRILCgdDT05O'
-    'RUNUEAASCgoGU1RBVFVTEAFCBwoFX3R5cGVCBwoFX3BlZXJCCAoGX2xpbWl0QgkKB19zdGF0dX'
-    'M=');
+    'MYBCABKA4yEi5jaXJjdWl0LnBiLlN0YXR1c0gDUgZzdGF0dXOIAQESNwoVZGlhZ25vc3RpY19z'
+    'ZXNzaW9uX2lkGAUgASgMSARSE2RpYWdub3N0aWNTZXNzaW9uSWSIAQEiHwoEVHlwZRILCgdDT0'
+    '5ORUNUEAASCgoGU1RBVFVTEAFCBwoFX3R5cGVCBwoFX3BlZXJCCAoGX2xpbWl0QgkKB19zdGF0'
+    'dXNCGAoWX2RpYWdub3N0aWNfc2Vzc2lvbl9pZA==');
 
 @$core.Deprecated('Use peerDescriptor instead')
 const Peer$json = {

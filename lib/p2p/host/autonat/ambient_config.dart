@@ -15,11 +15,19 @@ class AmbientAutoNATv2Config {
   /// If null, uses host.addrs
   final List<MultiAddr> Function()? addressFunc;
   
+  /// If true, only probe IPv4 addresses for reachability detection.
+  /// This ensures devices with public IPv6 but private IPv4 will still create
+  /// relay reservations for compatibility with IPv4-only peers.
+  /// The IPv6 addresses are still advertised and usable for direct connections -
+  /// this only affects how AutoNAT determines if relay is needed.
+  final bool ipv4Only;
+  
   const AmbientAutoNATv2Config({
     this.bootDelay = const Duration(seconds: 15),
     this.retryInterval = const Duration(minutes: 1),
     this.refreshInterval = const Duration(minutes: 15),
     this.addressFunc,
+    this.ipv4Only = false,
   });
 }
 

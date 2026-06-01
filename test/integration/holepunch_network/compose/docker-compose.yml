@@ -124,7 +124,7 @@ services:
   # Circuit Relay Server (Public)
   relay-server:
     build:
-      context: ../../../../../
+      context: ../../../../../  # agentic/ directory to include dart-udx
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: relay-server
     ports:
@@ -148,7 +148,7 @@ services:
   # Peer A (Behind NAT-A)
   peer-a:
     build:
-      context: ../../../../../
+      context: ../../../../../  # agentic/ directory to include dart-udx
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: peer-a
     ports:
@@ -181,7 +181,7 @@ services:
   # Peer B (Behind NAT-B)
   peer-b:
     build:
-      context: ../../../../../
+      context: ../../../../../  # agentic/ directory to include dart-udx
       dockerfile: dart-libp2p/test/integration/holepunch_network/containers/dart-peer/Dockerfile
     container_name: peer-b
     ports:

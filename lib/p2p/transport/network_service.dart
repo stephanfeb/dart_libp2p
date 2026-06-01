@@ -14,13 +14,11 @@ class NetworkService {
   Future<void> createTcpServer(String host, int port) async {
     try {
       final server = await ServerSocket.bind(host, port);
-      print('TCP Server listening on ${server.address}:${server.port}');
       
       server.listen((Socket client) {
         handleClient(client);
       });
     } catch (e) {
-      print('Error creating TCP server: $e');
     }
   }
 
@@ -28,26 +26,21 @@ class NetworkService {
     try {
       _tcpSocket = await Socket.connect(host, port);
       _isConnected = true;
-      print('Connected to server at ${_tcpSocket?.remoteAddress}:${_tcpSocket?.remotePort}');
       
       _tcpSocket?.listen(
         (Uint8List data) {
           final message = String.fromCharCodes(data);
-          print('Received: $message');
         },
         onError: (error) {
-          print('Error: $error');
           _isConnected = false;
           _tcpSocket?.close();
         },
         onDone: () {
-          print('Server disconnected');
           _isConnected = false;
           _tcpSocket?.close();
         },
       );
     } catch (e) {
-      print('Error connecting to TCP server: $e');
     }
   }
 
@@ -58,21 +51,17 @@ class NetworkService {
   }
 
   void handleClient(Socket client) {
-    print('Connection from ${client.remoteAddress}:${client.remotePort}');
     
     client.listen(
       (Uint8List data) {
         final message = String.fromCharCodes(data);
-        print('Received from client: $message');
         // Echo the message back
         client.write('Server received: $message');
       },
       onError: (error) {
-        print('Error: $error');
         client.close();
       },
       onDone: () {
-        print('Client disconnected');
         client.close();
       },
     );
@@ -84,7 +73,6 @@ class NetworkService {
   Future<void> createUdpSocket(String host, int port) async {
     try {
       _udpSocket = await RawDatagramSocket.bind(host, port);
-      print('UDP Socket bound to ${_udpSocket?.address}:${_udpSocket?.port}');
       
       _udpSocket?.listen(
         (RawSocketEvent event) {
@@ -92,19 +80,15 @@ class NetworkService {
             final datagram = _udpSocket?.receive();
             if (datagram != null) {
               final message = String.fromCharCodes(datagram.data);
-              print('Received UDP message: $message from ${datagram.address}:${datagram.port}');
             }
           }
         },
         onError: (error) {
-          print('UDP Socket error: $error');
         },
         onDone: () {
-          print('UDP Socket closed');
         },
       );
     } catch (e) {
-      print('Error creating UDP socket: $e');
     }
   }
 

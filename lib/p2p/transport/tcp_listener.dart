@@ -57,12 +57,10 @@ class TCPListener implements Listener {
         await connection.close();
       }
     } catch (e) {
-      print('Error handling incoming connection: $e');
       // Ensure socket is closed if connection handling fails
       try {
         await socket.close();
       } catch (closeError) {
-        print('Error closing socket after connection handling error: $closeError');
       }
     }
   }

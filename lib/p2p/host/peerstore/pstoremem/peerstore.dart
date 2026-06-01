@@ -104,7 +104,7 @@ class MemoryPeerstore implements Peerstore {
     }
 
     if (protocols != null) {
-      _protoBook.setProtocols(peerId, protocols);
+      await _protoBook.setProtocols(peerId, protocols);
     }
 
     if (metadata != null) {

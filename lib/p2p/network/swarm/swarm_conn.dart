@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
+import 'package:dart_libp2p/core/network/connection_context.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
@@ -65,6 +66,9 @@ class SwarmConn implements Conn {
 
   /// Event-driven health monitor for this connection
   late final ConnectionHealthMonitor _healthMonitor;
+
+  /// Connection context for event correlation across layers
+  ConnectionContext? _context;
 
   /// Creates a new SwarmConn
   SwarmConn({
@@ -155,6 +159,15 @@ class SwarmConn implements Conn {
   /// Records an error for health tracking
   void _recordHealthError(dynamic error) {
     _healthMonitor.metrics.recordError(error);
+  }
+
+  /// Gets the connection context for event correlation
+  ConnectionContext? get context => _context;
+
+  /// Sets the connection context (typically called after upgrade)
+  void setContext(ConnectionContext ctx) {
+    _context = ctx;
+    _logger.fine('SwarmConn ($id): Context set: ${ctx.connectionId}');
   }
 
   @override

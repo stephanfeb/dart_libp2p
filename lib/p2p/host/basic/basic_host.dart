@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show NetworkInterface, InternetAddressType; // Added for NetworkInterface
+import 'dart:io' show NetworkInterface, InternetAddressType, InternetAddress, RawDatagramSocket; // Added for NetworkInterface
 
 import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
@@ -27,6 +27,7 @@ import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Import Ad
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart'; // Added import
 import 'package:dart_libp2p/p2p/protocol/identify/identify.dart';   // Added import
+import 'package:dart_libp2p/p2p/protocol/identify/identify_exceptions.dart'; // Added for typed exceptions
 import 'package:dart_libp2p/p2p/protocol/identify/options.dart';  // Added import
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
@@ -34,6 +35,7 @@ import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'internal/backoff/backoff.dart';
 import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
+import 'package:dart_libp2p/p2p/transport/connection_manager.dart'; // For real ConnectionManager
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart'; // Added for PingService
@@ -52,6 +54,35 @@ final _log = Logger('basichost');
 
 /// Default negotiation timeout
 const Duration defaultNegotiationTimeout = Duration(seconds: 10);
+
+/// Outbound network capability types
+enum OutboundCapability { 
+  ipv4Only, 
+  ipv6Only, 
+  dualStack, 
+  relayOnly, 
+  unknown 
+}
+
+/// Information about local outbound connectivity capabilities
+class OutboundCapabilityInfo {
+  final bool hasIPv4;
+  final bool hasIPv6;
+  final DateTime detectedAt;
+  
+  OutboundCapabilityInfo({
+    required this.hasIPv4,
+    required this.hasIPv6,
+    required this.detectedAt,
+  });
+  
+  OutboundCapability get capability {
+    if (hasIPv4 && hasIPv6) return OutboundCapability.dualStack;
+    if (hasIPv4) return OutboundCapability.ipv4Only;
+    if (hasIPv6) return OutboundCapability.ipv6Only;
+    return OutboundCapability.relayOnly;
+  }
+}
 
 /// Default addresses factory function.
 /// Filters out loopback and unspecified addresses from the provided list.
@@ -96,6 +127,9 @@ class BasicHost implements Host {
   RelayManager? _relayManager; // Added RelayManager field
   AutoRelay? _autoRelay; // Added AutoRelay field
   CircuitV2Client? _circuitV2Client; // Added CircuitV2Client field
+
+  /// Access the Circuit Relay v2 client, if relay is enabled.
+  CircuitV2Client? get circuitV2Client => _circuitV2Client;
   AmbientAutoNATv2? _autoNATService; // Changed to AmbientAutoNATv2 orchestrator
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
@@ -123,6 +157,13 @@ class BasicHost implements Host {
   List<MultiAddr> _filteredInterfaceAddrs = [];
   List<MultiAddr> _allInterfaceAddrs = [];
   Timer? _addressMonitorTimer; // Added to store the timer
+  
+  // Outbound capability detection
+  OutboundCapabilityInfo _outboundCapability = OutboundCapabilityInfo(
+    hasIPv4: false,
+    hasIPv6: false,
+    detectedAt: DateTime.now(),
+  );
 
   /// Creates a new BasicHost with the given Network and Config.
   /// Use BasicHost.create() instead for proper async initialization.
@@ -147,7 +188,7 @@ class BasicHost implements Host {
     _mux = MultistreamMuxer(),
     _negtimeout = config.negotiationTimeout ?? defaultNegotiationTimeout,
     _addrsFactory = config.addrsFactory ?? defaultAddrsFactory,
-    _cmgr = config.connManager ?? NullConnMgr(),
+    _cmgr = config.connManager ?? ConnectionManager(),
     _eventBus = config.eventBus ?? BasicBus(),
     // Initialize _upgrader using the network's resourceManager
     // This assumes _network is already initialized and has its resourceManager.
@@ -163,7 +204,6 @@ class BasicHost implements Host {
       // metricsTracer: config.identifyMetricsTracer, // If added to Config
     );
     _idService = IdentifyService(this, options: identifyOpts);
-    _idService.start();
 
     // Initialize PingService if enabled in Config
     if (config.enablePing) {
@@ -232,41 +272,31 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] No listenAddrs configured in host config. Skipping explicit _network.listen() call from BasicHost.start().');
     }
 
-    // Start IDService
-    _log.fine('[BasicHost start] Before _idService.start. Current network.listenAddresses: ${_network.listenAddresses}');
-    // await _idService.start();
-    _log.fine('[BasicHost start] After _idService.start. Current network.listenAddresses: ${_network.listenAddresses}');
-
     // Persist a signed peer record for self to the peerstore if enabled.
-    // This ensures that when IdentifyService requests our own record, it's available.
+    // This must happen BEFORE _idService.start() so the initial snapshot
+    // includes the signed record.
     if (!(_config.disableSignedPeerRecord ?? false)) {
       _log.fine('Attempting to create and persist self signed peer record.');
       if (peerStore.addrBook is CertifiedAddrBook) {
         final cab = peerStore.addrBook as CertifiedAddrBook;
-        final selfId = id; // Host's own PeerId
+        final selfId = id;
         final privKey = await peerStore.keyBook.privKey(selfId);
 
         if (privKey == null) {
           _log.fine('Unable to access host private key for selfId $selfId; cannot create self signed record.');
         } else {
-          final currentAddrs = addrs; // Uses the host's addrs getter, which should be up-to-date
+          final currentAddrs = addrs;
           if (currentAddrs.isEmpty) {
             _log.fine('Host has no addresses at the moment of self-record creation; record will reflect this.');
           }
-          
+
           try {
-            // Create PeerRecord payload
-            // Note: The actual structure of PeerRecord and how it's created from AddrInfo
-            // or directly might differ slightly from Go. This assumes a Dart equivalent.
-            // The key is to get PeerId, sequence number, and addresses into a signable format.
             final recordPayload = peer_record.PeerRecord(
-              peerId: selfId, // Corrected: expects PeerId object
-              seq: DateTime.now().millisecondsSinceEpoch, // Using timestamp for sequence number
-              addrs: currentAddrs, // Corrected: expects List<MultiAddr> and param name is 'addrs'
+              peerId: selfId,
+              seq: DateTime.now().millisecondsSinceEpoch,
+              addrs: currentAddrs,
             );
-            
-            // Create and sign the Envelope
-            // Envelope.seal should handle marshalling the recordPayload and signing
+
             final envelope = await Envelope.seal(recordPayload, privKey);
 
             if (envelope != null) {
@@ -283,6 +313,12 @@ class BasicHost implements Host {
         _log.fine('Peerstore AddrBook is not a CertifiedAddrBook; cannot persist self signed record.');
       }
     }
+
+    // Start IDService after self-record is persisted so the initial snapshot
+    // includes the signed peer record.
+    _log.fine('[BasicHost start] Starting _idService. Current network.listenAddresses: ${_network.listenAddresses}');
+    await _idService.start();
+    _log.fine('[BasicHost start] _idService started. Current network.listenAddresses: ${_network.listenAddresses}');
 
     // PingService is started implicitly by its constructor registering a handler.
 
@@ -359,6 +395,7 @@ class BasicHost implements Host {
         host: this,
         upgrader: _upgrader,
         connManager: _cmgr,
+        metricsObserver: _config.relayMetricsObserver,
       );
       
       // Start the CircuitV2Client to register STOP protocol handler
@@ -426,7 +463,10 @@ class BasicHost implements Host {
           .stream
           .listen((event) async {
         if (event is EvtAutoRelayAddrsUpdated) {
-          _log.fine('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          _log.warning('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          for (var addr in event.advertisableAddrs) {
+            _log.warning('[BasicHost]   updated addr: $addr');
+          }
           _autoRelayAddrs = List.from(event.advertisableAddrs);
           
           // Regenerate signed peer record with new circuit addresses
@@ -663,7 +703,45 @@ class BasicHost implements Host {
         _log.fine('Local interface addresses updated. Filtered: ${_filteredInterfaceAddrs.length}, All: ${_allInterfaceAddrs.length}');
         _log.finer('Filtered interface addresses: $_filteredInterfaceAddrs');
       }
+      
+      // Derive outbound capability from discovered interfaces
+      final hasIPv4 = newFilteredInterfaceAddrs.any((a) => a.ip4 != null);
+      final hasIPv6 = newFilteredInterfaceAddrs.any((a) => a.ip6 != null);
+      
+      // Optional active IPv6 probe (only if interface exists)
+      bool canReachIPv6 = false;
+      if (hasIPv6) {
+        canReachIPv6 = await _probeIPv6Connectivity();
+      }
+      
+      // Update capability (refreshes with same cycle as interfaces)
+      final newCapability = OutboundCapabilityInfo(
+        hasIPv4: hasIPv4,
+        hasIPv6: hasIPv6 && canReachIPv6,
+        detectedAt: DateTime.now(),
+      );
+      
+      // Log capability changes
+      if (newCapability.capability != _outboundCapability.capability) {
+        _log.info('Outbound capability changed: ${_outboundCapability.capability} -> ${newCapability.capability}');
+      }
+      
+      _outboundCapability = newCapability;
     });
+  }
+  
+  /// Probe IPv6 connectivity by attempting to bind to IPv6 address
+  Future<bool> _probeIPv6Connectivity() async {
+    try {
+      // Quick UDP socket bind test to verify IPv6 is available
+      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv6, 0);
+      socket.close();
+      _log.fine('IPv6 connectivity probe succeeded');
+      return true;
+    } catch (e) {
+      _log.fine('IPv6 connectivity probe failed: $e');
+      return false;
+    }
   }
 
   void _newStreamHandler(P2PStream stream) async {
@@ -849,8 +927,13 @@ class BasicHost implements Host {
     // 4. Add circuit relay addresses from AutoRelay
     // These are addresses where we can be reached via a relay server
     if (_autoRelay != null && _autoRelayAddrs.isNotEmpty) {
-      _log.fine('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      _log.warning('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      for (var addr in _autoRelayAddrs) {
+        _log.warning('[BasicHost allAddrs]   circuit addr: $addr');
+      }
       finalAddrs.addAll(_autoRelayAddrs);
+    } else if (_autoRelay != null) {
+      _log.warning('[BasicHost allAddrs] AutoRelay active but _autoRelayAddrs is EMPTY');
     }
     
     // If after all this, finalAddrs is empty, but we had original listen addresses,
@@ -894,6 +977,9 @@ class BasicHost implements Host {
   PingService? get pingService => _pingService;
   RelayManager? get relayManager => _relayManager;
   AmbientAutoNATv2? get autoNATService => _autoNATService;
+  
+  /// Returns current outbound connectivity capability
+  OutboundCapabilityInfo get outboundCapability => _outboundCapability;
 
   /// Returns only public/observed addresses suitable for holepunching.
   /// This includes:
@@ -951,7 +1037,7 @@ class BasicHost implements Host {
     
     // Prevent self-dialing
     if (pi.id == id) {
-
+      _log.info('Preventing self-dial attempt to ${pi.id}');
       return;
     }
 
@@ -994,6 +1080,19 @@ class BasicHost implements Host {
       final totalTime = DateTime.now().difference(startTime);
 
 
+    } on IdentifyTimeoutException catch (e, stackTrace) {
+      // Handle identify timeout gracefully - log warning instead of error
+      final dialTime = DateTime.now().difference(dialStartTime);
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [CONNECT-TIMEOUT] Connection to ${pi.id} timed out during identify after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e');
+      // Rethrow the typed exception so callers can handle it specifically
+      rethrow;
+    } on IdentifyException catch (e, stackTrace) {
+      // Handle other identify exceptions
+      final dialTime = DateTime.now().difference(dialStartTime);
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [CONNECT-IDENTIFY-ERROR] Connection failed due to identify error after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e\n$stackTrace');
+      rethrow;
     } catch (e, stackTrace) {
       final dialTime = DateTime.now().difference(dialStartTime);
       final totalTime = DateTime.now().difference(startTime);
@@ -1012,11 +1111,38 @@ class BasicHost implements Host {
 
       // Phase 2: Identify Wait
       final identifyStartTime = DateTime.now();
-      
+
       await _idService.identifyWait(conn);
-      
+
       final identifyTime = DateTime.now().difference(identifyStartTime);
 
+    } on IdentifyTimeoutException catch (e, stackTrace) {
+      // Handle identify timeout gracefully - this is not a critical error,
+      // the peer may have gone offline or be unreachable.
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [DIAL-PEER-TIMEOUT] Identify timed out for ${p.toString()} after ${totalTime.inMilliseconds}ms: $e');
+      
+      // CRITICAL: Remove the stale connection to prevent persistent failure loops.
+      // Without this, subsequent newStream calls would reuse the dead connection
+      // and timeout again, creating a 30-second delay on every operation.
+      try {
+        _log.warning('🗑️ [DIAL-PEER-TIMEOUT] Removing stale connection to ${p.toString()}');
+        await _network.closePeer(p);
+      } catch (closeError) {
+        _log.warning('⚠️ [DIAL-PEER-TIMEOUT] Error closing stale connection: $closeError');
+      }
+      
+      // Rethrow the typed exception so callers can handle it appropriately
+      throw IdentifyTimeoutException(
+        peerId: p,
+        message: 'Dial failed due to identify timeout',
+        cause: e,
+      );
+    } on IdentifyException catch (e, stackTrace) {
+      // Handle other identify exceptions
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [DIAL-PEER-IDENTIFY-ERROR] Identify failed for ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
+      rethrow;
     } catch (e, stackTrace) {
       final totalTime = DateTime.now().difference(startTime);
       _log.severe('❌ [DIAL-PEER-ERROR] Failed to dial ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
@@ -1089,7 +1215,17 @@ class BasicHost implements Host {
     final connectStartTime = DateTime.now();
     _log.warning('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
-    await connect(AddrInfo(p, []), context: context);
+    try {
+      await connect(AddrInfo(p, []), context: context);
+    } on IdentifyTimeoutException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
+      rethrow;
+    } on IdentifyException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe('❌ [newStream Phase 1] Connection to ${p.toBase58()} failed due to identify error after ${totalTime.inMilliseconds}ms: $e');
+      rethrow;
+    }
     _log.warning('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
     final connectTime = DateTime.now().difference(connectStartTime);
@@ -1110,24 +1246,64 @@ class BasicHost implements Host {
 
 
     // Phase 3: Identify Wait
+    // CRITICAL FIX: Do NOT set stream deadline before identify wait
+    // Identify has its own internal timeout handling (30s)
+    // Setting deadline here causes it to expire during identify, breaking protocol negotiation
 
     final identifyStartTime = DateTime.now();
-    _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
-    
-    await _idService.identifyWait(stream.conn);
-    _log.warning('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
-    
+
+    // Skip identify for relay connections. Relay connections are already
+    // Noise-authenticated and the identify exchange fails because the inbound
+    // side's counter-identify DATA frames never reach the outbound side in time,
+    // causing a 30s timeout that blocks all protocol negotiation.
+    final connTransport = stream.conn.state.transport;
+    final isRelayConn = connTransport == 'circuit-relay';
+    if (isRelayConn) {
+      _log.fine('[newStream Phase 3] Skipping identify for relay connection to ${p.toBase58()} on stream ${stream.id()}');
+    } else {
+      _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
+
+      try {
+        await _idService.identifyWait(stream.conn);
+      } on IdentifyTimeoutException catch (e) {
+        final totalTime = DateTime.now().difference(startTime);
+        _log.warning('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
+        await stream.reset();
+
+        // CRITICAL: Remove the stale connection to prevent persistent failure loops.
+        // The identify timeout indicates the connection is dead - keeping it would
+        // cause repeated 30-second timeouts on subsequent operations.
+        try {
+          _log.warning('🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}');
+          await _network.closePeer(p);
+        } catch (closeError) {
+          _log.warning('⚠️ [newStream Phase 3] Error closing stale connection: $closeError');
+        }
+
+        rethrow;
+      } on IdentifyException catch (e) {
+        final totalTime = DateTime.now().difference(startTime);
+        _log.severe('❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e');
+        await stream.reset();
+        rethrow;
+      }
+      _log.warning('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
+    }
+
     final identifyTime = DateTime.now().difference(identifyStartTime);
 
 
     // Phase 4: Protocol Negotiation
+    // CRITICAL FIX: Set deadline AFTER identify completes to give protocol negotiation a fresh timeout window
 
     final negotiationStartTime = DateTime.now();
     
     try {
+      // Set deadline NOW, after identify is complete
+      // This gives protocol negotiation its own full timeout window
       if (hasTimeout && deadline != null) {
-
-        stream.setDeadline(deadline);
+        final freshDeadline = DateTime.now().add(_negtimeout);
+        stream.setDeadline(freshDeadline);
       }
 
 
@@ -1174,7 +1350,7 @@ class BasicHost implements Host {
       // Note: The go-libp2p implementation adds this *after* the stream handler returns,
       // but it seems more robust to add it as soon as negotiation succeeds.
       // This ensures that even if the handler has issues, we've recorded the protocol.
-      peerStore.protoBook.addProtocols(p, [selectedProtocol]);
+      await peerStore.protoBook.addProtocols(p, [selectedProtocol]);
       
       final setupTime = DateTime.now().difference(setupStartTime);
       final negotiationTime = DateTime.now().difference(negotiationStartTime);
@@ -1370,7 +1546,7 @@ class _AddressChangeNotifiee implements Notifiee {
   }
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     return await Future.delayed(Duration(milliseconds: 10));
   }
 

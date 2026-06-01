@@ -76,7 +76,7 @@ class TestNotifiee implements Notifiee {
   });
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     connectedCallback?.call(network, conn);
   }
 

@@ -28,6 +28,8 @@ import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm_conn.dart';
 import 'swarm_stream.dart';
 import 'swarm_dial.dart'; // For AddrDialer and DelayDialRanker
+import 'address_filter.dart'; // For AddressFilter
+import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // For OutboundCapabilityInfo
 
 /// Swarm is a Network implementation that manages connections to peers and
 /// handles streams over those connections.
@@ -80,6 +82,21 @@ class Swarm implements Network {
   final Lock _notifieeLock = Lock();
 
   final Lock _transportsLock = Lock();
+  
+  /// Track last activity time for connections (for relay health monitoring)
+  final Map<String, DateTime> _connectionLastActivity = {};
+
+  /// Track connection creation time (for grace period logic)
+  final Map<String, DateTime> _connectionCreatedAt = {};
+
+  /// Track consecutive probe failures per peer (for recovery logic)
+  final Map<String, int> _consecutiveProbeFailures = {};
+
+  /// Track peers that connected via relay (prefer relay addresses for them)
+  final Set<String> _relayConnectedPeers = {};
+
+  /// Track connections being upgraded (to avoid race condition during upgrade)
+  final Map<String, Completer<SwarmConn>> _upgradingConnections = {};
 
   /// Whether the swarm is closed
   bool _isClosed = false;
@@ -338,6 +355,40 @@ class Swarm implements Network {
     _logger.fine('Swarm._handleIncomingConnections called for listener: ${listener.runtimeType} on addr ${listener.addr}');
     // Explicitly type the stream's data event
     listener.connectionStream.listen((TransportConn transportConn) async { 
+      // FIX: For relay connections, extract peer ID and mark as upgrading
+      // This prevents race condition where dialPeer() doesn't see the connection during upgrade
+      String? remotePeerIdStr;
+      Completer<SwarmConn>? upgradingCompleter;
+      
+      try {
+        // Check if this is a relay connection with peer ID in address
+        if (transportConn.remoteMultiaddr.toString().contains('/p2p-circuit')) {
+          // Extract destination peer ID from circuit address
+          // Format: /ip4/.../p2p/RELAY_ID/p2p-circuit/p2p/DEST_ID
+          final addrStr = transportConn.remoteMultiaddr.toString();
+          final parts = addrStr.split('/');
+          for (int i = parts.length - 1; i >= 0; i--) {
+            if (parts[i] == 'p2p' && i + 1 < parts.length) {
+              remotePeerIdStr = parts[i + 1];
+              break;
+            }
+          }
+          
+          if (remotePeerIdStr != null) {
+            // Mark this peer as being upgraded to prevent race condition
+            final peerIdStr = remotePeerIdStr; // Capture non-null value
+            upgradingCompleter = Completer<SwarmConn>();
+            await _connLock.synchronized(() {
+              _upgradingConnections[peerIdStr] = upgradingCompleter!;
+              _relayConnectedPeers.add(peerIdStr);
+            });
+            _logger.info('Swarm: Marked peer $peerIdStr as upgrading (relay connection)');
+          }
+        }
+      } catch (e) {
+        _logger.warning('Swarm: Error extracting peer ID from relay address: $e');
+      }
+      
       try {
         // Obtain a ConnManagementScope for the new inbound connection
         // Assuming 'usefd' is true for real connections.
@@ -351,7 +402,15 @@ class Swarm implements Network {
           );
         } catch (e, s) {
           _logger.warning('Inbound connection upgrade failed for ${transportConn.remoteMultiaddr}: $e\n$s');
-          await transportConn.close(); 
+          await transportConn.close();
+          
+          // Clean up upgrading state
+          if (remotePeerIdStr != null && upgradingCompleter != null) {
+            await _connLock.synchronized(() {
+              _upgradingConnections.remove(remotePeerIdStr);
+            });
+            upgradingCompleter.completeError(e);
+          }
           return; 
         }
 
@@ -373,22 +432,57 @@ class Swarm implements Network {
           swarm: this,
           managementScope: connManagementScope,
         );
+        
+        // Set connection context if available from upgraded connection
+        if (upgradedConn is UpgradedConnectionImpl && upgradedConn.context != null) {
+          swarmConn.setContext(upgradedConn.context!);
+        }
 
         // Use upgradedConn.remotePeer for the map key
-        final String remotePeerIdStr = upgradedConn.remotePeer.toString();
-        _logger.warning('=== STORING INBOUND CONNECTION ===');
-        _logger.warning('Storing connection for peer: ${upgradedConn.remotePeer}');
-        _logger.warning('Peer ID toString(): "$remotePeerIdStr"');
-        _logger.warning('Peer ID toBase58(): ${upgradedConn.remotePeer.toBase58()}');
-        _logger.warning('Connection ID: ${swarmConn.id}');
-        _logger.warning('=== END STORING INBOUND CONNECTION ===');
+        // Note: remotePeerIdStr may already be set from relay address extraction above
+        final String actualPeerIdStr = upgradedConn.remotePeer.toString();
+        _logger.fine('Storing inbound connection for peer=$actualPeerIdStr, conn_id=${swarmConn.id}');
+        
+        // For relayed connections, deduplicate older connections to same peer via same relay
+        if (_isRelayedConnection(swarmConn)) {
+          final relayId = _extractRelayFromCircuitAddr(swarmConn.remoteMultiaddr);
+          if (relayId != null) {
+            await _connLock.synchronized(() async {
+              final existingConns = _connections[actualPeerIdStr] ?? [];
+              final staleRelayConns = existingConns.where((existing) {
+                if (!_isRelayedConnection(existing)) return false;
+                final existingRelayId = _extractRelayFromCircuitAddr(existing.remoteMultiaddr);
+                return existingRelayId == relayId && existing.id != swarmConn.id;
+              }).toList();
+              
+              // Close stale connections through the same relay
+              for (final stale in staleRelayConns) {
+                _logger.warning('[CONN-DEDUP-DIAG] Closing stale relay connection ${stale.id} to peer $actualPeerIdStr via relay $relayId in favor of new connection ${swarmConn.id}');
+                existingConns.remove(stale);
+                Future.microtask(() => stale.close());
+              }
+            });
+          }
+        }
         
         await _connLock.synchronized(() {
-          if (!_connections.containsKey(remotePeerIdStr)) {
-            _connections[remotePeerIdStr] = [];
+          if (!_connections.containsKey(actualPeerIdStr)) {
+            _connections[actualPeerIdStr] = [];
           }
-          _connections[remotePeerIdStr]!.add(swarmConn);
-          _logger.warning('Connection stored. Total connections for "$remotePeerIdStr": ${_connections[remotePeerIdStr]!.length}');
+          _connections[actualPeerIdStr]!.add(swarmConn);
+          _logger.fine('Connection stored. Total connections for "$actualPeerIdStr": ${_connections[actualPeerIdStr]!.length}');
+          
+          // Fix 1.1 & 1.2: Initialize activity tracking and creation time for incoming connections
+          _connectionLastActivity[swarmConn.id] = DateTime.now();
+          _connectionCreatedAt[swarmConn.id] = DateTime.now();
+          _connectionHealthStates[actualPeerIdStr] = ConnectionHealthState.healthy;
+          
+          // Complete upgrading completer if this was a relay connection
+          final completer = _upgradingConnections.remove(actualPeerIdStr);
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(swarmConn);
+            _logger.info('Swarm: Completed upgrade for peer $actualPeerIdStr');
+          }
         });
 
         await _notifieeLock.synchronized(() async {
@@ -440,14 +534,28 @@ class Swarm implements Network {
         managementScope: streamManagementScope,
       );
 
-      // Use the host's MultistreamMuxer to handle the incoming stream and negotiate the protocol
-      // The host's mux is an instance of MultistreamMuxer and implements ProtocolSwitch.
-      // The handle method performs the negotiation and dispatches to the correct handler.
+      // Set a negotiation deadline on the inbound stream so that stalled
+      // protocol negotiations don't hang forever.
+      final negTimeout = _config.negotiationTimeout ?? const Duration(seconds: 10);
+      final hasTimeout = negTimeout > Duration.zero;
+      if (hasTimeout) {
+        await swarmStream.setDeadline(DateTime.now().add(negTimeout));
+      }
+
+      // Use handle() rather than negotiate() directly — handle() injects
+      // leftover bytes from the negotiation back into the stream, which is
+      // critical when the remote sends protocol negotiation + application
+      // data in the same segment (e.g. relay STOP messages from Go peers).
       try {
         await _host?.mux.handle(swarmStream);
       } catch (e, s) {
         _logger.warning('Error handling incoming stream from ${conn.remotePeer} with multistream muxer: $e\n$s');
         await swarmStream.reset(); // Reset the SwarmStream, which closes scope
+      } finally {
+        // Clear the deadline so protocol handlers are not constrained.
+        if (hasTimeout) {
+          await swarmStream.setDeadline(null);
+        }
       }
     };
 
@@ -476,9 +584,8 @@ class Swarm implements Network {
           if (conn.streamHandler != null) {
             // Don't await this; let each stream be handled concurrently.
             // The handler itself is async.
-            _logger.warning('🎯 [Swarm._handleIncomingStreams] Accepted stream ${acceptedP2PStream.id()} from ${conn.remotePeer} on conn ${conn.id}. Invoking streamHandler...');
+            _logger.fine('Accepted inbound stream ${acceptedP2PStream.id()} from ${conn.remotePeer} on conn ${conn.id}');
             conn.streamHandler!(acceptedP2PStream);
-            _logger.warning('✅ [Swarm._handleIncomingStreams] streamHandler invoked for stream ${acceptedP2PStream.id()}');
           } else {
             // This case should ideally not happen if _handleIncomingStreams is always called
             // before streams can be accepted, or if streamHandler is set at conn construction.
@@ -585,22 +692,7 @@ class Swarm implements Network {
 
   @override
   Future<Conn> dialPeer(Context context, PeerId peerId) async {
-    _logger.warning('Swarm.dialPeer: Entered for peer ${peerId.toString()}. Context: ${context.hashCode}');
-    
-    // Debug peer ID information
-    _logger.warning('=== SWARM DIAL PEER DEBUG ===');
-    _logger.warning('Target peer ID: ${peerId.toString()}');
-    _logger.warning('Target peer ID toBase58(): ${peerId.toBase58()}');
-    _logger.warning('Target peer ID hashCode: ${peerId.hashCode}');
-    _logger.warning('Current connections map keys: ${_connections.keys.toList()}');
-    _logger.warning('Total connections in map: ${_connections.length}');
-    for (final entry in _connections.entries) {
-      _logger.warning('  Connection key: "${entry.key}" -> ${entry.value.length} connections');
-      for (final conn in entry.value) {
-        _logger.warning('    Conn ${conn.id}: remotePeer=${conn.remotePeer}, remotePeer.toString()="${conn.remotePeer.toString()}", isClosed=${conn.isClosed}');
-      }
-    }
-    _logger.warning('=== END SWARM DIAL PEER DEBUG ===');
+    _logger.fine('Swarm.dialPeer: peer=${peerId.toBase58()}, existing_conns=${_connections.length}');
     
     // Check if we're closed
     if (_isClosed) {
@@ -615,14 +707,39 @@ class Swarm implements Network {
 
     // Check if we already have a connection to this peer
     final peerIDStr = peerId.toString();
-    _logger.warning('Looking up connections for peer ID string: "$peerIDStr"');
+    _logger.fine('Looking up connections for peer ID string: "$peerIDStr"');
+    
+    // FIX: Check if connection is being upgraded (race condition prevention)
+    Completer<SwarmConn>? upgradingCompleter;
+    await _connLock.synchronized(() {
+      upgradingCompleter = _upgradingConnections[peerIDStr];
+    });
+    
+    if (upgradingCompleter != null) {
+      _logger.info('Swarm.dialPeer: Connection to $peerIDStr is being upgraded, waiting...');
+      try {
+        final swarmConn = await upgradingCompleter!.future.timeout(
+          Duration(seconds: 10),
+          onTimeout: () {
+            _logger.warning('Swarm.dialPeer: Timeout waiting for upgrade to complete for $peerIDStr');
+            throw TimeoutException('Upgrade timeout');
+          },
+        );
+        _logger.info('Swarm.dialPeer: Upgrade complete for $peerIDStr, returning connection ${swarmConn.id}');
+        return swarmConn;
+      } catch (e) {
+        _logger.warning('Swarm.dialPeer: Error waiting for upgrade: $e, proceeding with normal dial');
+        // Fall through to normal dial if upgrade fails
+      }
+    }
+    
     final existingConns = await _connLock.synchronized(() {
       return _connections[peerIDStr] ?? [];
     });
-    _logger.warning('Found ${existingConns.length} existing connections for peer ID string: "$peerIDStr"');
+    _logger.fine('Found ${existingConns.length} existing connections for peer ID string: "$peerIDStr"');
 
     if (existingConns.isNotEmpty) {
-      _logger.warning('Swarm.dialPeer: Found ${existingConns.length} existing connection(s) for peer ${peerId.toString()}. Validating health...');
+      _logger.fine('Swarm.dialPeer: Found ${existingConns.length} existing connection(s) for peer ${peerId.toString()}. Validating health...');
       
       // Filter out closed/unhealthy connections
       final healthyConns = <SwarmConn>[];
@@ -637,35 +754,48 @@ class Swarm implements Network {
         }
       }
       
-      // Clean up stale connections
+      // Clean up stale connections (validate protected ones by testing if still usable)
       if (staleConns.isNotEmpty) {
-        _logger.warning('Swarm.dialPeer: Cleaning up ${staleConns.length} stale connection(s) for peer ${peerId.toString()}');
+        _logger.warning('Swarm.dialPeer: Processing ${staleConns.length} stale connection(s) for peer ${peerId.toString()}');
         for (final staleConn in staleConns) {
-          // Remove from connections map without calling full removeConnection to avoid deadlock
-          final conns = _connections[peerIDStr] ?? [];
-          conns.remove(staleConn);
-          if (conns.isEmpty) {
-            _connections.remove(peerIDStr);
-          }
-          // Schedule cleanup without awaiting to avoid blocking
-          Future.microtask(() async {
+          // For protected connections, validate by trying to create a test stream
+          if (_host?.connManager.isProtected(staleConn.remotePeer, '') ?? false) {
+            _logger.info('Swarm.dialPeer: Protected connection ${staleConn.id} appears stale, validating...');
             try {
-              await staleConn.close();
+              // Try to create a new stream - if connection is alive, this will succeed
+              final testStream = await staleConn.newStream(Context()).timeout(const Duration(seconds: 5));
+              // Connection is alive - close test stream and keep the connection
+              await testStream.reset();
+              _logger.info('Swarm.dialPeer: Protected connection ${staleConn.id} validated, keeping');
+              healthyConns.add(staleConn);  // Move back to healthy list
+              continue;  // Skip cleanup for this connection
             } catch (e) {
-              _logger.warning('Swarm.dialPeer: Error closing stale connection ${staleConn.id}: $e');
+              _logger.warning('Swarm.dialPeer: Protected connection ${staleConn.id} failed validation: $e');
+              // Continue to cleanup
             }
-          });
+          }
+          
+          // Properly remove and close the stale connection so notifiees
+          // (identify, etc.) are informed and the old accept loop terminates.
+          try {
+            await removeConnection(staleConn);
+            await staleConn.close();
+          } catch (e) {
+            _logger.warning('Swarm.dialPeer: Error cleaning up stale connection ${staleConn.id}: $e');
+          }
         }
       }
       
       if (healthyConns.isNotEmpty) {
-        _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning connection ID: ${healthyConns.first.id}');
-        return healthyConns.first;
+        // Prefer newest connection - more likely to be alive for relayed paths
+        // where the end-to-end path can break without local detection
+        _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning newest connection ID: ${healthyConns.last.id}');
+        return healthyConns.last;
       } else {
         _logger.warning('Swarm.dialPeer: No healthy connections found for peer ${peerId.toString()}. Will create new connection.');
       }
     }
-    _logger.warning('Swarm.dialPeer: No existing connection found for peer ${peerId.toString()}. Attempting new dial.');
+    _logger.fine('Swarm.dialPeer: No existing connection for peer ${peerId.toString()}. Dialing.');
 
     // Get addresses for the peer
     final allAddrs = await _peerstore.addrBook.addrs(peerId);
@@ -674,8 +804,27 @@ class Swarm implements Network {
       throw Exception('No addresses found for peer: $peerId');
     }
 
-    // Filter out non-dialable addresses before attempting to connect.
-    final dialableAddrs = allAddrs.where((addr) {
+    // 1. Get outbound capability from host (uses existing _host reference)
+    OutboundCapabilityInfo capability;
+    if (_host is BasicHost) {
+      capability = (_host as BasicHost).outboundCapability;
+    } else {
+      // Fallback if host is not BasicHost (assume IPv4 only)
+      capability = OutboundCapabilityInfo(
+        hasIPv4: true, 
+        hasIPv6: false, 
+        detectedAt: DateTime.now()
+      );
+    }
+
+    // 2. Filter addresses by capability
+    var dialableAddrs = AddressFilter.filterReachable(allAddrs, capability);
+    
+    // 3. Deduplicate IPv6 addresses from same /64 prefix
+    dialableAddrs = AddressFilter.deduplicateIPv6(dialableAddrs);
+
+    // 4. Basic filtering (existing - remove 0.0.0.0, ::, bare circuit, self-routes)
+    dialableAddrs = dialableAddrs.where((addr) {
       final ip4Val = addr.valueForProtocol('ip4');
       if (ip4Val == '0.0.0.0') {
         return false;
@@ -690,6 +839,25 @@ class Swarm implements Network {
           components[0].$1.code == Protocols.circuit.code) {
         return false;
       }
+      // Filter out circuit addresses that route through this peer (self)
+      // This prevents "Cannot dial self" errors when trying to relay through ourselves
+      for (int i = 0; i < components.length; i++) {
+        final (protocol, value) = components[i];
+        if (protocol.code == Protocols.circuit.code && i > 0) {
+          final (prevProtocol, prevValue) = components[i - 1];
+          if (prevProtocol.code == Protocols.p2p.code) {
+            try {
+              final relayPeerId = PeerId.fromString(prevValue);
+              if (relayPeerId == _localPeer) {
+                _logger.fine('Swarm.dialPeer: Filtering out circuit address that routes through self: $addr');
+                return false;
+              }
+            } catch (e) {
+              // Invalid peer ID in address, skip filtering
+            }
+          }
+        }
+      }
       return true;
     }).toList();
 
@@ -698,25 +866,52 @@ class Swarm implements Network {
       throw Exception('No dialable addresses found for peer: $peerId');
     }
 
-    _logger.warning('Swarm.dialPeer: Found dialable addresses for peer $peerId: $dialableAddrs. Using parallel dialer...');
+    // 4b. Deduplicate circuit relay addresses
+    // Prevent Happy Eyeballs from creating multiple concurrent relay connections
+    // through the same relay to the same destination
+    dialableAddrs = _deduplicateCircuitAddrs(dialableAddrs);
+    _logger.fine('Swarm.dialPeer: After circuit dedup: ${dialableAddrs.length} addresses');
 
-    // Rank addresses (for logging order - direct before relay)
-    final ranker = DelayDialRanker();
-    final rankedAddrs = ranker(dialableAddrs);
-    final addrs = rankedAddrs.map((ad) => ad.addr).toList();
+    // 5. Rank by priority, with preference for relay if peer connected via relay
+    final ranker = CapabilityAwarePriorityRanker(
+      directTimeout: _config.dialTimeout,
+      relayTimeout: _config.relayDialTimeout,
+    );
+    var scoredAddrs = ranker.rank(dialableAddrs, capability);
+    
+    // FIX: Prefer relay addresses for peers that connected via relay
+    // If this peer connected to us via relay, their direct addresses are likely unreachable
+    final isRelayPeer = await _connLock.synchronized(() {
+      return _relayConnectedPeers.contains(peerIDStr);
+    });
+    
+    if (isRelayPeer) {
+      // Reorder: put circuit/relay addresses first
+      final relayAddrs = scoredAddrs.where((addr) => 
+        addr.toString().contains('/p2p-circuit')).toList();
+      final nonRelayAddrs = scoredAddrs.where((addr) => 
+        !addr.toString().contains('/p2p-circuit')).toList();
+      
+      if (relayAddrs.isNotEmpty) {
+        scoredAddrs = [...relayAddrs, ...nonRelayAddrs];
+        _logger.info('Swarm.dialPeer: Peer $peerIDStr connected via relay, prioritizing ${relayAddrs.length} relay addresses');
+      }
+    }
 
-    // Log ranked order
-    _logger.fine('Swarm.dialPeer: Ranked addresses (direct first, relay second): $addrs');
+    _logger.fine('Dialing $peerId with ${scoredAddrs.length} addresses '
+        '(capability: ${capability.capability}, relay-peer: $isRelayPeer)');
 
-    // Use AddrDialer for true parallel dialing
+    // 6. Dial with Happy Eyeballs staggering
     try {
-      final dialer = AddrDialer(
+      final dialer = HappyEyeballsDialer(
         peerId: peerId,
-        addrs: addrs,
+        addrs: scoredAddrs,
         dialFunc: (ctx, addr, pid) => _dialSingleAddr(addr, pid, ctx),
         context: context,
       );
       
+      // Track dial start time for metrics (just before actual network dial)
+      final dialStartTime = DateTime.now();
       final conn = await dialer.dial();
       _logger.fine('Swarm.dialPeer: Successfully connected to $peerId');
       
@@ -741,23 +936,37 @@ class Swarm implements Network {
         managementScope: connManagementScope,
       );
       
+      // Set connection context if available from upgraded connection
+      if (conn is UpgradedConnectionImpl && conn.context != null) {
+        swarmConn.setContext(conn.context!);
+      }
+      
       // Add to connections map
       await _connLock.synchronized(() {
         final peerIDStr = conn.remotePeer.toString();
         _connections.putIfAbsent(peerIDStr, () => []).add(swarmConn);
+        
+        // Fix 1.2: Initialize activity tracking and creation time for outbound connections
+        _connectionLastActivity[swarmConn.id] = DateTime.now();
+        _connectionCreatedAt[swarmConn.id] = DateTime.now();
+        _connectionHealthStates[peerIDStr] = ConnectionHealthState.healthy;
       });
       
-      // Notify connection
+      // Calculate dial latency for metrics
+      final dialLatency = DateTime.now().difference(dialStartTime);
+      _logger.info('Swarm.dialPeer: Dial latency for $peerId: ${dialLatency.inMilliseconds}ms');
+      
+      // Notify connection with dial latency
       await _notifieeLock.synchronized(() async {
         for (final notifiee in _notifiees) {
-          await notifiee.connected(this, swarmConn);
+          await notifiee.connected(this, swarmConn, dialLatency: dialLatency);
         }
       });
       
       // Handle incoming streams
       _handleIncomingStreams(swarmConn);
       
-      _logger.warning('Swarm.dialPeer: Connection established for $peerId. Conn ID: ${swarmConn.id}');
+      _logger.fine('Swarm.dialPeer: Connection established for $peerId. Conn ID: ${swarmConn.id}');
       return swarmConn;
       
     } catch (e) {
@@ -783,8 +992,21 @@ class Swarm implements Network {
       throw Exception('No transport found for address: $addr');
     }
     
+    // For circuit addresses, append /p2p/<destPeerId> so the circuit transport
+    // can identify the destination peer. This mirrors go-libp2p where the swarm
+    // passes peer.ID to Transport.Dial(ctx, addr, peerID).
+    var dialAddr = addr;
+    if (addr.toString().contains('/p2p-circuit')) {
+      final addrStr = addr.toString();
+      final peerIdStr = peerId.toString();
+      if (!addrStr.endsWith('/p2p/$peerIdStr')) {
+        dialAddr = addr.encapsulate(Protocols.p2p.name, peerIdStr);
+        _logger.fine('Swarm._dialSingleAddr: Appended dest peer ID to circuit address: $dialAddr');
+      }
+    }
+
     // Dial the address
-    final transportConn = await transport.dial(addr);
+    final transportConn = await transport.dial(dialAddr);
     
     // Upgrade the connection
     final upgradedConn = await _upgrader.upgradeOutbound(
@@ -954,6 +1176,85 @@ class Swarm implements Network {
     return false;
   }
 
+  /// Deduplicate circuit relay addresses to prevent Happy Eyeballs from creating
+  /// multiple concurrent relay connections through the same relay to the same destination.
+  /// 
+  /// Without this, if a peer advertises multiple circuit addresses (IPv4 + IPv6) through
+  /// the same relay, Happy Eyeballs will start 2+ parallel HOP requests. Since relay
+  /// connections take ~1s to establish (vs ~100ms for direct), all requests complete
+  /// before cancellation, causing the relay to see multiple concurrent connections.
+  List<MultiAddr> _deduplicateCircuitAddrs(List<MultiAddr> addrs) {
+    final seenRelayRoutes = <String>{};
+    final deduplicated = <MultiAddr>[];
+    
+    for (final addr in addrs) {
+      if (_isCircuitAddr(addr)) {
+        // Extract relay route (relayPeerID -> destPeerID)
+        final route = _extractRelayRoute(addr);
+        if (route != null) {
+          if (seenRelayRoutes.contains(route)) {
+            _logger.fine('Swarm: Skipping duplicate circuit route: $addr (route: $route)');
+            continue;  // Skip duplicate route through same relay
+          }
+          seenRelayRoutes.add(route);
+          _logger.fine('Swarm: Keeping circuit route: $addr (route: $route)');
+        }
+      }
+      deduplicated.add(addr);
+    }
+    
+    return deduplicated;
+  }
+
+  /// Check if an address is a circuit relay address
+  bool _isCircuitAddr(MultiAddr addr) {
+    return addr.toString().contains('/p2p-circuit');
+  }
+
+  /// Extract relay route key from a circuit address
+  /// Format: relayPeerID->destPeerID
+  /// Returns null if address is not a valid circuit address
+  String? _extractRelayRoute(MultiAddr addr) {
+    try {
+      final components = addr.components;
+      String? relayPeerId;
+      String? destPeerId;
+      
+      // Find /p2p/{relayId}/p2p-circuit/p2p/{destId} pattern
+      for (int i = 0; i < components.length; i++) {
+        final (protocol, value) = components[i];
+        
+        // Find relay peer ID (before /p2p-circuit)
+        if (protocol.code == Protocols.p2p.code && 
+            i + 1 < components.length &&
+            components[i + 1].$1.code == Protocols.circuit.code) {
+          relayPeerId = value;
+        }
+        
+        // Find destination peer ID (after /p2p-circuit)
+        if (protocol.code == Protocols.circuit.code &&
+            i + 1 < components.length &&
+            components[i + 1].$1.code == Protocols.p2p.code) {
+          destPeerId = components[i + 1].$2;
+        }
+      }
+      
+      if (relayPeerId != null && destPeerId != null) {
+        return '$relayPeerId->$destPeerId';
+      }
+      
+      // If we have relay but no dest, use just relay (for relay-only circuit addrs)
+      if (relayPeerId != null) {
+        return relayPeerId;
+      }
+      
+      return null;
+    } catch (e) {
+      _logger.warning('Swarm: Error extracting relay route from $addr: $e');
+      return null;
+    }
+  }
+
   /// Event-driven connection health change handler
   void onConnectionHealthChanged(SwarmConn conn, ConnectionHealthState newState) {
     final peerIdStr = conn.remotePeer.toString();
@@ -969,9 +1270,20 @@ class Swarm implements Network {
     }
   }
   
-  /// Immediately removes a failed connection
+  /// Removes a failed connection, respecting protection tags.
+  /// Protected connections (e.g., Ricochet servers) get their health reset
+  /// instead of being removed, to prevent permanent loss of critical connections.
   Future<void> _removeFailedConnection(SwarmConn conn) async {
     try {
+      // Protected connections should not be permanently removed — reset health
+      // to give them another chance. This prevents the cascade where a timeout
+      // removes a server connection and addresses expire, making recovery impossible.
+      if (_host?.connManager.isProtected(conn.remotePeer, '') ?? false) {
+        _logger.warning('Swarm: Protected connection ${conn.id} to ${conn.remotePeer} has failed - resetting health instead of removing');
+        conn.healthMetrics.recordPathUpdate(); // resets consecutive errors and state to healthy
+        return;
+      }
+
       _logger.warning('Swarm: Removing failed connection ${conn.id} to ${conn.remotePeer}');
       await removeConnection(conn);
       await conn.close();
@@ -980,9 +1292,28 @@ class Swarm implements Network {
     }
   }
 
+  /// Marks a connection to a peer as unhealthy
+  /// Called by transport layers (e.g., CircuitV2Client) when they detect relay path failures
+  void markConnectionUnhealthy(PeerId peer) {
+    final peerIdStr = peer.toString();
+    _connectionHealthStates[peerIdStr] = ConnectionHealthState.failed;
+    _logger.warning('Swarm: Marked connection to ${peer.toBase58()} as unhealthy');
+  }
+
   /// Enhanced connection health check using event-driven state
   bool _isConnectionHealthy(SwarmConn conn) {
     try {
+      // Fix 1.3: Grace period - don't aggressively health-check brand new connections
+      if (_isRelayedConnection(conn)) {
+        final createdAt = _connectionCreatedAt[conn.id];
+        if (createdAt != null) {
+          final connAge = DateTime.now().difference(createdAt);
+          if (connAge < Duration(seconds: 60)) {
+            return true;  // Trust new connections for first 60 seconds
+          }
+        }
+      }
+      
       // First check if the SwarmConn itself is closed
       if (conn.isClosed) {
         return false;
@@ -1000,6 +1331,24 @@ class Swarm implements Network {
       // If we have health state information, use it
       if (healthState == ConnectionHealthState.failed) {
         return false;
+      }
+      
+      // For relayed connections, check if we've had recent activity
+      if (_isRelayedConnection(conn)) {
+        final lastActivity = _connectionLastActivity[conn.id];
+        if (lastActivity != null) {
+          final idleTime = DateTime.now().difference(lastActivity);
+          // If relayed connection has been idle for too long without successful I/O,
+          // and we have no positive health state, consider it potentially unhealthy
+          if (idleTime > Duration(seconds: 60)) {
+            _logger.fine('Swarm: Relayed connection ${conn.id} idle for ${idleTime.inSeconds}s');
+            // Don't immediately mark as unhealthy - let health state decide
+            // But if health state is already failed, return false
+            if (healthState == ConnectionHealthState.failed) {
+              return false;
+            }
+          }
+        }
       }
       
       // For degraded connections, do additional checks
@@ -1029,8 +1378,108 @@ class Swarm implements Network {
     }
   }
 
+  /// Checks if a connection is a circuit relay connection
+  bool _isRelayedConnection(SwarmConn conn) {
+    final addr = conn.remoteMultiaddr.toString();
+    return addr.contains('/p2p-circuit');
+  }
+
+  /// Extracts the relay peer ID from a circuit multiaddr
+  /// Returns null if not a circuit address or relay ID cannot be extracted
+  String? _extractRelayFromCircuitAddr(MultiAddr addr) {
+    final addrStr = addr.toString();
+    if (!addrStr.contains('/p2p-circuit')) {
+      return null;
+    }
+    
+    // Circuit addresses have format: /ip4/x.x.x.x/tcp/port/p2p/relayId/p2p-circuit/p2p/destId
+    // We want to extract the relayId (the p2p component before /p2p-circuit)
+    final parts = addrStr.split('/');
+    for (int i = 0; i < parts.length - 1; i++) {
+      if (parts[i] == 'p2p-circuit' && i >= 2 && parts[i - 2] == 'p2p') {
+        return parts[i - 1]; // Return the relay peer ID
+      }
+    }
+    return null;
+  }
+
   /// Starts the connection health monitoring system
   void _startConnectionHealthMonitoring() {
+    // Start periodic probing for relayed connections
+    _startRelayedConnectionProbing();
+  }
+  
+  /// Periodically probes relayed connections to detect failures early
+  void _startRelayedConnectionProbing() {
+    Timer.periodic(Duration(seconds: 30), (_) async {
+      if (_isClosed) return;
+      
+      await _connLock.synchronized(() async {
+        for (final entry in _connections.entries) {
+          for (final conn in entry.value) {
+            if (_isRelayedConnection(conn) && !conn.isClosed) {
+              _probeRelayedConnection(conn);
+            }
+          }
+        }
+      });
+    });
+  }
+  
+  /// Probes a relayed connection to verify liveness
+  /// 
+  /// Fix 2.3: Prefers UDX's native PING frame (1 byte, non-intrusive) over
+  /// test stream creation for UDX connections. Falls back to test streams
+  /// for non-UDX transports.
+  Future<void> _probeRelayedConnection(SwarmConn conn) async {
+    final peerStr = conn.remotePeer.toString();
+    bool probeSuccess = false;
+    
+    try {
+      // Try UDX native PING if available (1 byte, non-intrusive)
+      // Check if the underlying connection supports ping (duck typing approach)
+      // This works because SwarmConn.conn could be a UDXSessionConn which has ping()
+      try {
+        // Use dynamic call to ping() to avoid circular dependency
+        final dynamic underlying = conn.conn;
+        if (underlying.runtimeType.toString().contains('UDXSessionConn')) {
+          probeSuccess = await underlying.ping(timeout: Duration(seconds: 5));
+          _logger.fine('Swarm: Connection ${conn.id} UDX ping: ${probeSuccess ? "success" : "failed"}');
+        }
+      } catch (e) {
+        // ping() not available or failed, will fall back to test stream
+        _logger.fine('Swarm: UDX ping not available: $e');
+      }
+      
+      // Fallback to test stream for non-UDX connections or if ping not supported
+      if (!probeSuccess) {
+        final testStream = await conn.newStream(Context())
+            .timeout(Duration(seconds: 5));
+        await testStream.reset();
+        probeSuccess = true;
+        _logger.fine('Swarm: Connection ${conn.id} test stream probe successful');
+      }
+      
+      // Success - update last activity
+      _connectionLastActivity[conn.id] = DateTime.now();
+      
+      // Fix 1.4: SUCCESS - Reset failure count and mark healthy
+      _consecutiveProbeFailures[peerStr] = 0;
+      _connectionHealthStates[peerStr] = ConnectionHealthState.healthy;
+      
+    } catch (e) {
+      // Fix 1.4: Track consecutive failures and only mark as failed after 3 failures
+      final failures = (_consecutiveProbeFailures[peerStr] ?? 0) + 1;
+      _consecutiveProbeFailures[peerStr] = failures;
+      
+      if (failures >= 3) {
+        _logger.warning('Swarm: Connection ${conn.id} probe failed $failures times: $e');
+        _connectionHealthStates[peerStr] = ConnectionHealthState.failed;
+      } else {
+        _logger.fine('Swarm: Connection ${conn.id} probe failed ($failures/3): $e');
+        // Don't mark as failed yet - allow recovery
+      }
+    }
   }
 
   /// Proactively cleans up stale connections
@@ -1060,11 +1509,27 @@ class Swarm implements Network {
       }
     });
 
-    // Clean up stale connections
+    // Clean up stale connections (validate protected ones by testing if still usable)
     if (staleConnections.isNotEmpty) {
-      _logger.info('Swarm._cleanupStaleConnections: Cleaning up ${staleConnections.length} stale connections (${healthyConnections}/${totalConnections} healthy)');
+      _logger.info('Swarm._cleanupStaleConnections: Processing ${staleConnections.length} stale connections (${healthyConnections}/${totalConnections} healthy)');
       
       for (final staleConn in staleConnections) {
+        // For protected connections, validate by trying to create a test stream
+        if (_host?.connManager.isProtected(staleConn.remotePeer, '') ?? false) {
+          _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} appears stale, validating...');
+          try {
+            // Try to create a new stream - if connection is alive, this will succeed
+            final testStream = await staleConn.newStream(Context()).timeout(const Duration(seconds: 5));
+            // Connection is alive - close test stream and keep the connection
+            await testStream.reset();
+            _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} validated, keeping');
+            continue;  // Skip cleanup - connection is actually healthy
+          } catch (e) {
+            _logger.warning('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} failed validation: $e');
+            // Continue to cleanup
+          }
+        }
+        
         try {
           await removeConnection(staleConn);
           await staleConn.close();

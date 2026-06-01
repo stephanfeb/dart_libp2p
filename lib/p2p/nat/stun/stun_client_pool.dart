@@ -250,7 +250,6 @@ class StunClientPool {
           return behavior;
         }
       } catch (e) {
-        print('Error discovering NAT behavior with server ${server.host}: $e');
         // Continue to the next server
       }
     }

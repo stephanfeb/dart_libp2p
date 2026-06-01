@@ -44,6 +44,9 @@ abstract class AutoNATv2 {
   /// Close the AutoNAT v2 service
   Future<void> close();
 
+  /// Whether there are peers available that support AutoNAT v2
+  bool get hasPeers;
+
   /// Check reachability for the given addresses
   Future<Result> getReachability(List<Request> requests);
 }

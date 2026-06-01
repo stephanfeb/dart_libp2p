@@ -129,6 +129,12 @@ class Protocols {
     size: 0,
   );
 
+  static const webrtc = Protocol(
+    name: 'webrtc',
+    code: 0x0113,
+    size: 0,
+  );
+
   static const udx = Protocol(
     name: 'udx',
     code: 0x0300, // Assigned a private use code for now
@@ -150,6 +156,7 @@ class Protocols {
     'certhash': certhash,
     'sni': sni,
     'p2p-circuit': circuit,
+    'webrtc': webrtc,
     'udx': udx,
   };
 

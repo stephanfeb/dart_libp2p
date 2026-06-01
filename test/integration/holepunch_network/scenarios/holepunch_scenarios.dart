@@ -64,20 +64,19 @@ class ConeToConeSucessScenario extends HolePunchScenario {
     orchestrator.environment['NAT_A_TYPE'] = 'cone';
     orchestrator.environment['NAT_B_TYPE'] = 'cone';
     
-    // Check if we're starting fresh infrastructure
-    final isStartingFresh = !orchestrator.isStarted;
-    
-    // Only start if not already started
-    if (isStartingFresh) {
-      await orchestrator.start();
-      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
-      print('🔧 Fresh orchestrator start - allowing extra warmup time for Cone NAT infrastructure...');
-      await Future.delayed(Duration(seconds: 20));
-    } else {
-      // Infrastructure already running, shorter delay for scenario transition
-      print('♻️  Reusing established infrastructure - brief warmup for Cone NAT setup...');
-      await Future.delayed(Duration(seconds: 5));
+    // CRITICAL: NAT type changes require container restart
+    // We must stop and restart infrastructure when NAT configuration changes
+    if (orchestrator.isStarted) {
+      print('🔄 Stopping existing infrastructure to apply new NAT configuration...');
+      await orchestrator.stop();
     }
+    
+    print('🔧 Starting infrastructure with Cone NAT configuration...');
+    await orchestrator.start();
+    
+    // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+    print('⏰ Allowing warmup time for Cone NAT infrastructure...');
+    await Future.delayed(Duration(seconds: 20));
     
     print('✅ ConeToConeSucessScenario setup complete');
   }
@@ -180,20 +179,19 @@ class SymmetricToSymmetricFailureScenario extends HolePunchScenario {
     orchestrator.environment['NAT_A_TYPE'] = 'symmetric';
     orchestrator.environment['NAT_B_TYPE'] = 'symmetric';
     
-    // Check if we're starting fresh infrastructure
-    final isStartingFresh = !orchestrator.isStarted;
-    
-    // Only start if not already started
-    if (isStartingFresh) {
-      await orchestrator.start();
-      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
-      print('🔧 Fresh orchestrator start - allowing extra warmup time for Symmetric NAT infrastructure...');
-      await Future.delayed(Duration(seconds: 20));
-    } else {
-      // Infrastructure already running, shorter delay for scenario transition
-      print('♻️  Reusing established infrastructure - brief warmup for Symmetric NAT setup...');
-      await Future.delayed(Duration(seconds: 5));
+    // CRITICAL: NAT type changes require container restart
+    // We must stop and restart infrastructure when NAT configuration changes
+    if (orchestrator.isStarted) {
+      print('🔄 Stopping existing infrastructure to apply new NAT configuration...');
+      await orchestrator.stop();
     }
+    
+    print('🔧 Starting infrastructure with Symmetric NAT configuration...');
+    await orchestrator.start();
+    
+    // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+    print('⏰ Allowing warmup time for Symmetric NAT infrastructure...');
+    await Future.delayed(Duration(seconds: 20));
     
     print('✅ SymmetricToSymmetricFailureScenario setup complete');
   }
@@ -290,20 +288,19 @@ class MixedNATScenario extends HolePunchScenario {
     orchestrator.environment['NAT_A_TYPE'] = 'cone';
     orchestrator.environment['NAT_B_TYPE'] = 'symmetric';
     
-    // Check if we're starting fresh infrastructure
-    final isStartingFresh = !orchestrator.isStarted;
-    
-    // Only start if not already started
-    if (isStartingFresh) {
-      await orchestrator.start();
-      // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
-      print('🔧 Fresh orchestrator start - allowing extra warmup time for Mixed NAT infrastructure...');
-      await Future.delayed(Duration(seconds: 20));
-    } else {
-      // Infrastructure already running, shorter delay for scenario transition
-      print('♻️  Reusing established infrastructure - brief warmup for Mixed NAT setup...');
-      await Future.delayed(Duration(seconds: 5));
+    // CRITICAL: NAT type changes require container restart
+    // We must stop and restart infrastructure when NAT configuration changes
+    if (orchestrator.isStarted) {
+      print('🔄 Stopping existing infrastructure to apply new NAT configuration...');
+      await orchestrator.stop();
     }
+    
+    print('🔧 Starting infrastructure with Mixed NAT configuration (Cone + Symmetric)...');
+    await orchestrator.start();
+    
+    // Fresh infrastructure needs extra time for NAT rules, relay connections, and STUN discovery
+    print('⏰ Allowing warmup time for Mixed NAT infrastructure...');
+    await Future.delayed(Duration(seconds: 20));
     
     print('✅ MixedNATScenario setup complete');
   }
@@ -513,11 +510,11 @@ class MixedNATScenario extends HolePunchScenario {
     try {
       print('📋 Collecting Mixed NAT scenario logs...');
       
-      final peerALogs = await orchestrator.getLogs('peer-a', lines: 30);
-      final peerBLogs = await orchestrator.getLogs('peer-b', lines: 30);
-      final relayLogs = await orchestrator.getLogs('relay-server', lines: 20);
-      final natALogs = await orchestrator.getLogs('nat-gateway-a', lines: 15);
-      final natBLogs = await orchestrator.getLogs('nat-gateway-b', lines: 15);
+      final peerALogs = await orchestrator.getLogs('peer-a'); // All logs
+      final peerBLogs = await orchestrator.getLogs('peer-b'); // All logs to see full startup
+      final relayLogs = await orchestrator.getLogs('relay-server', lines: 30);
+      final natALogs = await orchestrator.getLogs('nat-gateway-a'); // All logs  
+      final natBLogs = await orchestrator.getLogs('nat-gateway-b'); // All logs to see full NAT setup
       
       print('📋 Peer A logs (Mixed NAT - Cone):\n$peerALogs');
       print('📋 Peer B logs (Mixed NAT - Symmetric):\n$peerBLogs');

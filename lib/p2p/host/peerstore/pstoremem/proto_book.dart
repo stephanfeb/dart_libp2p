@@ -90,10 +90,9 @@ class MemoryProtoBook implements ProtoBook {
   }
 
   @override
-  void removeProtocols(PeerId id, List<ProtocolID> protocols) {
+  Future<void> removeProtocols(PeerId id, List<ProtocolID> protocols) async {
     final s = _getSegment(id);
-    // Using synchronous lock to match interface
-    _lock.synchronized(() {
+    await _lock.synchronized(() {
       final peerKey = id.toString();
       final protoSet = s._protocols[peerKey];
       if (protoSet == null) {

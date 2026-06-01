@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
@@ -10,10 +11,14 @@ import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/relay/resources.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/io.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/buffered_reader.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/util/prepended_stream.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/util/pbconv.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/voucher.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/client.dart'; // For encodeVarint
+import 'package:dart_libp2p/core/network/network.dart' show Connectedness, EvtPeerConnectednessChanged;
 import 'package:fixnum/fixnum.dart';
+import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 
 import '../../../../core/host/host.dart';
@@ -21,6 +26,9 @@ import '../../../../core/network/stream.dart';
 import '../../../../core/network/context.dart';
 import '../../../../core/multiaddr.dart';
 import '../../../discovery/peer_info.dart';
+import 'relay_metrics_observer.dart';
+
+final _log = Logger('Relay');
 
 /// Relay implements the relay service for the p2p-circuit/v2 protocol.
 class Relay {
@@ -28,8 +36,13 @@ class Relay {
   final Resources _resources;
   final Map<String, DateTime> _reservations = {};
   final Map<String, int> _connections = {};
+  final Map<String, String?> _sessionIds = {}; // Store session IDs for active connections
   Timer? _gcTimer;
   bool _closed = false;
+  StreamSubscription? _peerDisconnectSub;
+
+  /// Optional metrics observer for tracking relay server operations
+  RelayServerMetricsObserver? metricsObserver;
 
   /// Creates a new relay service.
   Relay(this._host, this._resources);
@@ -38,6 +51,7 @@ class Relay {
   void start() {
     _host.setStreamHandler(CircuitV2Protocol.protoIDv2Hop, (stream, remotePeer) => _handleStream(stream));
     _startGarbageCollection();
+    _startPeerDisconnectMonitor();
   }
 
   /// Closes the relay service.
@@ -46,42 +60,56 @@ class Relay {
     _closed = true;
     _host.removeStreamHandler(CircuitV2Protocol.protoIDv2Hop);
     _gcTimer?.cancel();
+    await _peerDisconnectSub?.cancel();
   }
 
   /// Handles incoming streams for the relay protocol.
   Future<void> _handleStream(P2PStream stream) async {
     try {
       // Read the length-delimited message (client sends with length prefix)
-      print('[Relay] Creating stream reader for incoming message');
-      final reader = DelimitedReader(_p2pStreamToDartStream(stream), 4096); // maxMessageSize
-      print('[Relay] Reading message...');
-      final pb = await reader.readMsg(HopMessage());
-      print('[Relay] Message read successfully, type: ${pb.type}');
+      // CRITICAL: Use manual reading to preserve any data that follows the HopMessage
+      final bufferedReader = BufferedP2PStreamReader(stream);
+      
+      // Read length-delimited message manually (instead of using DelimitedReader)
+      final messageLength = await bufferedReader.readVarint();
+      if (messageLength > 4096) {
+        throw Exception('HopMessage too large: $messageLength bytes');
+      }
+      final messageBytes = await bufferedReader.readExact(messageLength);
+      final pb = HopMessage.fromBuffer(messageBytes);
+      
+      
+      // CRITICAL FIX: If client sent extra data with HopMessage, prepend it to the stream
+      final remainingBytes = bufferedReader.remainingBuffer;
+      final P2PStream finalStream;
+      
+      if (remainingBytes.isNotEmpty) {
+        finalStream = PrependedStream(stream, remainingBytes);
+      } else {
+        finalStream = stream;
+      }
 
       // Handle the message based on its type
       switch (pb.type) {
         case HopMessage_Type.RESERVE:
-          await _handleReserve(stream, pb);
+          await _handleReserve(finalStream, pb);
           break;
         case HopMessage_Type.CONNECT:
-          await _handleConnect(stream, pb);
+          await _handleConnect(finalStream, pb);
           break;
         default:
-          await _writeResponse(stream, Status.UNEXPECTED_MESSAGE);
+          await _writeResponse(finalStream, Status.UNEXPECTED_MESSAGE);
           try {
-            await stream.close();
+            await finalStream.close();
           } catch (closeError) {
-            print('[Relay] Failed to close stream after unexpected message: $closeError');
           }
       }
-    } catch (e) {
-      await _writeResponse(stream, Status.MALFORMED_MESSAGE);
+    } catch (e, stackTrace) {
       try {
+        await _writeResponse(stream, Status.MALFORMED_MESSAGE);
         await stream.close();
       } catch (closeError) {
-        print('[Relay] Failed to close stream after error: $closeError');
       }
-      print('Error handling stream: $e');
     }
   }
 
@@ -89,11 +117,13 @@ class Relay {
   Future<void> _handleReserve(P2PStream stream, HopMessage msg) async {
     // For RESERVE requests, the peer making the reservation is the remote peer of the stream
     final peerId = stream.conn.remotePeer;
-    print('[Relay] Handling RESERVE from peer: ${peerId.toBase58()}');
+    
+    metricsObserver?.onReservationRequested(peerId);
     
     // Check if we have resources for a new reservation
     if (!_resources.canReserve(peerId)) {
-      print('[Relay] Resource limit exceeded for peer: ${peerId.toBase58()}');
+      metricsObserver?.onReservationDenied(peerId, 'resource_limit_exceeded');
+      metricsObserver?.onResourceLimitExceeded(peerId, 'reservation');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -101,7 +131,8 @@ class Relay {
     // Create a reservation
     final expire = DateTime.now().add(Duration(seconds: _resources.reservationTtl));
     _reservations[peerId.toString()] = expire;
-    print('[Relay] Reservation created for peer: ${peerId.toBase58()}, expires: $expire');
+    
+    metricsObserver?.onReservationGranted(peerId, expire);
 
     // Create a reservation voucher
     final voucher = ReservationVoucherData(
@@ -131,7 +162,6 @@ class Relay {
     ..status = Status.OK
     ..reservation = reservation
     ..limit = limit;
-  print('[Relay] Sending reservation response to peer: ${peerId.toBase58()}');
   
   // Write the message with a custom writer that tracks the write operation
   final writeCompleter = Completer<void>();
@@ -140,7 +170,6 @@ class Relay {
   
   // Wait for the write to complete before returning
   await writeCompleter.future;
-  print('[Relay] Reservation response sent and flushed');
   
   // Add a small delay to ensure the data is transmitted
   await Future.delayed(Duration(milliseconds: 50));
@@ -150,6 +179,18 @@ class Relay {
   Future<void> _handleConnect(P2PStream stream, HopMessage msg) async {
     // The SOURCE peer is the one who opened this HOP stream (the peer dialing)
     final srcPeerId = stream.conn.remotePeer;
+    
+    // Extract diagnostic session ID if present
+    final sessionId = msg.hasDiagnosticSessionId()
+        ? utf8.decode(msg.diagnosticSessionId)
+        : null;
+    
+    // Check rate limiting for HOP requests from this peer
+    if (!_resources.canMakeHopRequest(srcPeerId)) {
+      metricsObserver?.onResourceLimitExceeded(srcPeerId, 'hop_request_rate');
+      await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
+      return;
+    }
     
     // The DESTINATION peer is in msg.peer (the peer being dialed)
     if (!msg.hasPeer()) {
@@ -162,18 +203,30 @@ class Relay {
       await _writeResponse(stream, Status.MALFORMED_MESSAGE);
       return;
     }
+    
+    metricsObserver?.onRelayConnectRequested(srcPeerId, dstInfo.peerId, sessionId: sessionId);
 
     // Check if the DESTINATION peer has a reservation
     // (the peer being dialed TO needs the reservation, not the one dialing FROM)
     final reservation = _reservations[dstInfo.peerId.toString()];
     if (reservation == null || reservation.isBefore(DateTime.now())) {
-      print('[Relay] NO_RESERVATION: ${dstInfo.peerId} does not have an active reservation');
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'no_reservation', sessionId: sessionId);
       await _writeResponse(stream, Status.NO_RESERVATION);
       return;
     }
 
+    // Note: We do NOT pre-check connectedness here anymore. Even if a peer
+    // appears "notConnected", it might be in the middle of connecting/upgrading.
+    // The actual STOP stream creation below will naturally fail if the peer
+    // is truly unreachable, giving a more accurate error. This prevents race
+    // conditions where we reject valid relay requests just because the
+    // destination is still completing its connection handshake.
+    // Having a reservation is sufficient proof that the peer intends to be reachable.
+
     // Check if we have resources for a new connection
     if (!_resources.canConnect(srcPeerId, dstInfo.peerId)) {
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'resource_limit_exceeded', sessionId: sessionId);
+      metricsObserver?.onResourceLimitExceeded(srcPeerId, 'connection');
       await _writeResponse(stream, Status.RESOURCE_LIMIT_EXCEEDED);
       return;
     }
@@ -186,55 +239,69 @@ class Relay {
       // 3. Wait for identify
       // 4. Negotiate protocol
       // 5. Register protocol in peerstore
-      print('[Relay] Opening STOP stream to destination peer: ${dstInfo.peerId.toBase58()}');
       final dstStream = await _host.newStream(
         dstInfo.peerId, 
         [CircuitV2Protocol.protoIDv2Stop], 
         Context()
       );
-      print('[Relay] STOP stream opened and protocol negotiated with destination peer: ${dstInfo.peerId.toBase58()}');
       
       // Set handshake deadline for the STOP protocol handshake messages
       // This gives enough time for the STOP handshake to complete
       await dstStream.setDeadline(DateTime.now().add(Duration(minutes: 1)));
-      print('[Relay] Set 1-minute handshake deadline on STOP stream');
 
       // Create a stop message with SOURCE peer info
-      print('[Relay] Creating STOP message...');
       final stopMsg = StopMessage()
         ..type = StopMessage_Type.CONNECT
         ..peer = peerInfoToPeerV2(PeerInfo(peerId: srcPeerId, addrs: <MultiAddr>[].toSet()));
-      print('[Relay] STOP message created, type: ${stopMsg.type}');
+      
+      // Forward session ID to destination if present
+      if (sessionId != null) {
+        stopMsg.diagnosticSessionId = utf8.encode(sessionId);
+      }
 
       // Write the message with length prefix (required for DelimitedReader on the receiving end)
       // We write manually to ensure both the length and message are sent before reading response
-      print('[Relay] Encoding STOP message to bytes...');
       final messageBytes = stopMsg.writeToBuffer();
-      print('[Relay] Message encoded to ${messageBytes.length} bytes');
       final lengthBytes = encodeVarint(messageBytes.length);
-      print('[Relay] Writing length prefix (${lengthBytes.length} bytes) to STOP stream...');
       await dstStream.write(lengthBytes);
-      print('[Relay] Length prefix written, now writing message bytes (${messageBytes.length} bytes)...');
       await dstStream.write(messageBytes);
-      print('[Relay] Message bytes written, flushing stream...');
       // Flush the stream to ensure data is sent immediately
       if (dstStream is Sink) {
         // Most streams don't have a flush method, so we can't call it
         // The write should already flush automatically
       }
-      print('[Relay] STOP message written successfully to destination peer: ${dstInfo.peerId.toBase58()}');
 
       // Read the response (destination sends with length prefix)
-      print('[Relay] Reading STOP response from destination peer: ${dstInfo.peerId.toBase58()}...');
-      final reader = DelimitedReader(_p2pStreamToDartStream(dstStream), 4096);
-      final pb = await reader.readMsg(StopMessage());
-      print('[Relay] STOP response received from destination peer: ${dstInfo.peerId.toBase58()}, status: ${pb.status}');
+      // CRITICAL: Use manual reading to preserve any data that follows the STOP message
+      final bufferedReader = BufferedP2PStreamReader(dstStream);
+      
+      // Read length-delimited message manually (instead of using DelimitedReader)
+      final responseLength = await bufferedReader.readVarint();
+      if (responseLength > 4096) {
+        throw Exception('STOP message too large: $responseLength bytes');
+      }
+      final responseBytes = await bufferedReader.readExact(responseLength);
+      final pb = StopMessage.fromBuffer(responseBytes);
+      
 
       // Check the status
       if (pb.status != Status.OK) {
+        metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'stop_handshake_failed');
         await _writeResponse(stream, Status.CONNECTION_FAILED);
         await dstStream.close();
         return;
+      }
+      
+      metricsObserver?.onRelayConnectEstablished(srcPeerId, dstInfo.peerId, sessionId: sessionId);
+      
+      // CRITICAL FIX: Forward any buffered data that was read along with STOP message
+      // This prevents data loss when relay data immediately follows handshake
+      final remainingBytes = bufferedReader.remainingBuffer;
+      if (remainingBytes.isNotEmpty) {
+        try {
+          await stream.write(remainingBytes);
+        } catch (e) {
+        }
       }
 
       // Write the response to the source
@@ -244,24 +311,23 @@ class Relay {
       // This prevents yamux read timeouts from closing the relay connection prematurely
       await stream.setDeadline(null);
       await dstStream.setDeadline(null);
-      print('[Relay] Cleared deadlines on relay streams:');
-      print('[Relay]   - HOP stream (from ${srcPeerId.toBase58()}): id=${stream.id()}');
-      print('[Relay]   - STOP stream (to ${dstInfo.peerId.toBase58()}): id=${dstStream.id()}');
 
       // Add the connection to the active connections
       final connKey = '${srcPeerId}-${dstInfo.peerId}';
       final currentCount = _connections[connKey] ?? 0;
       _connections[connKey] = currentCount + 1;
-      print('[Relay] Active relay connections for ${srcPeerId.toBase58()} -> ${dstInfo.peerId.toBase58()}: ${currentCount + 1}');
+      
+      // Store session ID for this connection
+      _sessionIds[connKey] = sessionId;
+      
       if (currentCount > 0) {
-        print('[Relay] ⚠️  WARNING: Multiple concurrent relay connections detected!');
       }
 
       // Relay data between the peers
       _relayData(stream, dstStream, srcPeerId, dstInfo.peerId);
     } catch (e) {
+      metricsObserver?.onRelayConnectFailed(srcPeerId, dstInfo.peerId, 'connection_error: $e', sessionId: sessionId);
       await _writeResponse(stream, Status.CONNECTION_FAILED);
-      print('Failed to connect to destination peer: $e');
     }
   }
 
@@ -285,7 +351,21 @@ class Relay {
     PeerId dstPeer,
   ) {
     final connKey = '${srcPeer}-${dstPeer}';
+    final sessionId = _sessionIds[connKey]; // Retrieve session ID for this connection
     var cleanupDone = false;
+    
+    // Shared flag to track if either direction has encountered a fatal error
+    // and requested termination of the relay
+    var relayTerminated = false;
+    
+    // Bandwidth and duration tracking
+    int totalBytesRelayed = 0;
+    final maxBytes = _resources.connectionData;
+    final startTime = DateTime.now();
+    final maxDuration = Duration(seconds: _resources.connectionDuration);
+    
+    // Track initial connection establishment for metrics
+    final relayStartTime = DateTime.now();
 
     // Idempotent cleanup function
     // Note: We do NOT close streams here - each direction closes its own write side via closeWrite()
@@ -299,37 +379,60 @@ class Relay {
       final count = _connections[connKey] ?? 0;
       if (count <= 1) {
         _connections.remove(connKey);
+        _sessionIds.remove(connKey); // Clean up session ID
       } else {
         _connections[connKey] = count - 1;
       }
       
-      print('[Relay] Cleanup completed for ${srcPeer.toBase58()} -> ${dstPeer.toBase58()}');
+      // Notify metrics observer
+      final duration = DateTime.now().difference(relayStartTime);
+      metricsObserver?.onRelayConnectionClosed(srcPeer, dstPeer, duration, totalBytesRelayed, sessionId: sessionId);
+      
     }
 
     // Relay data from source to destination
     Future<void> relaySourceToDest() async {
       try {
         int bytesRelayed = 0;
-        while (true) {
+        while (!relayTerminated) {
+          // Check resource limits before reading more data
+          if (totalBytesRelayed >= maxBytes) {
+            relayTerminated = true;
+            // Signal graceful termination
+            await dstStream.closeWrite().catchError((e) {
+            });
+            break;
+          }
+          
+          if (DateTime.now().difference(startTime) > maxDuration) {
+            relayTerminated = true;
+            // Signal graceful termination
+            await dstStream.closeWrite().catchError((e) {
+            });
+            break;
+          }
+          
           final data = await srcStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to destination via closeWrite
             await dstStream.closeWrite().catchError((e) {
-              print('[Relay] Error closing write on destination: $e');
             });
             break;
           }
           bytesRelayed += data.length;
+          totalBytesRelayed += data.length;
+          metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await dstStream.write(data);
         }
       } catch (e) {
-        print('[Relay] Error relaying data from source to destination: $e');
-        // Reset both streams on error (like go-libp2p)
-        await srcStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting source stream: $resetErr');
-        });
-        await dstStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting destination stream: $resetErr');
+        // FIX: Only reset the streams involved in this direction's error
+        // Don't immediately reset the other direction - let it complete gracefully
+        // if possible. Only set the termination flag to signal the other direction
+        // to stop after its current operation completes.
+        relayTerminated = true;
+        
+        // Close our write side to signal EOF to the destination
+        await dstStream.closeWrite().catchError((closeErr) {
         });
       } finally {
         cleanup();
@@ -340,27 +443,45 @@ class Relay {
     Future<void> relayDestToSource() async {
       try {
         int bytesRelayed = 0;
-        while (true) {
+        while (!relayTerminated) {
+          // Check resource limits before reading more data
+          if (totalBytesRelayed >= maxBytes) {
+            relayTerminated = true;
+            // Signal graceful termination
+            await srcStream.closeWrite().catchError((e) {
+            });
+            break;
+          }
+          
+          if (DateTime.now().difference(startTime) > maxDuration) {
+            relayTerminated = true;
+            // Signal graceful termination
+            await srcStream.closeWrite().catchError((e) {
+            });
+            break;
+          }
+          
           final data = await dstStream.read();
           if (data.isEmpty) {
             // EOF received - propagate to source via closeWrite
-            print('[Relay] EOF from destination after relaying $bytesRelayed bytes total');
             await srcStream.closeWrite().catchError((e) {
-              print('[Relay] Error closing write on source: $e');
             });
             break;
           }
           bytesRelayed += data.length;
+          totalBytesRelayed += data.length;
+          metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await srcStream.write(data);
         }
       } catch (e) {
-        print('[Relay] Error relaying data from destination to source: $e');
-        // Reset both streams on error (like go-libp2p)
-        await dstStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting destination stream: $resetErr');
-        });
-        await srcStream.reset().catchError((resetErr) {
-          print('[Relay] Error resetting source stream: $resetErr');
+        // FIX: Only reset the streams involved in this direction's error
+        // Don't immediately reset the other direction - let it complete gracefully
+        // if possible. Only set the termination flag to signal the other direction
+        // to stop after its current operation completes.
+        relayTerminated = true;
+        
+        // Close our write side to signal EOF to the source
+        await srcStream.closeWrite().catchError((closeErr) {
         });
       } finally {
         cleanup();
@@ -378,23 +499,46 @@ class Relay {
       // Both directions completed - now it's safe to close any remaining open streams
       // This handles edge cases where closeWrite() didn't fully close the stream
       if (!srcStream.isClosed) {
-        print('[Relay] Final cleanup: closing source stream');
         await srcStream.close().catchError((e) {
-          print('[Relay] Error in final source stream close: $e');
         });
       }
       if (!dstStream.isClosed) {
-        print('[Relay] Final cleanup: closing destination stream');
         await dstStream.close().catchError((e) {
-          print('[Relay] Error in final destination stream close: $e');
         });
       }
     }
     
     // Start relay (fire and forget - errors are handled within each direction)
     startRelay().catchError((e) {
-      print('[Relay] Unexpected error in relay coordination: $e');
     });
+  }
+
+  /// Gracefully terminates a relay connection
+  /// Signals EOF to both ends before closing streams
+  Future<void> _terminateRelay(P2PStream srcStream, P2PStream dstStream, String reason) async {
+    
+    try {
+      // Signal EOF to both ends gracefully via closeWrite
+      await Future.wait([
+        srcStream.closeWrite().catchError((e) {
+        }),
+        dstStream.closeWrite().catchError((e) {
+        }),
+      ]);
+      
+      // Give a brief moment for EOF to propagate
+      await Future.delayed(Duration(milliseconds: 100));
+      
+      // Now fully close both streams
+      await Future.wait([
+        srcStream.close().catchError((e) {
+        }),
+        dstStream.close().catchError((e) {
+        }),
+      ]);
+      
+    } catch (e) {
+    }
   }
 
   /// Writes a response with the given status.
@@ -409,9 +553,7 @@ class Relay {
       final lengthBytes = encodeVarint(messageBytes.length);
       await stream.write(lengthBytes);
       await stream.write(messageBytes);
-      print('[Relay] Sent HOP STATUS response: $status (${messageBytes.length} bytes)');
     } catch (e) {
-      print('[Relay] Failed to write response (stream likely closed/reset): $e');
       // Don't rethrow - this is best-effort error reporting
     }
   }
@@ -421,6 +563,26 @@ class Relay {
     _gcTimer = Timer.periodic(Duration(minutes: 1), (_) {
       _gc();
     });
+  }
+
+  /// Monitors peer disconnections and removes reservations for disconnected peers.
+  void _startPeerDisconnectMonitor() {
+    try {
+      final sub = _host.eventBus.subscribe(EvtPeerConnectednessChanged);
+      _peerDisconnectSub = sub.stream.listen((event) {
+        if (event is EvtPeerConnectednessChanged &&
+            event.connectedness == Connectedness.notConnected) {
+          final peerStr = event.peer.toString();
+          final hadReservation = _reservations.remove(peerStr) != null;
+          if (hadReservation) {
+            _log.warning('[RELAY] Peer $peerStr disconnected — removed reservation. Remaining reservations: ${_reservations.length}');
+            metricsObserver?.onReservationExpired(event.peer);
+          }
+        }
+      });
+    } catch (e) {
+      _log.warning('[RELAY] Failed to subscribe to peer disconnection events: $e');
+    }
   }
 
   /// Garbage collects expired reservations.
@@ -434,6 +596,13 @@ class Relay {
     }
     for (final key in expired) {
       _reservations.remove(key);
+      // Notify metrics observer of expiration
+      try {
+        final peerId = PeerId.decode(key);
+        metricsObserver?.onReservationExpired(peerId);
+      } catch (e) {
+        // If we can't parse the peer ID, skip metrics notification
+      }
     }
   }
 
@@ -450,6 +619,13 @@ class Relay {
   }
 
   @visibleForTesting
+  void addConnectionForTesting(String srcPeer, String dstPeer) {
+    final connKey = '$srcPeer-$dstPeer';
+    final currentCount = _connections[connKey] ?? 0;
+    _connections[connKey] = currentCount + 1;
+  }
+
+  @visibleForTesting
   int getConnectionCount(String srcPeer, String dstPeer) {
     final connKey = '$srcPeer-$dstPeer';
     return _connections[connKey] ?? 0;
@@ -460,41 +636,6 @@ class Relay {
 
   @visibleForTesting
   Map<String, int> get connectionsForTesting => Map.unmodifiable(_connections);
-}
-
-/// Helper function to adapt P2PStream.read() to a Dart Stream for DelimitedReader
-/// Uses a StreamController to allow multiple subscriptions via await-for loops
-Stream<Uint8List> _p2pStreamToDartStream(P2PStream p2pStream) {
-  print('[Relay] _p2pStreamToDartStream called');
-  final controller = StreamController<Uint8List>();
-
-  Future<void> readLoop() async {
-    try {
-      while (true) {
-        if (controller.isClosed) break;
-        print('[Relay] Reading chunk from P2PStream...');
-        final data = await p2pStream.read();
-        print('[Relay] Read ${data.length} bytes, adding to controller...');
-        controller.add(data);
-      }
-    } catch (e, s) {
-      // Stream closed or error
-      print('[Relay] Stream read error or closed: $e');
-      if (!controller.isClosed) {
-        controller.addError(e, s);
-      }
-    } finally {
-      if (!controller.isClosed) {
-        await controller.close();
-      }
-    }
-  }
-
-  // Start reading immediately
-  readLoop();
-
-  // Return as broadcast stream to allow multiple await-for loops in DelimitedReader
-  return controller.stream.asBroadcastStream();
 }
 
 /// Helper class to adapt P2PStream to a Sink<List<int>> for writeDelimitedMessage

@@ -67,10 +67,17 @@ class AutoRelay {
     _background(_stopController!.stream);
     
     _log.fine('AutoRelay started, waiting for reachability events');
-    // Don't emit addresses immediately on start. Wait for:
-    // 1. Reachability status to be determined
-    // 2. RelayFinder to discover and reserve relays
-    // Address updates will be triggered by reachability events and relay updates
+
+    // Start RelayFinder immediately since initial status is unknown.
+    // We can't wait for a reachability CHANGE event because AutoNAT probes
+    // behind CGNAT fail with unknown, and unknown→unknown is not a change.
+    if (_status == Reachability.private || _status == Reachability.unknown) {
+      _log.fine('AutoRelay: Initial reachability is $_status, starting RelayFinder immediately');
+      await relayFinder.start().catchError((e) {
+        _log.severe('AutoRelay: Failed to start RelayFinder on init: $e');
+      });
+      metricsTracer.relayFinderStatus(true);
+    }
   }
 
   Future<void> _updateAndEmitAdvertisableAddrs() async {

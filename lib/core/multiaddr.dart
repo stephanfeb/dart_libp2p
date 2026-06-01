@@ -6,13 +6,12 @@ import 'package:dart_libp2p/p2p/multiaddr/protocol.dart';
 
 /// Represents a multiaddress
 class MultiAddr {
-  final String _addr;
   final List<(Protocol, String)> _components;
 
   /// Creates a new Multiaddr from a string
   /// Format: /protocol1/value1/protocol2/value2
   /// Example: /ip4/127.0.0.1/tcp/1234
-  MultiAddr(this._addr): _components = _parseAddr(_addr);
+  MultiAddr(String addr): _components = _parseAddr(addr);
 
 
   static List<(Protocol, String)> _parseAddr(String addr) {
@@ -48,7 +47,13 @@ class MultiAddr {
         if (i >= parts.length) {
           throw FormatException('Missing value for protocol: $protocolName');
         }
-        final value = parts[i];
+        var value = parts[i];
+        
+        // Strip zone identifier from IPv6 addresses (e.g., fe80::1%eth0 -> fe80::1)
+        if (protocolName == 'ip6') {
+          value = value.split('%')[0];
+        }
+        
         components.add((protocol, value));
         i++; // Consumed value
       }
@@ -57,7 +62,16 @@ class MultiAddr {
   }
 
   @override
-  String toString() => _addr;
+  String toString() {
+    final sb = StringBuffer();
+    for (final (protocol, value) in _components) {
+      sb.write('/${protocol.name}');
+      if (protocol.size != 0) { // Only add value if protocol is not size 0
+        sb.write('/$value');
+      }
+    }
+    return sb.toString();
+  }
 
   Uint8List toBytes() {
     final bytes = <int>[];
@@ -134,11 +148,14 @@ class MultiAddr {
   }
 
   String? valueForProtocol(String protocol) {
-    final component = _components.firstWhere(
-          (c) => c.$1.name == protocol,
-      orElse: () => (Protocols.ip4, ''),
-    );
-    return component.$1.name == protocol ? component.$2 : null;
+    try {
+      final component = _components.firstWhere((c) => c.$1.name == protocol);
+      // Return null for empty string values (protocols with size 0)
+      return component.$2.isEmpty ? null : component.$2;
+    } catch (e) {
+      // Protocol not found
+      return null;
+    }
   }
 
   /// Returns all protocols in this multiaddr
@@ -169,14 +186,14 @@ class MultiAddr {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is MultiAddr && other._addr == _addr;
+    return other is MultiAddr && other.toString() == toString();
   }
 
   @override
-  int get hashCode => _addr.hashCode;
+  int get hashCode => toString().hashCode;
 
   bool equals(MultiAddr addr) {
-    return addr.toString() == _addr;
+    return addr.toString() == toString();
   }
 
   bool isLoopback() {
@@ -312,4 +329,78 @@ class MultiAddr {
     return transports;
   }
 
+}
+
+/// Address type classification for connection prioritization
+enum AddressType {
+  directIPv4Public,
+  directIPv4Private,
+  directIPv6Public,
+  directIPv6LinkLocal,
+  relaySpecific,   // Full circuit path with relay peer ID
+  relayGeneric,    // Bare /p2p-circuit
+}
+
+/// Extension for address classification and analysis
+extension MultiAddrClassification on MultiAddr {
+  /// Classifies the address type for prioritization
+  AddressType get addressType {
+    // Check for relay first
+    if (hasCircuit) {
+      // Check if it's a specific relay path or generic
+      final comps = components;
+      
+      // Look for p2p protocol before p2p-circuit (indicates specific relay)
+      var hasRelayPeerId = false;
+      var circuitIndex = -1;
+      
+      for (var i = 0; i < comps.length; i++) {
+        if (comps[i].$1.name == 'p2p-circuit') {
+          circuitIndex = i;
+          break;
+        }
+      }
+      
+      if (circuitIndex > 0) {
+        // Check if there's a p2p component before circuit
+        for (var i = 0; i < circuitIndex; i++) {
+          if (comps[i].$1.name == 'p2p') {
+            hasRelayPeerId = true;
+            break;
+          }
+        }
+      }
+      
+      return hasRelayPeerId ? AddressType.relaySpecific : AddressType.relayGeneric;
+    }
+    
+    // Check IP type by examining components directly
+    final comps = components;
+    for (final (protocol, value) in comps) {
+      if (protocol.name == 'ip6') {
+        // It's an IPv6 address
+        final addr = value.toLowerCase();
+        if (addr.startsWith('fe80:')) return AddressType.directIPv6LinkLocal;
+        return AddressType.directIPv6Public;
+      } else if (protocol.name == 'ip4') {
+        // It's an IPv4 address
+        return isPrivate() ? AddressType.directIPv4Private : AddressType.directIPv4Public;
+      }
+    }
+    
+    return AddressType.relayGeneric; // Fallback
+  }
+  
+  /// Extract /64 prefix for IPv6 deduplication
+  /// Returns null if not an IPv6 address
+  String? get ipv6Prefix64 {
+    final v6 = ip6;
+    if (v6 == null) return null;
+    
+    // Split by colon and take first 4 groups (64 bits)
+    final parts = v6.split(':');
+    if (parts.length < 4) return null;
+    
+    return parts.take(4).join(':');
+  }
 }

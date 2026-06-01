@@ -401,6 +401,23 @@ class TCPConnection implements TransportConn {
     }
   }
 
+  /// Pushes data back to the front of the receive buffer so the next read()
+  /// returns it. Used to inject leftover bytes from multistream-select
+  /// negotiation before the Noise handshake reads from this connection.
+  void pushBack(Uint8List data) {
+    if (data.isEmpty) return;
+    _log.fine('TCPConnection($id) - pushBack: ${data.length} bytes pushed to front of receive buffer');
+    final existing = _receiveBuffer.toBytes();
+    _receiveBuffer.clear();
+    _receiveBuffer.add(data);
+    if (existing.isNotEmpty) {
+      _receiveBuffer.add(existing);
+    }
+    if (_pendingReadCompleter != null && !_pendingReadCompleter!.isCompleted) {
+      _pendingReadCompleter!.complete();
+    }
+  }
+
   @override
   Future<void> write(Uint8List data) async {
     _assertNotClosed();

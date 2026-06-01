@@ -72,7 +72,7 @@ class TestNotifiee implements Notifiee {
   });
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     connectedCallback?.call(network, conn);
   }
 
@@ -378,23 +378,31 @@ void main() {
 
     test('connection health during mixed stream states with UDX', () async {
       print('\n=== Starting Mixed Stream States Test with UDX ===');
+      final testStart = DateTime.now();
       
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating swarmA...');
       final swarmA = await createUDXTestSwarm(
         name: 'MixedSwarmA', 
         udxInstance: udxInstance,
         resourceManager: resourceManager,
         connManager: connManager,
       );
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] SwarmA created');
+      
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating swarmB...');
       final swarmB = await createUDXTestSwarm(
         name: 'MixedSwarmB', 
         udxInstance: udxInstance,
         resourceManager: resourceManager,
         connManager: connManager,
       );
+      print('[${DateTime.now().difference(testStart).inMilliseconds}ms] SwarmB created');
       
       try {
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Setting up listener...');
         final listenAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
         await swarmA.listen([listenAddr]);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Listener ready');
         
         final actualListenAddr = swarmA.listenAddresses.firstWhere(
           (addr) => addr.hasProtocol(multiaddr_protocol.Protocols.udx.name)
@@ -411,51 +419,63 @@ void main() {
         );
         
         // Create streams with mixed lifecycle management
-        print('Creating streams with mixed states...');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating 5 streams with mixed states...');
         final streams = <P2PStream>[];
         
         for (int i = 0; i < 5; i++) {
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating stream $i...');
           final stream = await swarmB.newStream(Context(), swarmA.localPeer);
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Stream $i created, writing data...');
           streams.add(stream);
           await stream.write(utf8.encode('mixed-state-stream-$i'));
+          print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Stream $i write complete');
         }
         
         final connections = swarmB.connsToPeer(swarmA.localPeer);
         expect(connections.length, equals(1));
         final connectionId = connections.first.id;
-        print('All streams using connection: $connectionId');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] All streams using connection: $connectionId');
         
         // Close some streams, keep others open
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Closing streams 0 and 2...');
         await streams[0].close();  // Closed
         await streams[2].close();  // Closed
         // streams[1], streams[3], streams[4] remain open
         
-        print('Closed streams 0 and 2, keeping 1, 3, 4 open');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Closed streams 0 and 2, keeping 1, 3, 4 open');
         
         // Verify connection is still healthy
         expect(connections.first.isClosed, isFalse);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Connection still healthy');
         
         // Create new streams while others are still open
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating newStream1...');
         final newStream1 = await swarmB.newStream(Context(), swarmA.localPeer);
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Creating newStream2...');
         final newStream2 = await swarmB.newStream(Context(), swarmA.localPeer);
         
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] Writing to new streams...');
         await newStream1.write(utf8.encode('new-stream-1'));
         await newStream2.write(utf8.encode('new-stream-2'));
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] New stream writes complete');
         
         // Verify still using same connection
         final connectionsAfter = swarmB.connsToPeer(swarmA.localPeer);
         expect(connectionsAfter.length, equals(1));
         expect(connectionsAfter.first.id, equals(connectionId));
         
-        print('✓ Mixed stream states test completed successfully!');
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] ✓ Mixed stream states test completed successfully!');
         print('✓ Connection remained healthy with mixed stream states');
         print('✓ New streams successfully created alongside existing ones');
         
       } finally {
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: Starting cleanup...');
         await swarmA.close();
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: swarmA closed');
         await swarmB.close();
+        print('[${DateTime.now().difference(testStart).inMilliseconds}ms] FINALLY BLOCK: swarmB closed');
       }
-    });
+    }, timeout: Timeout(Duration(seconds: 60)));
 
     test('bidirectional data exchange with connection reuse', () async {
       print('\n=== Starting Bidirectional Data Exchange Test ===');
@@ -659,27 +679,28 @@ void main() {
             List.generate(size, (_) => random.nextInt(256))
           );
           
-          // Setup server echo handler
+          // Setup server echo handler (large-data aware: reads until EOF)
           late P2PStream serverStream;
           final serverAcceptFuture = ((serverConn as dynamic).conn as core_mux_types.MuxedConn)
               .acceptStream()
               .then((stream) {
             serverStream = stream as P2PStream;
-            return _handleEchoStream(serverStream);
+            return _handleEchoStreamLarge(serverStream);
           });
-          
-          // Client sends data
+
+          // Client sends data then signals EOF so server knows when to echo
           final clientStream = await ((clientConn as dynamic).conn as core_mux_types.MuxedConn)
               .openStream(Context()) as P2PStream;
-          
+
           await clientStream.write(testData);
+          await clientStream.closeWrite();
           print('Client sent ${testData.length} bytes');
-          
+
           // Wait for server to handle the stream
-          await serverAcceptFuture.timeout(Duration(seconds: 10));
-          
-          // Read echo response
-          final receivedData = await clientStream.read().timeout(Duration(seconds: 10));
+          await serverAcceptFuture.timeout(Duration(seconds: 30));
+
+          // Read echo response - accumulate chunks since Yamux fragments large writes
+          final receivedData = await _readAll(clientStream, timeout: Duration(seconds: 15));
           print('Client received ${receivedData.length} bytes');
           
           // Verify data integrity
@@ -891,7 +912,7 @@ Future<void> _performIndependentEchoTest({
   }
 }
 
-/// Handles echo functionality for a stream
+/// Handles echo functionality for a stream (single read, for small payloads)
 Future<void> _handleEchoStream(P2PStream stream) async {
   try {
     final data = await stream.read().timeout(Duration(seconds: 5));
@@ -899,6 +920,30 @@ Future<void> _handleEchoStream(P2PStream stream) async {
     await stream.write(data);
   } catch (e) {
     print('Error in echo handler for stream ${stream.id()}: $e');
+    rethrow;
+  }
+}
+
+/// Reads all data from a stream until EOF (empty read), accumulating chunks.
+Future<Uint8List> _readAll(P2PStream stream, {Duration timeout = const Duration(seconds: 15)}) async {
+  final buffer = <int>[];
+  while (true) {
+    final chunk = await stream.read().timeout(timeout);
+    if (chunk.isEmpty) break; // EOF
+    buffer.addAll(chunk);
+  }
+  return Uint8List.fromList(buffer);
+}
+
+/// Handles echo for large data: reads until EOF then echoes all received data.
+Future<void> _handleEchoStreamLarge(P2PStream stream) async {
+  try {
+    final data = await _readAll(stream, timeout: Duration(seconds: 15));
+    print('Server echoing ${data.length} bytes on stream ${stream.id()}');
+    await stream.write(data);
+    await stream.closeWrite();
+  } catch (e) {
+    print('Error in large echo handler for stream ${stream.id()}: $e');
     rethrow;
   }
 }

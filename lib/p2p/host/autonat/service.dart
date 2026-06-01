@@ -330,10 +330,8 @@ class Mutex {
 // For now, let's make it a static method of AutoNATService for encapsulation.
 // It was previously inside Mutex by mistake.
 // static void _log(String message) { // This would be if it's part of AutoNATService
-//   print(message);
 // }
 
 // Top-level function for logging, as originally intended before moving to static.
 void _autonatServiceLog(String message) { // Renamed function
- print(message);
 }

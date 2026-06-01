@@ -62,6 +62,10 @@ abstract class P2PStream<T> {
 
   /// Returns true if the stream is closed
   bool get isClosed;
+
+  /// Returns true if the stream is ready for writing
+  /// More precise than !isClosed as it excludes closing state
+  bool get isWritable;
 }
 
 

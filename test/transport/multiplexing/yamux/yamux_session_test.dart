@@ -9,7 +9,7 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
-// import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart'; // Not strictly needed for this test
+import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:logging/logging.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
@@ -53,13 +53,40 @@ void main() {
           usedEarlyMuxerNegotiation: false, // Provide a default
       ));
       
-      // Mock write to succeed immediately. YamuxSession.openStream will try to send a SYN frame.
-      when(mockTransportConn.write(any)).thenAnswer((_) async {});
+      // Feed data to the session's read loop via a queue of pending reads
+      final pendingReads = <Completer<Uint8List>>[];
+      final dataToFeed = <Uint8List>[];
 
-      // Mock read to simulate no immediate response, to prevent openStream from hanging if it expects one.
-      final readCompleter = Completer<Uint8List>();
-      // Ensure read() can be called multiple times if the session logic needs it.
-      when(mockTransportConn.read(any)).thenAnswer((_) => readCompleter.future);
+      void _feedData(Uint8List data) {
+        if (pendingReads.isNotEmpty) {
+          final c = pendingReads.removeAt(0);
+          c.complete(data);
+        } else {
+          dataToFeed.add(data);
+        }
+      }
+
+      when(mockTransportConn.read(any)).thenAnswer((_) {
+        if (dataToFeed.isNotEmpty) {
+          return Future.value(dataToFeed.removeAt(0));
+        }
+        final c = Completer<Uint8List>();
+        pendingReads.add(c);
+        return c.future;
+      });
+
+      // Mock write: intercept SYN frames and respond with ACK via read
+      when(mockTransportConn.write(any)).thenAnswer((invocation) async {
+        final data = invocation.positionalArguments[0] as Uint8List;
+        try {
+          final frame = YamuxFrame.fromBytes(data);
+          if (frame.type == YamuxFrameType.windowUpdate &&
+              (frame.flags & YamuxFlags.syn != 0)) {
+            final ackBytes = YamuxFrame.synAckStream(frame.streamId).toBytes();
+            _feedData(ackBytes);
+          }
+        } catch (_) {}
+      });
 
 
       yamuxConfig = MultiplexerConfig(
@@ -129,5 +156,78 @@ void main() {
       
       await yamuxStream.close();
     });
+  });
+
+  group('YamuxSession Keepalive', () {
+    test('session should close when keepalive ping send fails due to closed underlying connection', () async {
+      // This test proves the zombie session bug: when the underlying transport
+      // connection dies, keepalive ping sends fail but the session never closes.
+      // It keeps firing pings every interval, logging errors indefinitely.
+
+      final clientPeerId = PeerId.fromBytes(Uint8List.fromList(
+          List.generate(34, (i) => (i % 250) + 1)..[0] = 0x12..[1] = 0x20));
+      final serverPeerId = PeerId.fromBytes(Uint8List.fromList(
+          List.generate(34, (i) => (i % 250) + 2)..[0] = 0x12..[1] = 0x20));
+
+      final mockConn = MockTransportConn();
+      when(mockConn.localPeer).thenReturn(clientPeerId);
+      when(mockConn.remotePeer).thenReturn(serverPeerId);
+      when(mockConn.localMultiaddr).thenReturn(MultiAddr('/ip4/127.0.0.1/tcp/1'));
+      when(mockConn.remoteMultiaddr).thenReturn(MultiAddr('/ip4/127.0.0.1/tcp/2'));
+      when(mockConn.isClosed).thenReturn(false);
+      when(mockConn.id).thenReturn('test-keepalive-conn');
+      when(mockConn.state).thenReturn(core_conn.ConnState(
+        transport: 'mock-tcp',
+        security: 'mock-noise',
+        streamMultiplexer: '',
+        usedEarlyMuxerNegotiation: false,
+      ));
+      when(mockConn.close()).thenAnswer((_) async {});
+
+      // Keep the read loop alive with a never-completing future
+      final readBlocker = Completer<Uint8List>();
+      when(mockConn.read(any)).thenAnswer((_) => readBlocker.future);
+
+      // Track whether write has been switched to throw
+      var writesShouldFail = false;
+
+      when(mockConn.write(any)).thenAnswer((_) async {
+        if (writesShouldFail) {
+          throw StateError('Stream is closed');
+        }
+      });
+
+      // Create session with FAST keepalive (100ms)
+      final config = MultiplexerConfig(
+        keepAliveInterval: Duration(milliseconds: 100),
+        maxStreamWindowSize: 256 * 1024,
+        initialStreamWindowSize: 256 * 1024,
+        streamWriteTimeout: Duration(seconds: 10),
+        maxStreams: 256,
+      );
+
+      final session = YamuxSession(mockConn, config, true);
+
+      // Let session init and first ping succeed
+      await Future.delayed(Duration(milliseconds: 50));
+      expect(session.isClosed, isFalse, reason: 'Session should be open initially');
+
+      // Now simulate the underlying connection dying
+      writesShouldFail = true;
+
+      // Wait for at least 2 keepalive intervals so a ping fires and fails
+      await Future.delayed(Duration(milliseconds: 300));
+
+      // THE KEY ASSERTION: session should have closed itself
+      expect(session.isClosed, isTrue,
+          reason: 'Session should close when keepalive ping send fails '
+              'due to closed underlying connection. '
+              'Currently it stays open as a zombie.');
+
+      // Cleanup: unblock the read loop
+      if (!readBlocker.isCompleted) {
+        readBlocker.completeError(StateError('test cleanup'));
+      }
+    }, timeout: Timeout(Duration(seconds: 5)));
   });
 }

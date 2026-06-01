@@ -79,7 +79,6 @@ final subscription = await client.subscribe(
 
 // Listen for messages
 subscription.messages.listen((message) async {
-  print('Received: ${message.body}');
   
   // Acknowledge the message
   if (message.requiresAck) {
@@ -96,7 +95,6 @@ final server = stompService.server!;
 
 // Listen for new connections
 server.onConnection.listen((connection) {
-  print('New client connected: ${connection.peerId}');
 });
 
 // Send a message to a destination
@@ -254,7 +252,6 @@ final client = await host.connectStomp(
 client.onStateChange.listen((state) {
   if (state == StompClientState.error) {
     // Library handles automatic reconnection
-    print('Connection lost, reconnecting...');
   }
 });
 ```
@@ -278,7 +275,6 @@ host.network.onPeerConnect.listen((peerId) async {
       ackMode: StompAckMode.auto,
     );
   } catch (e) {
-    print('Failed to establish STOMP connection: $e');
   }
 });
 ```
@@ -445,7 +441,6 @@ class NetworkBroadcaster {
       eagerError: false, // Don't fail on individual peer errors
     );
     
-    print('Broadcast sent to ${results.length} peers');
   }
   
   Future<void> _sendToPeer(PeerId peerId, String message, String? contentType) async {
@@ -459,7 +454,6 @@ class NetworkBroadcaster {
         );
       }
     } catch (e) {
-      print('Failed to send to $peerId: $e');
     }
   }
 }
@@ -506,7 +500,6 @@ class MessageRouter {
         headers: message.headers,
       );
     } catch (e) {
-      print('Failed to forward message to $targetPeer: $e');
     }
   }
   
@@ -580,13 +573,10 @@ The STOMP library provides several resilience features:
 client.onStateChange.listen((state) {
   switch (state) {
     case StompClientState.connected:
-      print('Connection established');
       break;
     case StompClientState.disconnected:
-      print('Connection lost');
       break;
     case StompClientState.error:
-      print('Connection error - will retry');
       break;
   }
 });
@@ -655,7 +645,6 @@ class ResilientMessaging {
         try {
           await subscribe();
         } catch (e) {
-          print('Failed to resubscribe to $destination: $e');
         }
       }
     });
@@ -700,13 +689,11 @@ class PartitionAwareMessaging {
         ));
       }
     } catch (e) {
-      print('Failed to send message: $e');
       // Could implement dead letter queue here
     }
   }
   
   void _handlePeerDisconnection(PeerId peerId) {
-    print('Peer $peerId disconnected - messages queued for retry');
     // Could implement message persistence here
   }
   
@@ -856,14 +843,12 @@ class SecureStompService {
     stompService.server?.onConnection.listen((connection) {
       if (!allowedPeers.contains(connection.peerId)) {
         connection.close();
-        print('Rejected connection from unauthorized peer: ${connection.peerId}');
       }
     });
     
     // Message filtering
     stompService.server?.onMessage.listen((message) {
       if (!_isAuthorizedDestination(message.destination)) {
-        print('Blocked unauthorized destination: ${message.destination}');
         return;
       }
     });
@@ -996,7 +981,6 @@ class EventDistributor {
           contentType: 'application/json',
         );
       } catch (e) {
-        print('Failed to send event to $subscriber: $e');
       }
     }
   }

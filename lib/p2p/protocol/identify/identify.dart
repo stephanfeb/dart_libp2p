@@ -28,6 +28,8 @@ import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRe
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart'; // Added import
+import 'package:dart_libp2p/p2p/multiaddr/codec.dart' show MultiAddrCodec; // For varint encoding
+import 'package:dart_libp2p/p2p/protocol/identify/identify_exceptions.dart';
 
 import 'package:dart_libp2p/core/certified_addr_book.dart';
 import 'package:dart_libp2p/core/event/addrs.dart';
@@ -97,7 +99,7 @@ class IdentifySnapshot {
   final List<MultiAddr> addrs;
 
   /// Signed peer record
-  final dynamic record;
+  final Envelope? record;
 
   /// Creates a new identify snapshot
   IdentifySnapshot({
@@ -109,55 +111,23 @@ class IdentifySnapshot {
 
   /// Returns true if this snapshot is equal to another snapshot
   Future<bool> equals(IdentifySnapshot other) async {
-    final currentRecord = record is Future ? await record : record;
-    final otherRecord = other.record is Future ? await other.record : other.record;
-
-    final hasRecord = currentRecord != null;
-    final otherHasRecord = otherRecord != null;
-
-    if (hasRecord != otherHasRecord) {
+    if ((record != null) != (other.record != null)) {
       return false;
     }
 
-    if (hasRecord) {
-      // Assuming Envelope has an 'equals' method or can be compared directly
-      // If Envelope.equals is also async, it needs to be awaited.
-      // For now, assuming it's synchronous or direct comparison is valid.
-      bool recordsAreEqual;
-      if (currentRecord is Envelope && otherRecord is Envelope) {
-        // If Envelope has a proper 'equals' method:
-        // recordsAreEqual = currentRecord.equals(otherRecord); 
-        // For now, let's assume direct comparison or a placeholder if no .equals()
-        // This might need further refinement based on Envelope's actual API
-        // For a simple placeholder, if they are not the same instance, assume not equal
-        // A proper deep comparison or hash comparison would be better.
-        // Let's assume Envelope has a synchronous .equals() for now.
-        // If not, this part needs to be adapted.
-        // Based on core/record/envelope.dart, Envelope does not have an equals method.
-        // We might need to compare marshalled bytes or specific fields.
-        // For now, to fix the immediate Future.equals error, we'll compare marshalled bytes.
-        try {
-          final currentRecordBytes = await currentRecord.marshal();
-          final otherRecordBytes = await otherRecord.marshal();
-          if (currentRecordBytes.length != otherRecordBytes.length) {
-            recordsAreEqual = false;
-          } else {
-            recordsAreEqual = true;
-            for (int i = 0; i < currentRecordBytes.length; i++) {
-              if (currentRecordBytes[i] != otherRecordBytes[i]) {
-                recordsAreEqual = false;
-                break;
-              }
-            }
-          }
-        } catch (e) {
-          // If marshalling fails, consider them not equal
-          recordsAreEqual = false;
+    if (record != null && other.record != null) {
+      try {
+        final currentRecordBytes = await record!.marshal();
+        final otherRecordBytes = await other.record!.marshal();
+        if (currentRecordBytes.length != otherRecordBytes.length) {
+          return false;
         }
-      } else {
-        recordsAreEqual = (currentRecord == otherRecord); // Fallback for non-Envelope or if one is null
-      }
-      if (!recordsAreEqual) {
+        for (int i = 0; i < currentRecordBytes.length; i++) {
+          if (currentRecordBytes[i] != otherRecordBytes[i]) {
+            return false;
+          }
+        }
+      } catch (e) {
         return false;
       }
     }
@@ -190,6 +160,11 @@ class IdentifySnapshot {
 class Entry {
   /// Completer for the identify wait operation
   Completer<void>? identifyWaitCompleter;
+
+  /// Whether identify has completed successfully for this connection.
+  /// When true, subsequent calls to identifyWait will return immediately
+  /// without re-running the identify protocol.
+  bool identifySucceeded = false;
 
   /// Push support status for the peer
   IdentifyPushSupport pushSupport = IdentifyPushSupport.unknown;
@@ -303,8 +278,9 @@ class IdentifyService implements IDService {
     host.setStreamHandler(id, handleIdentifyRequest); 
     host.setStreamHandler(idPush, handlePush); 
 
-    // Update snapshot
-    _updateSnapshot();
+    // Update snapshot — must be awaited so the initial snapshot is built
+    // before any connections can trigger Identify exchanges.
+    await _updateSnapshot();
 
     // Mark setup as completed
     _setupCompleted.complete();
@@ -386,11 +362,11 @@ class IdentifyService implements IDService {
     final trimmedAddrs = _trimHostAddrList(addrs, maxOwnIdentifyMsgSize - usedSpace - 256); // 256 bytes of buffer
 
     // Create new snapshot
-    dynamic record;
+    Envelope? record;
     if (!disableSignedPeerRecord) {
       final cab = host.peerStore.addrBook as CertifiedAddrBook?;
       if (cab != null) {
-        record = cab.getPeerRecord(host.id);
+        record = await cab.getPeerRecord(host.id);
       }
     }
 
@@ -399,7 +375,7 @@ class IdentifyService implements IDService {
         seq: 0, // Temporary seq, will be updated
         protocols: protocols,
         addrs: trimmedAddrs,
-        record: record, // This is a Future<Envelope?>
+        record: record,
       );
 
       // Await the comparison since 'equals' is now async
@@ -650,53 +626,33 @@ class IdentifyService implements IDService {
     final peerId = conn.remotePeer;
     final connAge = DateTime.now().difference(conn.stat.stats.opened);
 
-    // DEBUG: Add detailed stream creation logging for identify service
-    _log.warning(' [IDENTIFY-STREAM-CREATE-START] Creating stream for peer=$peerId, protocol=$protoIDString, conn_age=${connAge.inMilliseconds}ms');
-    
     P2PStream? stream;
     final streamCreateStart = DateTime.now();
-    
+
     try {
-      // DEBUG: Log stream creation attempt
-      _log.warning(' [IDENTIFY-STREAM-CREATE-ATTEMPT] About to call conn.newStream() for peer=$peerId, protocol=$protoIDString');
-
-      stream = await conn.newStream(Context()); // Context and StreamID are placeholders if not used by underlying muxer for initial open
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: BEFORE conn.newStream() peer=$peerId proto=$protoIDString connAge=${connAge.inMilliseconds}ms');
+      stream = await conn.newStream(Context());
       final streamCreateDuration = DateTime.now().difference(streamCreateStart);
-
-      // DEBUG: Log successful stream creation
-      _log.warning(' [IDENTIFY-STREAM-CREATE-SUCCESS] Stream created for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString, duration=${streamCreateDuration.inMilliseconds}ms');
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: AFTER conn.newStream() peer=$peerId stream=${stream.id()} duration=${streamCreateDuration.inMilliseconds}ms');
 
       stream.setDeadline(DateTime.now().add(timeout));
 
-      // DEBUG: Log protocol negotiation start
-      _log.warning(' [IDENTIFY-PROTOCOL-NEGOTIATE-START] Starting protocol negotiation for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString');
-      final negotiateStart = DateTime.now();
-
+      _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: BEFORE selectOneOf() peer=$peerId stream=${stream.id()} proto=$protoIDString');
       final protocolMuxer = host.mux as MultistreamMuxer;
       final selectedProtocol = await protocolMuxer.selectOneOf(stream, [protoIDString as ProtocolID]);
-      final negotiateDuration = DateTime.now().difference(negotiateStart);
-
-      // DEBUG: Log protocol negotiation result
-      _log.warning(' [IDENTIFY-PROTOCOL-NEGOTIATE-RESULT] Protocol negotiation for peer=$peerId, stream_id=${stream.id()}, requested=$protoIDString, selected=$selectedProtocol, duration=${negotiateDuration.inMilliseconds}ms');
 
       if (selectedProtocol == null) {
-        _log.warning('🔧 [NEWSTREAM-STEP-3-FAILED] Protocol negotiation failed for peer=$peerId, stream_id=${stream.id()}, protocol=$protoIDString. Resetting stream.');
+        _log.warning('Protocol negotiation failed for peer=$peerId, protocol=$protoIDString. Resetting stream.');
         await stream.reset();
         return null;
       }
-      
-      // DEBUG: Log protocol assignment
-      _log.warning(' [IDENTIFY-PROTOCOL-ASSIGN-START] Setting protocol scope and stream protocol for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
+
+      // Reset stream deadline after successful protocol negotiation
+      stream.setDeadline(DateTime.now().add(timeout));
 
       await stream.scope().setProtocol(selectedProtocol);
-
-      // DEBUG: Log stream protocol assignment
-      _log.warning(' [IDENTIFY-PROTOCOL-ASSIGN-STREAM] Setting stream protocol for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
-
       await stream.setProtocol(selectedProtocol);
-
-      // DEBUG: Log successful completion
-      _log.warning(' [IDENTIFY-STREAM-CREATE-COMPLETE] Stream creation and negotiation complete for peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
+      _log.fine(' [IDENTIFY-STREAM-READY] peer=$peerId, stream_id=${stream.id()}, protocol=$selectedProtocol');
 
       return stream;
     } catch (e, st) {
@@ -709,18 +665,37 @@ class IdentifyService implements IDService {
         _log.severe('[IdentifyService] PREMATURE_CLOSURE_CONTEXT: stream_id=${stream?.id() ?? 'null'}, protocol=$protoIDString, error_detail=$e');
       }
       
-      // This is a common race condition on shutdown, where the connection is closed
-      // between the check and the stream creation. It's not a critical error.
-      if (e.toString().contains('Bad state: Stream is closed')) {
-        _log.warning('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
-      } else {
-        _log.severe('IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
-      }
+      // Cleanup the stream if it was opened
       if (stream != null && !stream.isClosed) {
         _log.warning('IdentifyService._newStreamAndNegotiate: Resetting stream due to error for ${conn.remotePeer}.');
         await stream.reset();
       }
-      return null;
+      
+      // Check if this is a timeout-related exception
+      if (isTimeoutException(e)) {
+        _log.severe('[IdentifyService] TIMEOUT_DETECTED: peer=$peerId, duration=${totalDuration.inMilliseconds}ms');
+        throw IdentifyTimeoutException(
+          peerId: peerId,
+          message: 'Identify stream negotiation timed out for peer $peerId',
+          timeout: timeout,
+          cause: e,
+        );
+      }
+      
+      // This is a common race condition on shutdown, where the connection is closed
+      // between the check and the stream creation. It's not a critical error.
+      if (e.toString().contains('Bad state: Stream is closed')) {
+        _log.warning('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
+        return null;
+      }
+      
+      // For other errors, wrap in typed exception
+      _log.severe('IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
+      throw IdentifyStreamException(
+        peerId: peerId,
+        message: 'Error opening or negotiating stream with $peerId for $protoIDString',
+        cause: e,
+      );
     }
   }
 
@@ -755,6 +730,11 @@ class IdentifyService implements IDService {
     }
 
     try {
+      // Force a snapshot refresh to ensure we advertise all registered
+      // protocols.  The event-driven update (EvtLocalProtocolsUpdated) can
+      // be missed if the event bus subscription's async addSink hasn't
+      // completed when the event is emitted.
+      await _updateSnapshot();
       _log.finer('IdentifyService.sendIdentifyResp: Acquiring current snapshot for $peer.');
       final snapshot = await _currentSnapshotMutex.synchronized( () => _currentSnapshot);
       _log.fine('IdentifyService.sendIdentifyResp: Sending snapshot to $peer: seq=${snapshot._seq}, protocols=${snapshot.protocols.length}, addrs=${snapshot.addrs.length}');
@@ -843,35 +823,20 @@ class IdentifyService implements IDService {
     return mes;
   }
 
-  // Change to async and await the record
-  Future<Uint8List?> _getSignedRecord(IdentifySnapshot snapshot) async { // Made async, returns Future<Uint8List?>
-    _log.finer('IdentifyService._getSignedRecord: Attempting to get signed record. DisableSignedPeerRecord: $disableSignedPeerRecord, Snapshot record type: ${snapshot.record.runtimeType}');
+  Future<Uint8List?> _getSignedRecord(IdentifySnapshot snapshot) async {
+    _log.finer('IdentifyService._getSignedRecord: Attempting to get signed record. DisableSignedPeerRecord: $disableSignedPeerRecord, record is null: ${snapshot.record == null}');
     if (disableSignedPeerRecord) {
       _log.finer('IdentifyService._getSignedRecord: Signed peer record disabled.');
       return null;
     }
 
-    // Await the record if it's a Future
-    final actualRecord = snapshot.record is Future ? await snapshot.record : snapshot.record;
-
-    if (actualRecord == null) {
-      _log.finer('IdentifyService._getSignedRecord: Actual record is null after await.');
+    if (snapshot.record == null) {
+      _log.finer('IdentifyService._getSignedRecord: Record is null.');
       return null;
     }
 
-    // At this point, actualRecord should be an Envelope
-    if (actualRecord is! Envelope) {
-        _log.warning('IdentifyService._getSignedRecord: Record is not an Envelope. Type: ${actualRecord.runtimeType}');
-        return null;
-    }
-
     try {
-      // Now actualRecord is confirmed to be an Envelope
-      final marshalledRecord = await actualRecord.marshal(); // Envelope.marshal() is async
-      if (marshalledRecord == null) { // Check if marshal itself returned null
-          _log.warning('IdentifyService._getSignedRecord: Marshalled record is null.');
-          return null;
-      }
+      final marshalledRecord = await snapshot.record!.marshal();
       _log.finer('IdentifyService._getSignedRecord: Marshalled signed record successfully (${marshalledRecord.length} bytes).');
       return marshalledRecord;
     } catch (e, st) {
@@ -880,28 +845,38 @@ class IdentifyService implements IDService {
     }
   }
 
+  /// Writes a varint-length-prefixed protobuf message to the stream.
+  /// This matches go-libp2p's protoio.NewDelimitedWriter format.
+  Future<void> _writeDelimitedMsg(P2PStream stream, List<int> msgBytes) async {
+    final lenPrefix = MultiAddrCodec.encodeVarint(msgBytes.length);
+    final frame = Uint8List(lenPrefix.length + msgBytes.length);
+    frame.setRange(0, lenPrefix.length, lenPrefix);
+    frame.setRange(lenPrefix.length, frame.length, msgBytes);
+    await stream.write(frame);
+  }
+
   Future<void> _writeChunkedIdentifyMsg(P2PStream stream, Identify mes) async {
     final msgBytes = mes.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing to stream ${stream.id()} for peer ${stream.conn.remotePeer}. Total message size: ${msgBytes.length} bytes. SignedPeerRecord present: ${mes.signedPeerRecord.isNotEmpty}');
     if (mes.signedPeerRecord.isEmpty || msgBytes.length <= legacyIDSize) {
-      _log.finer('IdentifyService._writeChunkedIdentifyMsg: Sending as single message (size ${msgBytes.length} <= $legacyIDSize or no signed record).');
-      await stream.write(msgBytes);
+      _log.finer('IdentifyService._writeChunkedIdentifyMsg: Sending as single delimited message (size ${msgBytes.length}).');
+      await _writeDelimitedMsg(stream, msgBytes);
       _log.fine('IdentifyService._writeChunkedIdentifyMsg: Single message sent to ${stream.conn.remotePeer}.');
       return;
     }
-    
+
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Message size ${msgBytes.length} > $legacyIDSize and has signed record. Sending in chunks.');
     final sr = mes.signedPeerRecord;
     mes.signedPeerRecord = []; // Clear signed record for the first chunk
     final firstChunkBytes = mes.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing first chunk (${firstChunkBytes.length} bytes, without signed record) to ${stream.conn.remotePeer}.');
-    await stream.write(firstChunkBytes);
+    await _writeDelimitedMsg(stream, firstChunkBytes);
     _log.fine('IdentifyService._writeChunkedIdentifyMsg: First chunk sent to ${stream.conn.remotePeer}.');
 
     final srMsg = Identify()..signedPeerRecord = sr;
     final secondChunkBytes = srMsg.writeToBuffer();
     _log.finer('IdentifyService._writeChunkedIdentifyMsg: Writing second chunk (${secondChunkBytes.length} bytes, only signed record) to ${stream.conn.remotePeer}.');
-    await stream.write(secondChunkBytes);
+    await _writeDelimitedMsg(stream, secondChunkBytes);
     _log.fine('IdentifyService._writeChunkedIdentifyMsg: Second chunk (signed record) sent to ${stream.conn.remotePeer}.');
   }
 
@@ -992,55 +967,66 @@ class IdentifyService implements IDService {
     final peer = stream.conn.remotePeer;
     final readStart = DateTime.now();
 
-    
-    final finalMsg = Identify();
-    for (var i = 0; i < maxMessages; i++) {
-      final chunkStart = DateTime.now();
-
-      
-      try {
-
-        final data = await stream.read();
-        final chunkReadTime = DateTime.now().difference(chunkStart);
-        
-        if (data.isEmpty) {
-
-          break;
-        }
-        
-
-
-        
-        final mes = Identify.fromBuffer(data);
-        final chunkParseTime = DateTime.now().difference(chunkStart);
-
-        
-
-        _mergeIdentify(finalMsg, mes);
-        final chunkMergeTime = DateTime.now().difference(chunkStart);
-
-        
-      } catch (e) {
-        final chunkErrorTime = DateTime.now().difference(chunkStart);
-        _log.severe(' [READ-ALL-ID-MESSAGES-CHUNK-${i+1}-ERROR] Error reading chunk from peer=$peer, duration=${chunkErrorTime.inMilliseconds}ms, error=$e');
-        
-        // Check for specific stream closed / EOF conditions
-        if (e is StateError && (e.message.contains('remote side closed (EOF)') || e.message.contains('YamuxStreamState.closed') || e.message.contains('closed by remote') || e.message.contains('Stream is YamuxStreamState.reset'))) {
-
-             break;
-        }
-        if (e is StreamClosedException || (e is IOException && e.toString().contains('closed'))) { 
-
-          break;
-        }
-        _log.severe(' [READ-ALL-ID-MESSAGES-CHUNK-${i+1}-UNHANDLED] Unhandled error reading message chunk from peer=$peer: $e. Rethrowing.');
-        throw e;
-      }
-    }
-    
+    // Read a single varint-length-prefixed identify message.
+    // go-libp2p sends exactly one delimited protobuf message per identify exchange.
+    final buffer = BytesBuilder();
+    final msgBytes = await _readDelimitedMsg(stream, buffer);
     final totalReadTime = DateTime.now().difference(readStart);
 
-    return finalMsg;
+    if (msgBytes == null || msgBytes.isEmpty) {
+      _log.severe(' [READ-ALL-ID-MESSAGES] No identify message received from peer=$peer, duration=${totalReadTime.inMilliseconds}ms');
+      return Identify();
+    }
+
+    _log.fine(' [READ-ALL-ID-MESSAGES] Parsed identify from peer=$peer, ${msgBytes.length} bytes, duration=${totalReadTime.inMilliseconds}ms');
+    return Identify.fromBuffer(msgBytes);
+  }
+
+  /// Reads a single varint-length-prefixed message from the stream.
+  /// Uses [buffer] to accumulate partial reads and handle leftover bytes.
+  /// Returns null on EOF.
+  Future<Uint8List?> _readDelimitedMsg(P2PStream stream, BytesBuilder buffer) async {
+    while (true) {
+      final accumulated = buffer.toBytes();
+
+      // Try to decode varint length prefix from accumulated bytes
+      if (accumulated.isNotEmpty) {
+        try {
+          final (length, consumed) = MultiAddrCodec.decodeVarint(accumulated);
+          if (consumed > 0 && accumulated.length >= consumed + length) {
+            // We have the full message
+            final msgBytes = Uint8List.fromList(
+                accumulated.sublist(consumed, consumed + length));
+            // Put leftover bytes back in buffer
+            buffer.clear();
+            if (accumulated.length > consumed + length) {
+              buffer.add(accumulated.sublist(consumed + length));
+            }
+            return msgBytes;
+          }
+        } catch (e) {
+          // Incomplete varint, need more data
+          if (e is! RangeError) rethrow;
+        }
+      }
+
+      // Need more data from stream
+      try {
+        final chunk = await stream.read();
+        if (chunk.isEmpty) {
+          return null;
+        }
+        buffer.add(chunk);
+      } catch (e) {
+        if (accumulated.isNotEmpty) {
+          // Stream closed with data in buffer — try parsing as-is
+          // (fallback for Dart-to-Dart which may not use length framing yet)
+          buffer.clear();
+          return Uint8List.fromList(accumulated);
+        }
+        rethrow;
+      }
+    }
   }
 
   void _mergeIdentify(Identify target, Identify source) {
@@ -1076,7 +1062,7 @@ class IdentifyService implements IDService {
 
     final (added, removed) = _diff(supported, mesProtocols);
     _log.fine('IdentifyService._consumeMessage: For peer $p - Added protocols: ${added.length}, Removed protocols: ${removed.length}');
-    host.peerStore.protoBook.setProtocols(p, mesProtocols);
+    await host.peerStore.protoBook.setProtocols(p, mesProtocols);
 
     if (isPush) {
       _log.fine('IdentifyService._consumeMessage: Emitting EvtPeerProtocolsUpdated for $p due to PUSH.');
@@ -1415,6 +1401,14 @@ class IdentifyService implements IDService {
       var entry = _conns[conn];
 
       if (entry != null) {
+        // OPTIMIZATION: If identify already succeeded for this connection, return immediately.
+        // This prevents re-running identify on every newStream call, which would cause
+        // 30-second timeouts when the connection is stale.
+        if (entry.identifySucceeded) {
+          _log.fine(' [IDENTIFY-WAIT-ALREADY-SUCCEEDED] Peer $peerId already identified on this connection, skipping');
+          // completerToAwait remains null, so function will return immediately
+          return;
+        }
 
         if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
 
@@ -1458,9 +1452,34 @@ class IdentifyService implements IDService {
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
       _log.warning(' [IDENTIFY-WAIT-ERROR] Identify completer for peer=$peerId completed with error, total_duration=${totalDuration.inMilliseconds}ms, error=$e\n$st');
-      // The error should have been emitted by _spawnIdentifyConn.
-      // Rethrow if this path needs to signal failure upwards.
-      // For now, just log, as the event bus should have handled it.
+      
+      // Handle timeout exceptions gracefully.
+      // A timeout indicates the peer is unreachable, not a security concern.
+      // The failure event has already been emitted by _spawnIdentifyConn's catchError,
+      // so applications can listen for EvtPeerIdentificationFailed if needed.
+      // Rethrowing typed IdentifyTimeoutException allows callers to specifically handle timeouts.
+      if (e is IdentifyTimeoutException) {
+        _log.warning(' [IDENTIFY-WAIT-TIMEOUT] Identify timeout for peer=$peerId handled gracefully. Rethrowing typed exception for caller to handle.');
+        rethrow;
+      }
+      
+      // Also handle timeout detection from generic exceptions
+      if (isTimeoutException(e)) {
+        _log.warning(' [IDENTIFY-WAIT-TIMEOUT-DETECTED] Identify timeout detected for peer=$peerId. Converting to typed exception.');
+        throw IdentifyTimeoutException(
+          peerId: peerId,
+          message: 'Identify timed out for peer $peerId',
+          cause: e,
+        );
+      }
+      
+      // CRITICAL SECURITY FIX: For non-timeout errors, we MUST rethrow.
+      // If identify fails (other than timeout), the connection is unverified 
+      // and potentially insecure (missing keys/metadata).
+      // Callers (like BasicHost.connect or newStream) expect identifyWait to complete successfully
+      // before proceeding. If we swallow the error, they proceed with a degraded connection.
+      // By rethrowing, we ensure BasicHost aborts the connection.
+      rethrow;
     }
   }
 
@@ -1476,6 +1495,10 @@ class IdentifyService implements IDService {
 
     _identifyConn(conn).then((_) {
       final duration = DateTime.now().difference(spawnStart);
+
+      // Mark identify as succeeded - subsequent calls to identifyWait will skip re-identification
+      entry.identifySucceeded = true;
+      _log.fine(' [SPAWN-IDENTIFY-SUCCESS] Identify succeeded for peer=$peerId, duration=${duration.inMilliseconds}ms');
 
       if (!entry.identifyWaitCompleter!.isCompleted) {
 
@@ -1514,7 +1537,10 @@ class IdentifyService implements IDService {
       final streamNegotiationDuration = DateTime.now().difference(identifyStart);
       if (stream == null) {
         _log.severe(' [IDENTIFY-CONN-STREAM-FAILED] peer=$peerId, duration=${streamNegotiationDuration.inMilliseconds}ms, reason=stream_negotiation_failed');
-        throw Exception('Failed to open or negotiate identify stream with $peerId');
+        throw IdentifyStreamException(
+          peerId: peerId,
+          message: 'Failed to open or negotiate identify stream with $peerId',
+        );
       }
       
 
@@ -1683,9 +1709,9 @@ class _NetNotifiee implements Notifiee {
   _NetNotifiee(this._ids);
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     final peerId = conn.remotePeer;
-    _log.fine('Identify.Notifiee.connected: Connection established with $peerId. Conn ID: ${conn.id}, Direction: ${conn.stat.stats.direction}');
+    _log.fine('[IDENTIFY-DIAG] Notifiee.connected: peer=$peerId connID=${conn.id} direction=${conn.stat.stats.direction} transport=${conn.state.transport} security=${conn.state.security} mux=${conn.state.streamMultiplexer}');
     await _ids._connsMutex.synchronized(() async {
       _log.finer('Identify.Notifiee.connected: Acquired _connsMutex for $peerId.');
       _ids._addConnWithLock(conn); // Ensure entry exists
@@ -1695,7 +1721,25 @@ class _NetNotifiee implements Notifiee {
     // IDENTIFY PROTOCOL COORDINATION FIX:
     // Only the dialer (outbound connection initiator) should start identify protocol
     // to prevent bidirectional race conditions where both peers create identify streams simultaneously
-    if (conn.stat.stats.direction == Direction.outbound) {
+
+    // Skip identify for relay connections. The inbound side's counter-identify
+    // exchange fails (DATA frames don't arrive in time), causing a 30s timeout.
+    // Relay connections are already Noise-authenticated, so identify is not required.
+    final connTransport = conn.state.transport;
+    final isRelayConn = connTransport == 'circuit-relay';
+    if (isRelayConn) {
+      _log.fine('[IDENTIFY-COORDINATION] Relay connection to $peerId (${conn.stat.stats.direction}) — skipping identify');
+      // Mark identify as succeeded so identifyWait returns immediately
+      await _ids._connsMutex.synchronized(() async {
+        final entry = _ids._conns[conn];
+        if (entry != null) {
+          entry.identifySucceeded = true;
+          if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
+            entry.identifyWaitCompleter!.complete();
+          }
+        }
+      });
+    } else if (conn.stat.stats.direction == Direction.outbound) {
       _log.fine('🔧 [IDENTIFY-COORDINATION] Outbound connection to $peerId. This peer is the DIALER - initiating identify protocol.');
       // Don't await here to avoid blocking the notifiee callback.
       // identifyWait itself handles its asynchronous nature.
@@ -1735,6 +1779,14 @@ class _NetNotifiee implements Notifiee {
       default:
         _log.finer('Identify.Notifiee.disconnected: Peer $peerId not connected/limited. Processing addresses for recently disconnected.');
         break;
+    }
+
+    // Check if peer is protected (e.g., gossipsub mesh, DHT routing table, app services)
+    // Protected peers should not have their addresses downgraded
+    final isProtected = _ids.host.connManager.isProtected(peerId, '');
+    if (isProtected) {
+      _log.fine('Identify.Notifiee.disconnected: Peer $peerId is protected, preserving addresses at connectedAddrTTL');
+      return;
     }
 
     final addrs = await _ids.host.peerStore.addrBook.addrs(peerId);

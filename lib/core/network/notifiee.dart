@@ -12,7 +12,8 @@ abstract class Notifiee {
   void listenClose(Network network, MultiAddr addr);
   
   /// Called when a connection opened
-  Future<void> connected(Network network, Conn conn);
+  /// [dialLatency] is provided for outbound connections when timing is available
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency});
   
   /// Called when a connection closed
   Future<void> disconnected(Network network, Conn conn);
@@ -28,8 +29,8 @@ class NotifyBundle implements Notifiee {
   /// Function called when network stops listening on an addr
   final void Function(Network, MultiAddr)? listenCloseF;
   
-  /// Function called when a connection opened
-  final void Function(Network, Conn)? connectedF;
+  /// Function called when a connection opened (with optional dial latency)
+  final void Function(Network, Conn, {Duration? dialLatency})? connectedF;
   
   /// Function called when a connection closed
   final void Function(Network, Conn)? disconnectedF;
@@ -57,9 +58,9 @@ class NotifyBundle implements Notifiee {
   }
   
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     if (connectedF != null) {
-      connectedF!(network, conn);
+      connectedF!(network, conn, dialLatency: dialLatency);
     }
   }
   
@@ -77,7 +78,7 @@ final NoopNotifiee globalNoopNotifiee = NoopNotifiee();
 /// NoopNotifiee is a no-op implementation of Notifiee
 class NoopNotifiee implements Notifiee {
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     return await Future.delayed(Duration(milliseconds: 10));
   }
   

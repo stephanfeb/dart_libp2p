@@ -7,11 +7,12 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
+import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:dart_libp2p/p2p/transport/upgrader.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 
-@GenerateMocks([Host, Upgrader, ConnManager, P2PStream, Conn])
+@GenerateMocks([Host, Upgrader, ConnManager, P2PStream, Conn, Peerstore])
 import 'client_test.mocks.dart';
 
 void main() {
@@ -35,9 +36,6 @@ void main() {
 
     group('Initialization', () {
       test('should start and register STOP protocol handler', () async {
-        // Arrange
-        when(mockHost.setStreamHandler(any, any)).thenReturn(null);
-
         // Act
         await client.start();
 
@@ -50,9 +48,6 @@ void main() {
 
       test('should stop and remove protocol handler', () async {
         // Arrange
-        when(mockHost.removeStreamHandler(any)).thenReturn(null);
-        when(mockHost.setStreamHandler(any, any)).thenReturn(null);
-        
         await client.start();
 
         // Act
@@ -203,9 +198,8 @@ void main() {
         // Act
         final protocols = client.protocols;
 
-        // Assert
-        expect(protocols, contains(CircuitV2Protocol.protoIDv2Hop));
-        expect(protocols, contains(CircuitV2Protocol.protoIDv2Stop));
+        // Assert - protocols returns the transport protocol identifier
+        expect(protocols, contains('/p2p-circuit'));
       });
 
       test('should return correct protocol ID', () {
@@ -323,23 +317,22 @@ void main() {
     group('Integration with Host', () {
       test('should access host peerstore correctly', () {
         // Arrange
-        when(mockHost.peerStore).thenReturn(null as dynamic);
+        final mockPeerstore = MockPeerstore();
+        when(mockHost.peerStore).thenReturn(mockPeerstore);
 
         // Act
-        // Accessing peerstore property
-        client.peerstore;
+        final result = client.peerstore;
 
         // Assert
+        expect(result, equals(mockPeerstore));
         verify(mockHost.peerStore).called(1);
       });
     });
 
     group('Lifecycle Management', () {
       test('close should stop the client', () async {
-        // Arrange
-        when(mockHost.setStreamHandler(any, any)).thenReturn(null);
-        when(mockHost.removeStreamHandler(any)).thenReturn(null);
-        
+        // Arrange - void methods don't need stubbing with mockito
+
         await client.start();
 
         // Act
@@ -351,21 +344,15 @@ void main() {
       });
 
       test('should handle multiple start calls gracefully', () async {
-        // Arrange
-        when(mockHost.setStreamHandler(any, any)).thenReturn(null);
-
         // Act - Start twice
         await client.start();
         await client.start();
 
-        // Assert - Handler should be registered (implementation dependent)
-        verify(mockHost.setStreamHandler(any, any)).called(greaterThan(0));
+        // Assert - Handler should be registered twice
+        verify(mockHost.setStreamHandler(any, any)).called(2);
       });
 
       test('should handle stop before start gracefully', () async {
-        // Arrange
-        when(mockHost.removeStreamHandler(any)).thenReturn(null);
-
         // Act & Assert - Should not throw
         expect(() async => await client.stop(), returnsNormally);
       });

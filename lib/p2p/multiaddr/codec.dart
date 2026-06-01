@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'protocol.dart';
 import 'validator.dart';
 
@@ -20,6 +21,11 @@ class MultiAddrCodec {
         return _encodePort(value);
       case 'unix':
         return _encodePath(value);
+      case 'p2p':
+      case 'ipfs':
+        // The p2p protocol value is a peer ID string; encode it to raw multihash bytes.
+        final peerId = PeerId.fromString(value);
+        return peerId.toBytes();
       default:
         if (protocol.size == 0) { // Protocol has no value component
           return Uint8List(0);
@@ -44,6 +50,11 @@ class MultiAddrCodec {
         return _decodePort(bytes);
       case 'unix':
         return _decodePath(bytes);
+      case 'p2p':
+      case 'ipfs':
+        // The p2p protocol value is raw multihash bytes encoding a peer ID.
+        final peerId = PeerId.fromBytes(Uint8List.fromList(bytes));
+        return peerId.toString();
       default:
         if (protocol.size == 0) { // Protocol has no value component
           return '';

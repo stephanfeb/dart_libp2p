@@ -227,7 +227,7 @@ void main() {
         mockAutoNATv2,
         config: AmbientAutoNATv2Config(
           bootDelay: const Duration(milliseconds: 100),
-          retryInterval: const Duration(milliseconds: 200),
+          retryInterval: const Duration(milliseconds: 300),
           refreshInterval: const Duration(seconds: 5),
         ),
       );

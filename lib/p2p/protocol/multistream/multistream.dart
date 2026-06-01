@@ -16,6 +16,8 @@ import 'package:logging/logging.dart'; // Added import for Logger
 
 import '../../../core/network/conn.dart'; // Added import for Conn
 import '../../transport/multiplexing/yamux/yamux_exceptions.dart'; // Import Yamux exception handling
+import '../../transport/multiplexing/yamux/stream.dart'; // For YamuxStream.pushData
+import '../../network/swarm/swarm_stream.dart'; // For SwarmStream.incoming
 
 final _log = Logger('multistream'); // Added logger instance
 
@@ -68,6 +70,10 @@ class MultistreamMuxer implements ProtocolSwitch {
   
   /// Configuration for multistream operations
   final MultistreamConfig config;
+
+  /// Leftover bytes from _actualReadDelimited, keyed by stream ID.
+  /// When a single read returns multiple messages, the extra bytes are stored here.
+  final Map<String, Uint8List> _leftoverMap = {};
   
   /// Creates a new MultistreamMuxer with optional configuration
   MultistreamMuxer({
@@ -189,8 +195,23 @@ class MultistreamMuxer implements ProtocolSwitch {
   
   @override
   Future<void> handle(P2PStream<dynamic> stream) async {
-    final (proto, handler) = await negotiate(stream);
-    
+    late final ProtocolID proto;
+    late final HandlerFunc handler;
+    try {
+      final result = await negotiate(stream);
+      proto = result.$1;
+      handler = result.$2;
+    } catch (e) {
+      // Clean up any leftover bytes on negotiation failure
+      _leftoverMap.remove(stream.id());
+      rethrow;
+    }
+
+    // After negotiation, inject any leftover bytes back into the stream.
+    // This handles the case where Go sends protocol negotiation + application data
+    // in the same TCP segment.
+    _injectLeftover(stream);
+
     // Ensure the stream is valid before proceeding
     if (stream.isClosed) {
         _log.warning('[multistreamMuxer - handle] Stream for protocol $proto was closed during or immediately after negotiation. Aborting handler call.');
@@ -199,22 +220,62 @@ class MultistreamMuxer implements ProtocolSwitch {
 
     try {
              _log.fine('[multistreamMuxer - handle] Protocol $proto negotiated. Attempting to set protocol on stream scope and stream itself.');
-             // Set on the scope for resource management
-             await stream.scope().setProtocol(proto); 
-             // Also set on the stream itself for application access
+             await stream.scope().setProtocol(proto);
              await stream.setProtocol(proto);
              _log.fine('[multistreamMuxer - handle] Successfully set protocol $proto on stream scope and stream. Proceeding to call handler.');
            } catch (e, s) {
              _log.severe('[multistreamMuxer - handle] CRITICAL: Error occurred while setting protocol $proto on stream scope/stream: $e\n$s. Resetting stream and not calling handler.');
-      // If setProtocol fails (e.g., resource limits), we should not proceed to the handler.
-      await stream.reset(); 
-      // Depending on desired error propagation, you might rethrow or just log.
-      // For now, rethrowing makes the failure visible.
-      rethrow; 
+      await stream.reset();
+      rethrow;
     }
-    
+
     // Only call the handler if setProtocol was successful
     return handler(proto, stream);
+  }
+
+  /// Injects any leftover bytes from multistream negotiation back into the stream's
+  /// read buffer, so that application-level reads get the correct data.
+  ///
+  /// If injection fails (stream type does not support pushData), the leftover
+  /// is retained in [_leftoverMap] so the caller can retrieve it via [drainLeftover].
+  void _injectLeftover(P2PStream<dynamic> stream) {
+    final streamId = stream.id();
+    final leftover = _leftoverMap[streamId];
+    if (leftover == null || leftover.isEmpty) {
+      _leftoverMap.remove(streamId);
+      return;
+    }
+
+    _log.fine('[multistreamMuxer] Injecting ${leftover.length} leftover bytes back into stream $streamId');
+    // Navigate through SwarmStream wrapper to get the underlying YamuxStream
+    dynamic target = stream;
+    // SwarmStream wraps _underlyingMuxedStream, which delegates to YamuxStream
+    if (target is SwarmStream) {
+      target = target.incoming;
+    }
+    if (target is YamuxStream) {
+      target.pushData(leftover);
+      _leftoverMap.remove(streamId); // Only remove after successful injection
+    } else {
+      // Retain in map so caller can retrieve via drainLeftover()
+      _log.warning('[multistreamMuxer] Cannot inject leftover bytes into stream type ${target.runtimeType}. '
+          'Retaining ${leftover.length} bytes in leftoverMap for drainLeftover().');
+    }
+  }
+
+  /// Drains any leftover bytes accumulated during multistream negotiation
+  /// for the given [streamId]. Returns null if no leftover exists.
+  ///
+  /// Used by the connection upgrader to recover bytes that were read during
+  /// multistream-select but belong to the next protocol layer (e.g., Noise
+  /// handshake bytes that arrived in the same transport chunk as the final
+  /// multistream negotiation message).
+  Uint8List? drainLeftover(String streamId) {
+    final leftover = _leftoverMap.remove(streamId);
+    if (leftover != null && leftover.isNotEmpty) {
+      _log.fine('[multistreamMuxer] Drained ${leftover.length} leftover bytes for stream $streamId');
+    }
+    return leftover;
   }
 
   /// Selects one of the given protocols with the remote peer.
@@ -238,10 +299,13 @@ class MultistreamMuxer implements ProtocolSwitch {
     
     try {
       // 1. Send our multistream protocol ID
+      _log.fine('[MSS-DIAG] selectOneOf: BEFORE first _writeDelimited (multistream header) stream=$streamId peer=$peerInfo');
       await _writeDelimited(stream, utf8.encode(protocolID));
+      _log.fine('[MSS-DIAG] selectOneOf: AFTER first _writeDelimited, BEFORE _readNextToken stream=$streamId peer=$peerInfo');
 
       // 2. Read their multistream protocol ID
       final remoteProtoID = await _readNextToken(stream);
+      _log.fine('[MSS-DIAG] selectOneOf: AFTER _readNextToken got="$remoteProtoID" stream=$streamId peer=$peerInfo');
 
       if (remoteProtoID != protocolID) {
 
@@ -359,40 +423,29 @@ class MultistreamMuxer implements ProtocolSwitch {
     );
   }
 
-  /// Internal method that performs the actual read operation without timeout
+  /// Internal method that performs the actual read operation without timeout.
+  /// Handles leftover bytes from previous reads to support multiple messages
+  /// arriving in a single TCP segment (common with go-libp2p).
   Future<Uint8List> _actualReadDelimited(P2PStream<dynamic> stream) async {
     final buffer = BytesBuilder();
-    int length = -1;
-    int bytesRead = 0;
     int varintBytesRead = 0;
     bool lengthDecoded = false;
+    int length = -1;
+
+    // Start with any leftover bytes from previous call on this stream
+    final streamId = stream.id();
+    final leftover = _leftoverMap.remove(streamId);
+    if (leftover != null && leftover.isNotEmpty) {
+      buffer.add(leftover);
+    }
 
     while (true) {
-      // Check stream state before each read
-      if (stream.isClosed) {
-        _log.warning('[multistream] Stream closed during read operation');
-        throw FormatException('Stream closed during read operation');
-      }
-      
-      final chunk = await stream.read();
-      
-      // Handle EOF gracefully
-      if (chunk.isEmpty) {
-        if (stream.isClosed) {
-          _log.warning('[multistream] Stream closed during read operation');
-          throw FormatException('Stream closed during read operation');
-        }
-        throw FormatException('Unexpected end of stream');
-      }
+      // Try to decode from what we have before reading more
+      final accumulated = buffer.toBytes();
 
-      buffer.add(chunk);
-      bytesRead += chunk.length;
-
-      if (!lengthDecoded) {
-        // Try to decode varint from the buffer
+      if (!lengthDecoded && accumulated.isNotEmpty) {
         try {
-          final (decodedLength, consumed) = MultiAddrCodec.decodeVarint(
-              buffer.toBytes());
+          final (decodedLength, consumed) = MultiAddrCodec.decodeVarint(accumulated);
           if (consumed > 0) {
             length = decodedLength;
             lengthDecoded = true;
@@ -403,26 +456,37 @@ class MultistreamMuxer implements ProtocolSwitch {
             }
           }
         } catch (e) {
-          // Not enough bytes yet to decode varint, continue reading
-          if (e is! RangeError) {
-            rethrow;
-          }
+          if (e is! RangeError) rethrow;
         }
       }
 
-      if (lengthDecoded) {
-        if (bytesRead >= length + varintBytesRead) {
-          // We have read at least the full message + varint
-          final fullMessage = buffer.toBytes();
-          if (fullMessage.length > length + varintBytesRead &&
-              fullMessage[length + varintBytesRead - 1] != 10) {
-            throw FormatException('Message did not have trailing newline');
-          }
-          // Return the message without the varint and newline
-          return Uint8List.fromList(fullMessage.sublist(
-              varintBytesRead, length + varintBytesRead - 1));
+      if (lengthDecoded && accumulated.length >= length + varintBytesRead) {
+        final totalMessageSize = varintBytesRead + length;
+        // Save leftover bytes for next call
+        if (accumulated.length > totalMessageSize) {
+          _leftoverMap[streamId] = Uint8List.fromList(accumulated.sublist(totalMessageSize));
         }
+        // Return message without varint prefix and trailing newline
+        return Uint8List.fromList(
+            accumulated.sublist(varintBytesRead, varintBytesRead + length - 1));
       }
+
+      // Need more data
+      if (stream.isClosed) {
+        _log.warning('[multistream] Stream closed during read operation');
+        throw FormatException('Stream closed during read operation');
+      }
+
+      final chunk = await stream.read();
+
+      if (chunk.isEmpty) {
+        if (stream.isClosed) {
+          throw FormatException('Stream closed during read operation');
+        }
+        throw FormatException('Unexpected end of stream');
+      }
+
+      buffer.add(chunk);
     }
   }
   

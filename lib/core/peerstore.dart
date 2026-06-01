@@ -30,7 +30,9 @@ class AddressTTL {
 
   /// Used when we recently connected to a peer.
   /// It means that we are reasonably certain of the peer's address.
-  static const Duration recentlyConnectedAddrTTL = Duration(minutes: 15);
+  /// Increased to 4 hours to support persistent connections and prevent
+  /// premature address expiration for gossipsub mesh and DHT routing peers.
+  static const Duration recentlyConnectedAddrTTL = Duration(hours: 4);
 
   /// Used for our own external addresses observed by peers.
   /// Deprecated: observed addresses are maintained till we disconnect from the peer which provided it
@@ -208,13 +210,13 @@ abstract class ProtoBook {
   Future<List<ProtocolID>> getProtocols(PeerId id);
 
   /// AddProtocols adds the given protocols to the peer.
-  void addProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> addProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// SetProtocols sets the protocols for the given peer (replacing any previously stored protocols).
-  void setProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> setProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// RemoveProtocols removes the given protocols from the peer.
-  void removeProtocols(PeerId id, List<ProtocolID> protocols);
+  Future<void> removeProtocols(PeerId id, List<ProtocolID> protocols);
 
   /// SupportsProtocols returns the set of protocols the peer supports from among the given protocols.
   /// If the returned error is not null, the result is indeterminate.

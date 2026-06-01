@@ -24,6 +24,7 @@ export 'core/event/addrs.dart';
 export 'core/event/bus.dart';
 export 'core/event/dht.dart';
 export 'core/event/identify.dart';
+export 'p2p/protocol/identify/identify_exceptions.dart'; // Typed identify exceptions
 export 'core/event/nattype.dart' hide NATTransportProtocol, NATDeviceType;
 export 'core/event/protocol.dart';
 export 'core/event/reachability.dart';

@@ -15,6 +15,7 @@ import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart' as core_protocol; // Alias to avoid conflict with multiaddr.Protocol
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
+import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/yamux_exceptions.dart';
 
 // Mock implementations for dependencies
 class MockPeerId extends PeerId {
@@ -265,7 +266,7 @@ class MockConn implements Conn {
   @override
   MultiAddr get remoteMultiaddr => MockMultiaddr('/ip4/127.0.0.1/tcp/54321');
   @override
-  PeerId get remotePeer => MockPeerId('remote_mock_peer');
+  PeerId get remotePeer => MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx');
   @override
   Future<PublicKey?> get remotePublicKey async => null;
   @override
@@ -306,6 +307,8 @@ void main() {
         initialWindowSize: 256 * 1024, // 256KB
         sendFrame: sendFrame,
         parentConn: mockConn,
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024, // 64KB default
       );
     });
 
@@ -325,16 +328,16 @@ void main() {
       expect(sentFrames.length, equals(1));
       expect(sentFrames[0].type, equals(YamuxFrameType.windowUpdate));
       expect(sentFrames[0].streamId, equals(1));
-      expect(sentFrames[0].data.buffer.asByteData().getUint32(0, Endian.big), equals(256 * 1024));
+      expect(sentFrames[0].length, equals(256 * 1024));
     });
 
     test('throws when writing to unopened stream', () async {
       final data = Uint8List.fromList([1, 2, 3]);
-      expect(() => stream.write(data), throwsA(isA<StateError>()));
+      expect(() => stream.write(data), throwsA(isA<YamuxStreamStateException>()));
     });
 
     test('throws when reading from unopened stream', () async {
-      expect(() => stream.read(), throwsA(isA<StateError>()));
+      expect(() => stream.read(), throwsA(isA<YamuxStreamStateException>()));
     });
 
     test('basic window size behavior', () async {
@@ -349,6 +352,8 @@ void main() {
         initialWindowSize: 10, // Start with just 10 bytes
         sendFrame: sendFrame,
         parentConn: mockConn,
+        remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+        maxFrameSize: 64 * 1024,
       );
       await stream.open();
       sentFrames.clear();
@@ -435,6 +440,8 @@ void main() {
           initialWindowSize: 64 * 1024, // 64KB
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -514,6 +521,8 @@ void main() {
           initialWindowSize: 1024, // 1KB
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -586,17 +595,27 @@ void main() {
       });
 
       test('handles remote closure', () async {
+        // Open stream only if not already open
+        if (stream.streamState == YamuxStreamState.init) {
+          await stream.open();
+        }
+        sentFrames.clear();
+        
         // Send FIN frame from remote
         final frame = YamuxFrame.createData(1, Uint8List(0), fin: true);
         await stream.handleFrame(frame);
 
-        // Verify stream closed
+        // Verify stream transitioned to closing state
         expect(stream.streamState, equals(YamuxStreamState.closing));
         expect(stream.isClosed, isTrue);
 
-        // Verify operations throw
-        expect(() => stream.write(Uint8List(1)), throwsA(isA<StateError>()));
-        expect(() => stream.read(), throwsA(isA<StateError>()));
+        // With half-close, local can still write after remote sends FIN
+        await stream.write(Uint8List.fromList([1, 2, 3]));
+        expect(sentFrames.isNotEmpty, isTrue);
+        
+        // Reads should return EOF since remote closed its write side
+        final readResult = await stream.read();
+        expect(readResult.isEmpty, isTrue);
       });
 
       test('closes cleanly with pending reads', () async {
@@ -640,6 +659,8 @@ void main() {
           initialWindowSize: 1024,
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
         await stream.open();
         sentFrames.clear();
@@ -661,11 +682,11 @@ void main() {
         expect(stream.streamState, equals(YamuxStreamState.closed));
         expect(stream.isClosed, isTrue);
 
-        // Try to read (should result in StateError, sync or async)
-        expect(stream.read(), throwsA(isA<StateError>()));
+        // Try to read (should result in YamuxStreamStateException, sync or async)
+        expect(stream.read(), throwsA(isA<YamuxStreamStateException>()));
 
-        // Try to write (should result in StateError, sync or async)
-        expect(stream.write(data), throwsA(isA<StateError>()));
+        // Try to write (should result in YamuxStreamStateException, sync or async)
+        expect(stream.write(data), throwsA(isA<YamuxStreamStateException>()));
       });
 
       test('minimal closure test', () async {
@@ -676,6 +697,8 @@ void main() {
           initialWindowSize: 1024,
           sendFrame: sendFrame,
           parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
         );
 
         // Don't even open the stream, just close it
@@ -708,7 +731,8 @@ void main() {
         expect(stream.streamState, equals(YamuxStreamState.reset));
         expect(stream.isClosed, isTrue);
         expect(sentFrames.length, equals(1));
-        expect(sentFrames[0].type, equals(YamuxFrameType.reset));
+        expect(sentFrames[0].type, equals(YamuxFrameType.windowUpdate));
+        expect(sentFrames[0].flags & YamuxFlags.rst, equals(YamuxFlags.rst));
       });
 
       test('handles invalid frame types', () async {
@@ -732,6 +756,232 @@ void main() {
 
         // Should not throw, but should ignore the data
         await stream.handleFrame(frame);
+        expect(stream.streamState, equals(YamuxStreamState.closed));
+      });
+    });
+
+    group('Half-Close Functionality', () {
+      test('closeWrite() sends FIN and prevents further writes', () async {
+        final mockConn = MockConn();
+        final sentFrames = <YamuxFrame>[];
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {
+            sentFrames.add(frame);
+          },
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream.open();
+        sentFrames.clear(); // Clear the initial window update
+        await stream.closeWrite();
+        
+        // Verify FIN frame was sent
+        expect(sentFrames.length, equals(1));
+        expect(sentFrames[0].type, equals(YamuxFrameType.dataFrame));
+        expect(sentFrames[0].flags & YamuxFlags.fin, equals(YamuxFlags.fin));
+        expect(sentFrames[0].data.isEmpty, isTrue);
+        
+        // Verify further writes throw error
+        expect(
+          () => stream.write([1, 2, 3]),
+          throwsStateError,
+        );
+      });
+
+      test('closeWrite() allows continued reads', () async {
+        final mockConn = MockConn();
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {},
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream.open();
+        await stream.closeWrite();
+        
+        // Should still be able to receive data
+        final testData = Uint8List.fromList([10, 20, 30]);
+        final dataFrame = YamuxFrame.createData(1, testData);
+        await stream.handleFrame(dataFrame);
+        
+        final received = await stream.read();
+        expect(received, equals(testData));
+      });
+
+      test('bidirectional half-close with independent write closure', () async {
+        final mockConn = MockConn();
+        final sentFrames = <YamuxFrame>[];
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {
+            sentFrames.add(frame);
+          },
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream.open();
+        sentFrames.clear(); // Clear the initial window update
+        
+        // Local closeWrite
+        await stream.closeWrite();
+        expect(sentFrames.length, equals(1));
+        expect(sentFrames[0].flags & YamuxFlags.fin, equals(YamuxFlags.fin));
+        
+        // Remote can still send data
+        final testData = Uint8List.fromList([40, 50, 60]);
+        final dataFrame = YamuxFrame.createData(1, testData);
+        await stream.handleFrame(dataFrame);
+        
+        final received = await stream.read();
+        expect(received, equals(testData));
+        
+        // Remote closes its write side
+        final remoteFin = YamuxFrame.createData(1, Uint8List(0), fin: true);
+        await stream.handleFrame(remoteFin);
+        
+        // Stream should be in closing state (both FINs exchanged)
+        // The stream remains in closing state until all data is consumed via read()
+        // This prevents data loss in relay scenarios where one direction may still have
+        // pending data to read even after both FINs are exchanged.
+        expect(stream.streamState, equals(YamuxStreamState.closing));
+        
+        // Reading EOF triggers cleanup when both FINs sent and queue is empty
+        final eof = await stream.read();
+        expect(eof.isEmpty, isTrue);
+        
+        // Now the stream should be fully closed
+        expect(stream.streamState, equals(YamuxStreamState.closed));
+      });
+
+      test('receiving FIN transitions to closing state', () async {
+        final mockConn = MockConn();
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {},
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        // Initial state should be init
+        expect(stream.streamState, equals(YamuxStreamState.init));
+        
+        // Receive FIN from remote
+        final finFrame = YamuxFrame.createData(1, Uint8List(0), fin: true);
+        await stream.handleFrame(finFrame);
+        
+        // Should transition to closing state
+        expect(stream.streamState, equals(YamuxStreamState.closing));
+        
+        // Test that local can still write after receiving remote FIN
+        final sentFrames2 = <YamuxFrame>[];
+        final stream2 = YamuxStream(
+          id: 2,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {
+            sentFrames2.add(frame);
+          },
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream2.open();
+        sentFrames2.clear();
+        
+        // Receive FIN from remote
+        final finFrame2 = YamuxFrame.createData(2, Uint8List(0), fin: true);
+        await stream2.handleFrame(finFrame2);
+        
+        expect(stream2.streamState, equals(YamuxStreamState.closing));
+        
+        // Can still write after receiving FIN
+        await stream2.write([2, 3, 4]);
+        expect(sentFrames2.isNotEmpty, isTrue, reason: 'Write after receiving FIN should send data frames');
+      });
+
+      test('closeRead() completes pending read with EOF', () async {
+        final mockConn = MockConn();
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {},
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream.open();
+        
+        // Start a pending read
+        final readFuture = stream.read();
+        
+        // Close read side
+        await stream.closeRead();
+        
+        // Pending read should complete with EOF
+        final result = await readFuture;
+        expect(result.isEmpty, isTrue);
+        
+        // Future reads should also return EOF
+        final result2 = await stream.read();
+        expect(result2.isEmpty, isTrue);
+      });
+
+      test('full close after closeWrite() works correctly', () async {
+        final mockConn = MockConn();
+        final sentFrames = <YamuxFrame>[];
+        
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {
+            sentFrames.add(frame);
+          },
+          parentConn: mockConn,
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        
+        await stream.open();
+        sentFrames.clear(); // Clear the initial window update
+        await stream.closeWrite();
+        expect(sentFrames.length, equals(1));
+        
+        await stream.close();
+        
+        // close() should send another FIN if not already in closing state
+        // or just do cleanup if already sent FIN
         expect(stream.streamState, equals(YamuxStreamState.closed));
       });
     });

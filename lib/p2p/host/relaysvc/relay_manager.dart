@@ -28,6 +28,9 @@ class RelayManager {
   Completer<void>? _backgroundCompleter;
 
   static final _log = Logger('RelayManager');
+  
+  /// Returns the active relay service instance, if running
+  Relay? get activeRelay => _activeRelay;
 
   /// Private constructor for RelayManager.
   RelayManager._(this._host, this._relayResourcesConfig);

@@ -38,6 +38,7 @@ import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
 import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/client/metrics_observer.dart';
 
 final Logger _logger = Logger('Config');
 
@@ -105,6 +106,13 @@ class Config {
   
   // Relay server configuration
   List<String> relayServers = []; // List of relay multiaddr strings to auto-connect
+  
+  // Relay metrics observer (for instrumentation)
+  RelayMetricsObserver? relayMetricsObserver;
+
+  // Dial timeout configuration
+  Duration dialTimeout = const Duration(seconds: 15);
+  Duration relayDialTimeout = const Duration(seconds: 30);
 
   /// Apply applies the given options to the config, returning the first error
   /// encountered (if any).
@@ -121,6 +129,12 @@ class Config {
   Future<Host> newNode() async {
     // Validate configuration
     _validate();
+
+    // Ensure core record types are registered (idempotent)
+    RecordRegistry.register<pb.PeerRecord>(
+      String.fromCharCodes(PeerRecordEnvelopePayloadType),
+      pb.PeerRecord.fromBuffer
+    );
 
     // This is a placeholder implementation that outlines the steps involved in creating a Host.
     // In a real implementation, these steps would be implemented with actual code.
@@ -355,6 +369,16 @@ extension ConfigOptions on Config {
     enableHolePunching = enabled;
   }
   
+  /// Configures the dial timeout for direct connections.
+  Future<void> withDialTimeout(Duration timeout) async {
+    dialTimeout = timeout;
+  }
+
+  /// Configures the dial timeout for relay connections.
+  Future<void> withRelayDialTimeout(Duration timeout) async {
+    relayDialTimeout = timeout;
+  }
+
   /// Configures relay servers to automatically connect to during startup
   Future<void> withRelayServers(List<String> servers) async {
     relayServers = servers;
@@ -500,8 +524,23 @@ class Libp2p {
     return (config) => config.withAutoNAT(enabled);
   }
   
+  /// Configures the dial timeout for direct connections.
+  static Option dialTimeout(Duration timeout) {
+    return (config) => config.withDialTimeout(timeout);
+  }
+
+  /// Configures the dial timeout for relay connections.
+  static Option relayDialTimeout(Duration timeout) {
+    return (config) => config.withRelayDialTimeout(timeout);
+  }
+
   static Option relayServers(List<String> servers) {
     return (config) => config.withRelayServers(servers);
+  }
+
+  /// Sets the relay metrics observer for tracking relay client operations
+  static Option relayMetricsObserver(RelayMetricsObserver observer) {
+    return (config) => config.relayMetricsObserver = observer;
   }
 
   // AutoNATv2 specific options

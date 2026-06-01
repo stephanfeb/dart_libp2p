@@ -26,7 +26,6 @@ import './metrics.dart';
 
 // Logging function for this file
 void _log(String message) {
-  print('[AutoNAT] $message');
 }
 
 const int maxConfidence = 3;
@@ -504,7 +503,7 @@ class AmbientAutoNAT implements AutoNAT, Notifiee {
   void listenClose(Network network, MultiAddr addr) {}
 
   @override
-  Future<void> connected(Network network, Conn conn) async {
+  Future<void> connected(Network network, Conn conn, {Duration? dialLatency}) async {
     if (_isClosed) return;
     // This check is slightly different from Go's `manet.IsPublicAddr(c.RemoteMultiaddr())`
     // as `conn.remoteMultiaddr()` might not be directly public if it's e.g. a relay.

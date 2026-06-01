@@ -25,6 +25,7 @@ class HopMessage extends $pb.GeneratedMessage {
     Reservation? reservation,
     Limit? limit,
     Status? status,
+    $core.List<$core.int>? diagnosticSessionId,
   }) {
     final $result = create();
     if (type != null) {
@@ -42,6 +43,9 @@ class HopMessage extends $pb.GeneratedMessage {
     if (status != null) {
       $result.status = status;
     }
+    if (diagnosticSessionId != null) {
+      $result.diagnosticSessionId = diagnosticSessionId;
+    }
     return $result;
   }
   HopMessage._() : super();
@@ -54,6 +58,7 @@ class HopMessage extends $pb.GeneratedMessage {
     ..aOM<Reservation>(3, _omitFieldNames ? '' : 'reservation', subBuilder: Reservation.create)
     ..aOM<Limit>(4, _omitFieldNames ? '' : 'limit', subBuilder: Limit.create)
     ..e<Status>(5, _omitFieldNames ? '' : 'status', $pb.PbFieldType.OE, defaultOrMaker: Status.UNUSED, valueOf: Status.valueOf, enumValues: Status.values)
+    ..a<$core.List<$core.int>>(6, _omitFieldNames ? '' : 'diagnosticSessionId', $pb.PbFieldType.OY)
     ..hasRequiredFields = false
   ;
 
@@ -130,6 +135,16 @@ class HopMessage extends $pb.GeneratedMessage {
   $core.bool hasStatus() => $_has(4);
   @$pb.TagNumber(5)
   void clearStatus() => clearField(5);
+
+  /// Diagnostic session ID for cross-node correlation (extension)
+  @$pb.TagNumber(6)
+  $core.List<$core.int> get diagnosticSessionId => $_getN(5);
+  @$pb.TagNumber(6)
+  set diagnosticSessionId($core.List<$core.int> v) { $_setBytes(5, v); }
+  @$pb.TagNumber(6)
+  $core.bool hasDiagnosticSessionId() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearDiagnosticSessionId() => clearField(6);
 }
 
 class StopMessage extends $pb.GeneratedMessage {
@@ -138,6 +153,7 @@ class StopMessage extends $pb.GeneratedMessage {
     Peer? peer,
     Limit? limit,
     Status? status,
+    $core.List<$core.int>? diagnosticSessionId,
   }) {
     final $result = create();
     if (type != null) {
@@ -152,6 +168,9 @@ class StopMessage extends $pb.GeneratedMessage {
     if (status != null) {
       $result.status = status;
     }
+    if (diagnosticSessionId != null) {
+      $result.diagnosticSessionId = diagnosticSessionId;
+    }
     return $result;
   }
   StopMessage._() : super();
@@ -163,6 +182,7 @@ class StopMessage extends $pb.GeneratedMessage {
     ..aOM<Peer>(2, _omitFieldNames ? '' : 'peer', subBuilder: Peer.create)
     ..aOM<Limit>(3, _omitFieldNames ? '' : 'limit', subBuilder: Limit.create)
     ..e<Status>(4, _omitFieldNames ? '' : 'status', $pb.PbFieldType.OE, defaultOrMaker: Status.UNUSED, valueOf: Status.valueOf, enumValues: Status.values)
+    ..a<$core.List<$core.int>>(5, _omitFieldNames ? '' : 'diagnosticSessionId', $pb.PbFieldType.OY)
     ..hasRequiredFields = false
   ;
 
@@ -228,6 +248,16 @@ class StopMessage extends $pb.GeneratedMessage {
   $core.bool hasStatus() => $_has(3);
   @$pb.TagNumber(4)
   void clearStatus() => clearField(4);
+
+  /// Diagnostic session ID for cross-node correlation (extension)
+  @$pb.TagNumber(5)
+  $core.List<$core.int> get diagnosticSessionId => $_getN(4);
+  @$pb.TagNumber(5)
+  set diagnosticSessionId($core.List<$core.int> v) { $_setBytes(4, v); }
+  @$pb.TagNumber(5)
+  $core.bool hasDiagnosticSessionId() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearDiagnosticSessionId() => clearField(5);
 }
 
 class Peer extends $pb.GeneratedMessage {

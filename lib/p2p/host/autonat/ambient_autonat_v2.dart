@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/event/addrs.dart';
@@ -32,6 +33,8 @@ class AmbientAutoNATv2 {
   // State tracking
   Reachability _currentStatus = Reachability.unknown;
   int _confidence = 0;
+  bool _hasEmittedInitial = false;
+  int _noPeersAttempts = 0; // Track consecutive no-peers failures for backoff
   
   // Event emission
   late final Emitter _emitter;
@@ -105,6 +108,7 @@ class AmbientAutoNATv2 {
       // Check if peer supports AutoNAT v2 dial protocol
       if (protocols.contains(AutoNATv2Protocols.dialProtocol)) {
         _log.fine('Peer $peerId supports AutoNAT v2, scheduling probe');
+        _noPeersAttempts = 0; // Reset backoff since we have a peer now
         _scheduleNextProbe(true);
       }
     } catch (e) {
@@ -135,8 +139,8 @@ class AmbientAutoNATv2 {
       
       try {
         await _executeProbe();
-      } catch (e, stackTrace) {
-        _log.severe('Error executing probe: $e', e, stackTrace);
+      } catch (e) {
+        _log.warning('Error executing probe: $e');
         // Treat errors as unknown observations
         _handleProbeError(e);
       }
@@ -156,26 +160,44 @@ class AmbientAutoNATv2 {
   
   Future<void> _executeProbe() async {
     if (_closed) return;
-    
+
+    // Check if any peers support AutoNAT v2 before attempting probe
+    if (!_autoNATv2.hasPeers) {
+      _noPeersAttempts++;
+      // Backoff: 10s, 20s, 40s, 60s, 60s, ... (capped at 60s)
+      final backoffSeconds = min(60, 10 * (1 << min(_noPeersAttempts - 1, 3)));
+      _log.fine('No peers support AutoNAT v2 yet, retrying in ${backoffSeconds}s '
+                '(attempt $_noPeersAttempts)');
+      // Emit initial unknown so AutoRelay can start even without AutoNAT peers
+      if (!_hasEmittedInitial) {
+        _log.info('No AutoNAT v2 peers available, emitting initial UNKNOWN reachability');
+        _hasEmittedInitial = true;
+        _emitStatusChange();
+      }
+      _scheduleNextProbe(false, delay: Duration(seconds: backoffSeconds));
+      return;
+    }
+    _noPeersAttempts = 0;
+
     _log.info('Executing reachability probe');
-    
+
     // Get addresses to probe
     final addrs = _getAddressesToProbe();
-    
+
     if (addrs.isEmpty) {
-      _log.warning('No addresses to probe');
+      _log.fine('No addresses to probe');
       _scheduleNextProbe(false);
       return;
     }
-    
+
     // Create requests for each address
     final requests = addrs.map((addr) => Request(
       addr: addr,
       sendDialData: false,
     )).toList();
-    
+
     _log.fine('Probing ${requests.length} addresses');
-    
+
     // Use AutoNATv2 to check reachability
     // Errors are caught at the scheduling level
     final result = await _autoNATv2.getReachability(requests);
@@ -188,7 +210,17 @@ class AmbientAutoNATv2 {
     }
     
     // Use host addresses, filtering for public addresses
-    return _host.addrs.where((addr) => addr.isPublic()).toList();
+    var addrs = _host.addrs.where((addr) => addr.isPublic());
+    
+    // If ipv4Only is set, filter out IPv6 addresses.
+    // This ensures relay reservations are created even if device has public IPv6,
+    // for compatibility with IPv4-only peers.
+    if (_config.ipv4Only) {
+      addrs = addrs.where((addr) => addr.ip6 == null);
+      _log.fine('ipv4Only mode: filtered to ${addrs.length} IPv4-only addresses for probing');
+    }
+    
+    return addrs.toList();
   }
   
   void _handleProbeResult(Result result) {
@@ -255,6 +287,11 @@ class AmbientAutoNATv2 {
       } else if (_currentStatus != Reachability.unknown) {
         _log.info('Reachability changed from $_currentStatus to UNKNOWN');
         _currentStatus = observation;
+        _emitStatusChange();
+      } else if (!_hasEmittedInitial) {
+        // First probe confirmed unknown status — emit so AutoRelay can react
+        _log.info('Initial reachability confirmed as UNKNOWN, emitting event');
+        _hasEmittedInitial = true;
         _emitStatusChange();
       }
     }

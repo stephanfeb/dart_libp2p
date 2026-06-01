@@ -5,6 +5,7 @@ import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:logging/logging.dart'; // Added for logging
 
 import 'package:dart_libp2p/core/network/conn.dart'; // Conn is directly available
+import 'package:dart_libp2p/core/peer/peer_id.dart'; // For PeerId
 
 import '../../../../core/network/stream.dart'; // For P2PStream, StreamStats
 import '../../../../core/network/common.dart' show Direction; // For Direction
@@ -12,6 +13,7 @@ import '../../../../core/network/rcmgr.dart' show StreamScope; // For StreamScop
 import '../../../../core/network/mux.dart' as core_mux; // For MuxedStream
 import 'frame.dart'; // Defines YamuxFrame, YamuxFrameType, YamuxFlags
 import 'yamux_exceptions.dart'; // Import Yamux exception handling
+import 'metrics_observer.dart'; // For YamuxMetricsObserver
 
 // Added logger instance
 final _log = Logger('YamuxStream');
@@ -67,6 +69,21 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// The parent connection (YamuxSession)
   final Conn _parentConn; // Added field
+  
+  /// Metrics observer for reporting stream events
+  final YamuxMetricsObserver? _metricsObserver;
+  
+  /// Remote peer ID for metrics reporting
+  final PeerId? _remotePeer;
+  
+  /// When the stream was opened (for duration calculation)
+  DateTime? _openedAt;
+  
+  /// Total bytes read from this stream
+  int _bytesRead = 0;
+  
+  /// Total bytes written to this stream
+  int _bytesWritten = 0;
 
   /// Bytes consumed from our local receive window since last window update sent to remote
   int _consumedBytesForLocalWindowUpdate = 0;
@@ -79,6 +96,17 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// Queue for incoming data
   final _incomingQueue = <Uint8List>[];
+
+  /// Pushes data to the front of the incoming queue, so the next read() returns it.
+  /// Used to inject leftover bytes after multistream-select negotiation.
+  void pushData(Uint8List data) {
+    if (data.isEmpty) return;
+    if (_readCompleter != null && !_readCompleter!.isCompleted) {
+      _readCompleter!.complete(data);
+    } else {
+      _incomingQueue.insert(0, data);
+    }
+  }
 
   /// Completer for next read operation
   Completer<Uint8List>? _readCompleter;
@@ -119,6 +147,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   static const int _maxFramesPerBatch = 10;
   static const Duration _frameProcessingDelay = Duration(milliseconds: 2);
 
+  /// Maximum size of a single DATA frame payload
+  /// This limits the size of Yamux frames to prevent head-of-line blocking
+  /// when encrypted messages are lost or delayed at the transport layer.
+  final int _maxFrameSize;
+
   /// Checks if the stream deadline has been exceeded
   void _checkDeadline() {
     if (_deadline != null && DateTime.now().isAfter(_deadline!)) {
@@ -157,6 +190,9 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     required int initialWindowSize, // This is the initial window for both sides
     required Future<void> Function(YamuxFrame frame) sendFrame,
     required Conn parentConn, // Added parameter
+    PeerId? remotePeer, // For metrics reporting (null before security handshake)
+    required int maxFrameSize, // Maximum DATA frame payload size
+    YamuxMetricsObserver? metricsObserver, // For metrics reporting
     String? logPrefix,
   })  : streamId = id,
         streamProtocol = protocol,
@@ -165,8 +201,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         _remoteReceiveWindow = initialWindowSize, // Initially, we can send this much
         _sendFrame = sendFrame,
         _parentConn = parentConn, // Initialize field
+        _remotePeer = remotePeer,
+        _maxFrameSize = maxFrameSize,
+        _metricsObserver = metricsObserver,
         _logPrefix = logPrefix ?? "StreamID=$id" {
-    _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow');
+    _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow, Max frame size: $_maxFrameSize');
   }
 
   /// Opens the stream (called by session when creating a new stream locally or accepting one)
@@ -176,11 +215,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.warning('$_logPrefix open() called on stream not in init state: $_state');
       throw StateError('Stream is not in init state');
     }
-    // Note: Yamux doesn't have an explicit "open" frame like SYN.
-    // For an outbound stream, sending the first DATA frame effectively opens it.
-    // For an inbound stream, receiving the first DATA frame opens it.
-    // The session handles sending initial window updates when it establishes the stream.
     _state = YamuxStreamState.open;
+    _openedAt = DateTime.now();
     _log.fine('$_logPrefix Stream opened. State: $_state. Sending initial window update.');
 
     // Send initial window update to the remote peer
@@ -188,10 +224,31 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     await _sendFrame(frame);
   }
 
+  /// Opens the stream for an incoming (remote-initiated) stream.
+  /// Unlike [open()], this fire-and-forgets the initial window update
+  /// so it doesn't block the yamux read loop when the UDX write path
+  /// is congestion-stalled.
+  Future<void> openIncoming() async {
+    _log.finer('$_logPrefix openIncoming() called. Current state: $_state');
+    if (_state != YamuxStreamState.init) {
+      _log.warning('$_logPrefix openIncoming() called on stream not in init state: $_state');
+      throw StateError('Stream is not in init state');
+    }
+    _state = YamuxStreamState.open;
+    _openedAt = DateTime.now();
+    _log.fine('$_logPrefix Stream opened (incoming). Sending initial window update (fire-and-forget).');
+
+    // Fire-and-forget: don't block the read loop on the window update send.
+    final frame = YamuxFrame.windowUpdate(streamId, _localReceiveWindow);
+    _sendFrame(frame).catchError((e) {
+      _log.warning('$_logPrefix Error sending initial window update: $e');
+    });
+  }
+
   @override
   Future<void> write(List<int> data) async {
     final inputDataLength = data.length;
-    _log.fine('$_logPrefix YamuxStream.write: ENTERED. Requested to write $inputDataLength bytes. Current state: $_state, Our send window (remote receive): $_remoteReceiveWindow');
+    _log.fine('$_logPrefix [YAMUX-WRITE-DIAG] YamuxStream.write ENTERED: $inputDataLength bytes, state=$_state, sendWindow=$_remoteReceiveWindow');
     
     // Check deadline before starting write operation
     _checkDeadline();
@@ -201,9 +258,16 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       throw StateError('Stream is closed for writing.');
     }
 
-    if (_state != YamuxStreamState.open) {
-      _log.warning('$_logPrefix YamuxStream.write: Called on non-open stream. State: $_state. Requested: $inputDataLength bytes.');
-      throw StateError('Stream is not open for writing. Current state: $_state');
+    // Allow writes in both 'open' and 'closing' states
+    // 'closing' means remote sent FIN, but we can still write (half-close)
+    if (_state != YamuxStreamState.open && _state != YamuxStreamState.closing) {
+      _log.warning('$_logPrefix YamuxStream.write: Called on non-open/non-closing stream. State: $_state. Requested: $inputDataLength bytes.');
+      throw YamuxStreamStateException(
+        'Stream is not open for writing',
+        currentState: _state.name,
+        requestedOperation: 'write',
+        streamId: streamId,
+      );
     }
 
     if (inputDataLength == 0) {
@@ -268,7 +332,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       var offset = 0;
       final Uint8List dataToWrite = data is Uint8List ? data : Uint8List.fromList(data);
 
-      while (offset < dataToWrite.length && _state == YamuxStreamState.open) {
+      // Allow writes in both 'open' and 'closing' states (half-close support)
+      while (offset < dataToWrite.length && (_state == YamuxStreamState.open || _state == YamuxStreamState.closing)) {
         if (_remoteReceiveWindow == 0) {
           _log.fine('$_logPrefix Direct write: Send window is 0. Waiting for remote to update. Offset: $offset/${dataToWrite.length}');
           _sendWindowUpdateCompleter ??= Completer<void>();
@@ -276,13 +341,20 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
           _sendWindowUpdateCompleter = null;
         }
         
-        if (_state != YamuxStreamState.open) {
+        if (_state != YamuxStreamState.open && _state != YamuxStreamState.closing) {
           _log.warning('$_logPrefix Direct write: Stream state changed to $_state while waiting for window. Aborting write.');
           break;
         }
 
         final remaining = dataToWrite.length - offset;
-        final chunkSize = (remaining > _remoteReceiveWindow) ? _remoteReceiveWindow : remaining;
+        // Limit chunk size by:
+        // 1. _maxFrameSize - prevents large encrypted messages that cause head-of-line blocking
+        // 2. _remoteReceiveWindow - respects flow control from the receiver
+        // Using smaller frames improves resilience to packet loss and allows better
+        // interleaving of control frames (window updates, pings) with data frames.
+        int chunkSize = remaining;
+        if (chunkSize > _maxFrameSize) chunkSize = _maxFrameSize;
+        if (chunkSize > _remoteReceiveWindow) chunkSize = _remoteReceiveWindow;
         
         if (chunkSize == 0) {
           if (remaining > 0) {
@@ -298,6 +370,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         
         await _sendFrame(frame);
         
+        _bytesWritten += chunkSize; // Track bytes written
         _remoteReceiveWindow -= chunkSize;
         offset += chunkSize;
       }
@@ -314,7 +387,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     } catch (e, st) {
       _log.severe('$_logPrefix Direct write: Error during write of ${data.length} bytes: $e\n$st');
-      if (_state == YamuxStreamState.open) {
+      if (_state == YamuxStreamState.open || _state == YamuxStreamState.closing) {
         await reset();
       }
       rethrow;
@@ -327,7 +400,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     _isProcessingWrites = true;
     
     try {
-      while (_writeQueue.isNotEmpty && _state == YamuxStreamState.open) {
+      // Allow processing writes in both 'open' and 'closing' states (half-close support)
+      while (_writeQueue.isNotEmpty && (_state == YamuxStreamState.open || _state == YamuxStreamState.closing)) {
         final queuedWrite = _writeQueue.removeFirst();
         final queueTime = DateTime.now().difference(queuedWrite.queuedAt);
         
@@ -380,7 +454,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   @override
   Future<void> reset() async {
-    _log.fine('$_logPrefix reset() called. Current state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] reset() called (LOCAL reset, will send RST to remote). Current state: $_state');
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.finer('$_logPrefix reset() called but stream already closed/reset. State: $_state. Doing nothing.');
       return;
@@ -395,6 +469,19 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     } catch (e) {
       _log.warning('$_logPrefix Error sending RESET frame during reset(): $e. Will proceed with local cleanup.');
     } finally {
+      // Notify metrics observer before cleanup
+      if (_metricsObserver != null && _remotePeer != null) {
+        try {
+          _metricsObserver.onStreamReset(
+            _remotePeer,
+            streamId,
+            'Stream reset (previous state: $previousState)',
+          );
+        } catch (e) {
+          _log.warning('$_logPrefix Error notifying metrics observer on reset: $e');
+        }
+      }
+      
       _log.finer('$_logPrefix Cleaning up after reset (was $previousState).');
       await _cleanup();
     }
@@ -431,6 +518,22 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.warning(
           '$_logPrefix Error sending FIN frame during close(): $e. Proceeding to forceful cleanup (reset).');
     } finally {
+      // Notify metrics observer before cleanup
+      if (_metricsObserver != null && _openedAt != null && _remotePeer != null) {
+        try {
+          final duration = DateTime.now().difference(_openedAt!);
+          _metricsObserver.onStreamClosed(
+            _remotePeer,
+            streamId,
+            duration,
+            _bytesRead,
+            _bytesWritten,
+          );
+        } catch (e) {
+          _log.warning('$_logPrefix Error notifying metrics observer on close: $e');
+        }
+      }
+      
       _log.finer(
           '$_logPrefix close() ensuring cleanup. State before final cleanup: $_state (was $previousState).');
       await _cleanup();
@@ -487,6 +590,15 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // Handle special states with empty queue
     if (_state == YamuxStreamState.closing) {
       _log.finer('$_logPrefix read() on remotely closed stream with empty queue. No more data will arrive.');
+      
+      // FIX: Now that we've consumed all data (queue empty) and received remote FIN (closing state),
+      // if we've also sent our FIN (_localFinSent), it's safe to fully cleanup.
+      // This ensures cleanup only happens after all data is consumed, not prematurely in closeWrite().
+      if (_localFinSent) {
+        _log.fine('$_logPrefix Both FINs sent and all data consumed. Now safe to cleanup.');
+        await _cleanup();
+      }
+      
       return Uint8List(0); // Return EOF instead of throwing
     }
 
@@ -583,40 +695,48 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
               // Handle partial reads
               if (maxLength != null && data.length > maxLength) {
-
+                final chunk = data.sublist(0, maxLength);
+                _bytesRead += chunk.length; // Track bytes read
                 _incomingQueue.add(data.sublist(maxLength));
-                return data.sublist(0, maxLength);
+                return chunk;
               }
               
+              _bytesRead += data.length; // Track bytes read
               return data;
             } catch (e) {
               final completerErrorDuration = DateTime.now().difference(attemptStartTime);
               _readCompleter = null;
               _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
-              
-              // Handle state transitions during read
-              if (_state == YamuxStreamState.closing) {
 
-                await _cleanup();
+              // Handle all terminal state transitions during read gracefully.
+              // When connection closes abruptly, forceReset() sets state to 'reset',
+              // or cleanup may set it to 'closed'. Return EOF instead of throwing
+              // to allow graceful handling by upper layers.
+              if (_state == YamuxStreamState.closing ||
+                  _state == YamuxStreamState.closed ||
+                  _state == YamuxStreamState.reset) {
+                _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state, returning EOF');
                 return Uint8List(0); // Return EOF instead of throwing
               }
-              
+
               // For other errors, rethrow with context
               rethrow;
             }
           },
           timeout: currentTimeout,
           streamId: streamId,
-          operationName: 'read_wait_attempt_$attempts',
-          currentState: _state.toString(),
+          operationName: 'read',
+          currentState: _state.name,
         );
       } on YamuxStreamTimeoutException catch (e) {
         final attemptDuration = DateTime.now().difference(attemptStartTime);
         _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-TIMEOUT] Timeout on attempt $attempts/$maxAttempts after ${attemptDuration.inMilliseconds}ms: ${e.message}');
         
-        // Check if stream is still viable
-        if (_state != YamuxStreamState.open || isClosed) {
-          _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-UNVIABLE] Stream no longer viable for retry. State: $_state, Closed: $isClosed');
+        // Check if stream is still viable - also check parent connection state
+        // for faster failure detection when underlying transport closes
+        final parentConnClosed = _parentConn.isClosed;
+        if (_state != YamuxStreamState.open || isClosed || parentConnClosed) {
+          _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-UNVIABLE] Stream no longer viable for retry. State: $_state, Closed: $isClosed, ParentConnClosed: $parentConnClosed');
           throw YamuxStreamStateException(
             'Stream became unavailable during read timeout',
             currentState: _state.name,
@@ -656,7 +776,15 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     final handleStartTime = DateTime.now();
 
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
-      _log.warning('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');
+      _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');
+      return;
+    }
+
+    // Handle RST flag on any frame type
+    if (frame.flags & YamuxFlags.rst != 0) {
+      _log.warning('$_logPrefix [STREAM-RESET-DIAG] Received REMOTE RST flag on frame type=${frame.type}. Resetting stream from state $_state.');
+      _state = YamuxStreamState.reset;
+      await _cleanup();
       return;
     }
 
@@ -674,12 +802,6 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
         case YamuxFrameType.ping:
           await _handlePingFrame(frame);
-          break;
-
-        case YamuxFrameType.reset:
-          _log.fine('$_logPrefix Received RESET frame. Session is terminating.');
-          _state = YamuxStreamState.reset; // Treat as reset
-          await _cleanup();
           break;
 
         default:
@@ -703,7 +825,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
        _log.finer('$_logPrefix Received WINDOW_UPDATE on non-open/non-closing stream. State: $_state. Ignoring.');
       return;
     }
-    final delta = frame.data.buffer.asByteData().getUint32(0, Endian.big);
+    final delta = frame.length; // Delta is in the length field per Yamux spec
     _log.finer('$_logPrefix Received WINDOW_UPDATE from remote, delta: $delta. Current our send window: $_remoteReceiveWindow, New: ${_remoteReceiveWindow + delta}');
     _remoteReceiveWindow += delta;
     if (_sendWindowUpdateCompleter?.isCompleted == false) {
@@ -717,11 +839,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // Respond to PING if it's a request (flag 0)
     if (frame.flags == 0) { // Ping request
       _log.finer('$_logPrefix Received PING request (flag 0), sending PONG (flag 1). Opaque value: ${frame.length}');
-      final pongFrame = YamuxFrame.ping(true, frame.length); 
-      await _sendFrame(pongFrame);
+      // Fire-and-forget: don't block the read loop on PONG send.
+      final pongFrame = YamuxFrame.ping(true, frame.length);
+      _sendFrame(pongFrame).catchError((e) {
+        _log.warning('$_logPrefix Error sending PONG response: $e');
+      });
     } else { // Ping response (flag 1)
       _log.finer('$_logPrefix Received PONG (PING response flag 1). Opaque value: ${frame.length}');
-      // TODO: Handle pong if we sent a ping and are waiting for response
     }
   }
 
@@ -777,34 +901,46 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _consumedBytesForLocalWindowUpdate += frame.data.length;
       _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-DATA-WINDOW] Consumed for local window: $_consumedBytesForLocalWindowUpdate');
       
-      // Send window update when threshold reached
+      // Send window update when threshold reached.
+      // Fire-and-forget: don't block the read loop waiting for the write to complete.
+      // If the send fails, restore the consumed bytes so they're included in the
+      // next window update attempt — otherwise lost bytes permanently reduce the
+      // remote sender's credit and stall the stream.
       if (_consumedBytesForLocalWindowUpdate >= _minWindowUpdateBytes) {
-        final updateFrame = YamuxFrame.windowUpdate(streamId, _consumedBytesForLocalWindowUpdate);
-        await _sendFrame(updateFrame);
-        _localReceiveWindow += _consumedBytesForLocalWindowUpdate; // We "give back" the window
-        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Sent window update for $_consumedBytesForLocalWindowUpdate bytes');
+        final bytesToUpdate = _consumedBytesForLocalWindowUpdate;
         _consumedBytesForLocalWindowUpdate = 0;
+        _localReceiveWindow += bytesToUpdate;
+        final updateFrame = YamuxFrame.windowUpdate(streamId, bytesToUpdate);
+        _sendFrame(updateFrame).then((_) {
+          _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-WINDOW-UPDATE] Sent window update for $bytesToUpdate bytes');
+        }).catchError((e) {
+          // Restore consumed bytes so they'll be included in the next window update.
+          _consumedBytesForLocalWindowUpdate += bytesToUpdate;
+          _localReceiveWindow -= bytesToUpdate;
+          _log.warning('$_logPrefix Error sending window update for $bytesToUpdate bytes (will retry): $e');
+        });
       }
     }
 
     // Handle FIN flag for stream closure
     if (frame.flags & YamuxFlags.fin != 0) {
-      bool stateChangedToClosing = false;
       if (_state == YamuxStreamState.open) {
         _state = YamuxStreamState.closing;
-        stateChangedToClosing = true;
         _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] Received FIN, transitioning to closing state');
 
+        // FIX: Complete pending read with EOF (empty data) instead of error.
+        // This allows graceful handling of stream closure and proper relay forwarding.
+        // The reader will get EOF and can finish processing.
         if (frame.data.isEmpty && _readCompleter != null && !_readCompleter!.isCompleted) {
-          _readCompleter!.completeError(StateError('Stream closed by remote.'));
+          _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] Completing pending read with EOF');
+          _readCompleter!.complete(Uint8List(0));
         }
       }
-      // If we have already sent a FIN (_localFinSent is true) and now we've received a FIN (state is closing),
-      // then both sides are done. Clean up.
-      if (_localFinSent && (_state == YamuxStreamState.closing || stateChangedToClosing)) {
-        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-BIDIRECTIONAL-CLOSE] Both sides sent FIN, cleaning up');
-        await _cleanup();
-      }
+      // FIX: Do NOT cleanup here even if both FINs have been sent.
+      // The incoming queue may still have data that needs to be consumed.
+      // Cleanup will happen when read() returns EOF and detects both FINs + empty queue.
+      // This prevents data loss in bidirectional relay scenarios.
+      _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] FIN received. localFinSent=$_localFinSent, queueSize=${_incomingQueue.length}');
     }
   }
 
@@ -881,6 +1017,9 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   @override
   bool get isClosed => _state == YamuxStreamState.closed || _state == YamuxStreamState.reset || _state == YamuxStreamState.closing;
 
+  @override
+  bool get isWritable => _state == YamuxStreamState.open;
+
   YamuxStreamState get streamState => _state; // Expose state for testing/debugging
 
   int get currentRemoteReceiveWindow => _remoteReceiveWindow; // For testing
@@ -933,14 +1072,17 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _localFinSent = true;
       _log.fine('$_logPrefix closeWrite() sent FIN and set _localFinSent=true. Current stream state: $_state.');
 
-      // If remote also sent FIN (_state == YamuxStreamState.closing), then both sides are done writing.
-      // The stream can now be fully cleaned up.
-      if (_state == YamuxStreamState.closing) {
-        _log.fine('$_logPrefix closeWrite() called, _localFinSent=true, and stream was already in closing state (remote FIN received). Cleaning up.');
-        await _cleanup();
-      } else {
-        _log.fine('$_logPrefix closeWrite() sent FIN. Stream remains in state: $_state for potential reads or remote FIN.');
-      }
+      // FIX: Do NOT call _cleanup() here even if both FINs have been sent.
+      // Both FINs sent only means "writing is done on both sides" - reading should
+      // continue until all buffered data is consumed. Premature cleanup here was
+      // causing bidirectional relay connections to become unidirectional because
+      // the incoming queue would be cleared before the relay could forward all data.
+      // 
+      // The stream will be properly cleaned up when:
+      // 1. read() returns EOF (empty data) after both FINs, OR
+      // 2. close() is explicitly called, OR
+      // 3. reset() is called due to an error
+      _log.fine('$_logPrefix closeWrite() completed. Stream remains readable in state: $_state.');
     } catch (e) {
       _log.severe('$_logPrefix Error sending FIN frame during closeWrite(): $e. Resetting stream.');
       await reset(); // Escalate to reset on send error
@@ -1005,13 +1147,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// Forces the stream into reset state without sending frames (e.g., called by session on its own closure)
   Future<void> forceReset() async {
-    _log.fine('$_logPrefix forceReset() called. Current state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] forceReset() called (session cleanup). Current state: $_state');
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.finer('$_logPrefix forceReset() called but stream already closed/reset. State: $_state. Doing nothing.');
       return;
     }
     _state = YamuxStreamState.reset;
     await _cleanup();
-    _log.fine('$_logPrefix forceReset() completed. Final state: $_state');
+    _log.warning('$_logPrefix [STREAM-RESET-DIAG] forceReset() completed. Final state: $_state');
   }
 }

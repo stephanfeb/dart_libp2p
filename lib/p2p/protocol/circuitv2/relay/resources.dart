@@ -22,12 +22,18 @@ class Resources {
 
   /// The maximum data transfer for connections in bytes.
   final int connectionData;
+  
+  /// The maximum number of HOP requests per peer per minute (rate limiting).
+  final int maxHopRequestsPerMinute;
 
   /// The current number of reservations.
   int _reservations = 0;
 
   /// The current number of connections.
   int _connections = 0;
+  
+  /// Track HOP request history for rate limiting
+  final Map<String, List<DateTime>> _hopRequestHistory = {};
 
   /// Creates a new resource manager.
   Resources({
@@ -36,6 +42,7 @@ class Resources {
     this.reservationTtl = 3600,
     this.connectionDuration = 3600,
     this.connectionData = 1 << 20, // 1 MiB
+    this.maxHopRequestsPerMinute = 10,
   });
 
   /// Checks if a peer can make a reservation.
@@ -66,5 +73,28 @@ class Resources {
   /// Removes a connection for a peer.
   void removeConnection(PeerId src, PeerId dst) {
     _connections--;
+  }
+  
+  /// Checks if a peer can make a HOP request (rate limiting)
+  /// Uses a sliding window to track requests per minute
+  bool canMakeHopRequest(PeerId peer) {
+    final peerStr = peer.toString();
+    final now = DateTime.now();
+    final cutoff = now.subtract(Duration(minutes: 1));
+    
+    // Clean old entries (older than 1 minute)
+    _hopRequestHistory[peerStr] = (_hopRequestHistory[peerStr] ?? [])
+        .where((t) => t.isAfter(cutoff))
+        .toList();
+    
+    // Check rate limit
+    final requestCount = _hopRequestHistory[peerStr]?.length ?? 0;
+    if (requestCount >= maxHopRequestsPerMinute) {
+      return false;
+    }
+    
+    // Record this request
+    _hopRequestHistory.putIfAbsent(peerStr, () => []).add(now);
+    return true;
   }
 }

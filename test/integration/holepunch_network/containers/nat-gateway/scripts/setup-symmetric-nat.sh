@@ -25,21 +25,27 @@ iptables -t filter -N SYMM_FORWARD 2>/dev/null || iptables -t filter -F SYMM_FOR
 iptables -P FORWARD ACCEPT  # Keep Docker networking working
 
 # Enable forwarding between interfaces for established connections
-iptables -A FORWARD -i ${INTERNAL_IF} -o ${EXTERNAL_IF} -j ACCEPT
-iptables -A FORWARD -i ${EXTERNAL_IF} -o ${INTERNAL_IF} -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Use -I (INSERT) at specific positions to place rules BEFORE Docker's isolation rules
+# Docker adds FORWARD rules that can block inter-network traffic, so we must insert first
+iptables -I FORWARD 1 -i ${INTERNAL_IF} -o ${EXTERNAL_IF} -j ACCEPT
+iptables -I FORWARD 2 -i ${EXTERNAL_IF} -o ${INTERNAL_IF} -m state --state ESTABLISHED,RELATED -j ACCEPT
 
 # Symmetric NAT: Address and port dependent mapping
 # Each destination gets a unique external port mapping
-iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE --random-fully
+# Try --random for port randomization, fall back to MASQUERADE without flags if not supported
+set +e  # Temporarily disable exit on error
+iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE --random 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "⚠️  --random flag not supported, using basic MASQUERADE"
+    iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE
+fi
+set -e  # Re-enable exit on error
 
 # Block inbound connections that don't match established outbound connections
-# This simulates symmetric NAT's strict filtering
-iptables -A FORWARD -i ${EXTERNAL_IF} -o ${INTERNAL_IF} -m state --state NEW -j DROP
-
-# Additional filtering: only allow packets that match exact connection tuples
-# This makes it more restrictive than cone NAT
-iptables -t nat -A PREROUTING -i ${EXTERNAL_IF} -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -t nat -A PREROUTING -i ${EXTERNAL_IF} -j DROP
+# This simulates symmetric NAT's strict filtering (only allow ESTABLISHED,RELATED)
+# Note: Filtering must be done in the filter table, not nat table
+# Insert at position 3 (after our two ACCEPT rules)
+iptables -I FORWARD 3 -i ${EXTERNAL_IF} -o ${INTERNAL_IF} -m state --state NEW -j DROP
 
 # Log NAT translations for debugging
 iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j LOG --log-prefix "SYMM-NAT-OUT: " --log-level 6
