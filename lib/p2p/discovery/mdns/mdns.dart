@@ -209,19 +209,31 @@ class MdnsDiscovery implements Discovery {
   }
 
   /// Perform a single mDNS discovery query
-  Future<void> _performDiscoveryQuery(String serviceName) async {
+  Future<void> _performDiscoveryQuery(
+    String serviceName, {
+      Duration timeout = const Duration(seconds: 10),
+      String domain = 'local',
+      NetworkInterface? networkInterface,
+      bool wantUnicastResponse = false,
+      bool reusePort = true,
+      bool reuseAddress = true,
+      int multicastHops = 1,
+      void Function(String message)? logger,
+  }) async {
     try {
       // Use MDNSClient.query() with longer timeout instead of lookup() which has 1s timeout
       // Extract just the service part (remove .local if present)  
       final serviceOnly = serviceName.replaceAll('.local', '');
       final params = QueryParams(
         service: serviceOnly,  // Pass "_p2p._udp" not "_p2p._udp.local"
-        domain: 'local',
-        timeout: const Duration(seconds: 10), // Extended timeout for better discovery
-        wantUnicastResponse: false,
-        reusePort: true,
-        reuseAddress: true,
-        multicastHops: 1,
+        domain: domain,
+        timeout: timeout, // Extended timeout for better discovery
+        networkInterface: networkInterface,
+        wantUnicastResponse: wantUnicastResponse,
+        reusePort: reusePort,
+        reuseAddress: reuseAddress,
+        multicastHops: multicastHops,
+        logger: logger,
       );
       
       final stream = await MDNSClient.query(params);
