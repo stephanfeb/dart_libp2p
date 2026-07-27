@@ -44,6 +44,17 @@ class UDXTransport implements Transport {
   final Set<UDXSessionConn> _activeDialerConns = {};
   // static int _nextDialStreamIdPairBase = 1; // Removed static counter
 
+  // The multiplexer(s) backing this transport's active listener(s), keyed by
+  // IP family (true = IPv6, false = IPv4). DCUtR's simultaneous-connect
+  // requires the punch dial to originate from the SAME local socket whose
+  // external NAT mapping was already advertised in the CONNECT message — a
+  // fresh ephemeral dial socket gets a different, unadvertised mapping and
+  // the punch times out. When a listener is active for the target's address
+  // family, _performDial reuses its multiplexer (dart_udx routes by CID, so
+  // one physical socket safely hosts both the listener's inbound sessions
+  // and this outbound dial).
+  final Map<bool, UDXMultiplexer> _listenerMultiplexers = {};
+
   /// Optional metrics observer for UDX transport events
   UdxMetricsObserver? metricsObserver;
   
@@ -68,8 +79,8 @@ class UDXTransport implements Transport {
   }
 
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
-    _logger.fine('[UDXTransport.dial] Attempting to dial $addr with timeout: ${timeout ?? config.dialTimeout}');
+  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
+    _logger.fine('[UDXTransport.dial] Attempting to dial $addr with timeout: ${timeout ?? config.dialTimeout}, simultaneousConnect: $simultaneousConnect');
     final host = addr.valueForProtocol('ip4') ?? addr.valueForProtocol('ip6');
     final port = int.parse(addr.valueForProtocol('udp') ?? '0');
 
@@ -78,10 +89,10 @@ class UDXTransport implements Transport {
     }
 
     final effectiveTimeout = timeout ?? config.dialTimeout;
-    
+
     // Use UDX exception handler with retry logic for the entire dial operation
     return await UDXExceptionHandler.handleUDXOperation(
-      () => _performDial(addr, host, port, effectiveTimeout),
+      () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect),
       'UDXTransport.dial($addr)',
       retryConfig: UDXRetryConfig.regular,
     );
@@ -89,36 +100,62 @@ class UDXTransport implements Transport {
 
   /// Performs the actual dial operation with comprehensive resource cleanup
   Future<TransportConn> _performDial(
-    MultiAddr addr, 
-    String host, 
-    int port, 
+    MultiAddr addr,
+    String host,
+    int port,
     Duration effectiveTimeout,
+    bool simultaneousConnect,
   ) async {
     RawDatagramSocket? rawSocket;
     UDXMultiplexer? multiplexer;
     UDPSocket? udpSocket;
     UDXStream? initialStream;
-    
-    try {
-      _logger.fine('[UDXTransport._performDial] Creating RawDatagramSocket for $host');
-      
-      // Create raw UDP socket and bind it with UDX exception handling
-      final isIPv6 = UDX.getAddressFamily(host) == 6;
-      rawSocket = await UDXExceptionHandler.handleUDXOperation(
-        () => RawDatagramSocket.bind(
-          isIPv6 ? InternetAddress.anyIPv6 : InternetAddress.anyIPv4, 
-          0
-        ),
-        'RawDatagramSocket.bind($host)',
-      );
-      _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket!.port}');
+    // True when this call created its own rawSocket/multiplexer and is
+    // therefore responsible for tearing it down on failure. When reusing a
+    // listener's multiplexer, ownership stays with that listener.
+    bool ownsMultiplexer = false;
 
-      // Create multiplexer with exception handling
-      multiplexer = await UDXExceptionHandler.handleUDXOperation(
-        () async => UDXMultiplexer(rawSocket!, metricsObserver: metricsObserver),
-        'UDXMultiplexer.create',
-      );
-      _logger.fine('[UDXTransport._performDial] UDXMultiplexer created');
+    try {
+      // DCUtR's simultaneous-connect requires the punch dial to originate
+      // from the SAME local socket whose external NAT mapping was already
+      // advertised in the CONNECT message — a fresh ephemeral dial socket
+      // gets a different, unadvertised mapping and the punch times out. When
+      // a listener is active for the target's address family AND this dial
+      // is itself a simultaneous-connect attempt, reuse the listener's
+      // multiplexer instead of binding a new socket (dart_udx routes by CID,
+      // so one physical socket safely hosts both the listener's inbound
+      // sessions and this outbound dial). Gating on simultaneousConnect
+      // keeps ordinary dials — including a transport dialing its own
+      // active listener, as in-process tests do — on their own fresh
+      // socket, where they belong.
+      final isIPv6 = UDX.getAddressFamily(host) == 6;
+      final reused = simultaneousConnect ? _listenerMultiplexers[isIPv6] : null;
+
+      if (reused != null) {
+        _logger.fine('[UDXTransport._performDial] Reusing active listener multiplexer (${reused.socket.address.address}:${reused.socket.port}) for dial to $host:$port — required for DCUtR simultaneous-connect.');
+        multiplexer = reused;
+        ownsMultiplexer = false;
+      } else {
+        _logger.fine('[UDXTransport._performDial] No active listener for this address family; creating RawDatagramSocket for $host');
+
+        // Create raw UDP socket and bind it with UDX exception handling
+        rawSocket = await UDXExceptionHandler.handleUDXOperation(
+          () => RawDatagramSocket.bind(
+            isIPv6 ? InternetAddress.anyIPv6 : InternetAddress.anyIPv4,
+            0
+          ),
+          'RawDatagramSocket.bind($host)',
+        );
+        _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket!.port}');
+
+        // Create multiplexer with exception handling
+        multiplexer = await UDXExceptionHandler.handleUDXOperation(
+          () async => UDXMultiplexer(rawSocket!, metricsObserver: metricsObserver),
+          'UDXMultiplexer.create',
+        );
+        ownsMultiplexer = true;
+        _logger.fine('[UDXTransport._performDial] UDXMultiplexer created');
+      }
 
       // Create UDPSocket through multiplexer with exception handling
       udpSocket = await UDXExceptionHandler.handleUDXOperation(
@@ -205,8 +242,9 @@ class UDXTransport implements Transport {
         }
       }
 
-      final localProtocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
-      final localMa = MultiAddr('/$localProtocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      final localSocket = multiplexer!.socket;
+      final localProtocol = localSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final localMa = MultiAddr('/$localProtocol/${localSocket.address.address}/udp/${localSocket.port}/udx');
       final remoteMa = addr;
 
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
@@ -231,13 +269,16 @@ class UDXTransport implements Transport {
     } catch (error) {
       _logger.warning('[UDXTransport._performDial] Error during dial to $addr: $error. Performing cleanup.');
       
-      // Comprehensive resource cleanup using UDXExceptionUtils
+      // Comprehensive resource cleanup using UDXExceptionUtils.
+      // Only close the multiplexer/rawSocket if this dial created them — a
+      // reused listener multiplexer must keep serving that listener's
+      // inbound sessions after a failed dial attempt.
       await UDXExceptionUtils.safeCloseAll({
         'initialStream': () async => await initialStream?.close(),
-        'multiplexer': () async => multiplexer?.close(),
-        'rawSocket': () async => rawSocket?.close(),
+        if (ownsMultiplexer) 'multiplexer': () async => multiplexer?.close(),
+        if (ownsMultiplexer) 'rawSocket': () async => rawSocket?.close(),
       });
-      
+
       rethrow; // Let UDXExceptionHandler handle the retry logic
     }
   }
@@ -269,7 +310,13 @@ class UDXTransport implements Transport {
       multiplexer = UDXMultiplexer(rawSocket, metricsObserver: metricsObserver);
       _logger.fine('[UDXTransport.listen] UDXMultiplexer created');
 
-      final protocol = rawSocket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final isIPv6 = rawSocket.address.type == InternetAddressType.IPv6;
+      // Register this listener's multiplexer so a subsequent DCUtR punch
+      // dial to a peer of the same address family reuses this socket's NAT
+      // mapping instead of opening a fresh, unadvertised one.
+      _listenerMultiplexers[isIPv6] = multiplexer;
+
+      final protocol = isIPv6 ? 'ip6' : 'ip4';
       final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       _logger.fine('[UDXTransport.listen] Creating UDXListener for $boundMa');
       final listener = UDXListener(
@@ -323,6 +370,7 @@ class UDXTransport implements Transport {
       }
     }
     _activeListeners.clear();
+    _listenerMultiplexers.clear();
     _logger.fine('[UDXTransport.dispose] All active listeners closed and cleared.');
 
     for (final conn in _activeDialerConns.toList()) { 
@@ -555,9 +603,16 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     final expectedRemoteHost = _remoteMultiaddr.valueForProtocol(remoteAddress.type == InternetAddressType.IPv4 ? 'ip4' : 'ip6');
     final expectedRemotePort = int.parse(_remoteMultiaddr.valueForProtocol('udp')!);
 
-    if (remoteAddress.address != expectedRemoteHost || remotePort != expectedRemotePort) {
+    // Accept on port-only match as a fallback. Through NAT, the source IP a
+    // punch/new-stream packet actually arrives from can differ from what was
+    // advertised (the peer's NAT may egress a different address than the one
+    // it's mapped as); the port is the more reliable identifier here.
+    if (remotePort != expectedRemotePort) {
       _logger.fine('[UDXSessionConn $id] (Dialer): Received unmatched packet from unexpected source ${remoteAddress.address}:$remotePort. Expected $expectedRemoteHost:$expectedRemotePort. Ignoring.');
       return;
+    }
+    if (remoteAddress.address != expectedRemoteHost) {
+      _logger.info('[UDXSessionConn $id] (Dialer): Accepting unmatched packet on port-only match — source IP ${remoteAddress.address} differs from expected $expectedRemoteHost (through-NAT discrepancy), port $remotePort matches.');
     }
     
     try {
