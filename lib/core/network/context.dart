@@ -47,9 +47,14 @@ class Context {
 
   /// Gets the force direct dial option from the Context
   (bool, String) getForceDirectDial() {
+    // Callers store this key as either a bool (e.g. holepunch/service.dart's
+    // `true`) or a String reason (e.g. holepuncher.dart). The unconditional
+    // `as String` cast below threw a TypeError for bool-valued callers,
+    // silently discarding the force-direct-dial signal on that path. Accept
+    // either representation.
     final value = getValue(_forceDirectDialKey);
     if (value != null) {
-      return (true, value as String);
+      return (true, value is String ? value : value.toString());
     }
     return (false, '');
   }
