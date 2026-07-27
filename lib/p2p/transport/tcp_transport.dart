@@ -40,7 +40,7 @@ class TCPTransport implements Transport {
        _connManager = connManager ?? ConnectionManager();
 
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
+  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
     final host = addr.valueForProtocol('ip4') ?? addr.valueForProtocol('ip6');
     final port = int.parse(addr.valueForProtocol('tcp') ?? '0');
 
