@@ -1,8 +1,6 @@
 /// Implementation of the holepunch service.
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/holepuncher.dart';
