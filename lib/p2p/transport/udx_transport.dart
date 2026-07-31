@@ -53,7 +53,7 @@ class UDXTransport implements Transport {
   // family, _performDial reuses its multiplexer (dart_udx routes by CID, so
   // one physical socket safely hosts both the listener's inbound sessions
   // and this outbound dial).
-  final Map<bool, UDXMultiplexer> _listenerMultiplexers = {};
+  final Map<bool, List<UDXMultiplexer>> _listenerMultiplexers = {};
 
   /// Optional metrics observer for UDX transport events
   UdxMetricsObserver? metricsObserver;
@@ -129,7 +129,10 @@ class UDXTransport implements Transport {
       // active listener, as in-process tests do — on their own fresh
       // socket, where they belong.
       final isIPv6 = UDX.getAddressFamily(host) == 6;
-      final reused = simultaneousConnect ? _listenerMultiplexers[isIPv6] : null;
+      final familyListeners = _listenerMultiplexers[isIPv6];
+      final reused = simultaneousConnect && familyListeners != null && familyListeners.isNotEmpty
+          ? familyListeners.last
+          : null;
 
       if (reused != null) {
         _logger.fine('[UDXTransport._performDial] Reusing active listener multiplexer (${reused.socket.address.address}:${reused.socket.port}) for dial to $host:$port — required for DCUtR simultaneous-connect.');
@@ -314,7 +317,7 @@ class UDXTransport implements Transport {
       // Register this listener's multiplexer so a subsequent DCUtR punch
       // dial to a peer of the same address family reuses this socket's NAT
       // mapping instead of opening a fresh, unadvertised one.
-      _listenerMultiplexers[isIPv6] = multiplexer;
+      _listenerMultiplexers.putIfAbsent(isIPv6, () => []).add(multiplexer);
 
       final protocol = isIPv6 ? 'ip6' : 'ip4';
       final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
@@ -326,6 +329,13 @@ class UDXTransport implements Transport {
         transport: this,
         connManager: _connManager,
         sessionConnFactory: UDXSessionConn.new,
+        onClosed: () {
+          final familyListeners = _listenerMultiplexers[isIPv6];
+          familyListeners?.remove(multiplexer);
+          if (familyListeners != null && familyListeners.isEmpty) {
+            _listenerMultiplexers.remove(isIPv6);
+          }
+        },
       );
 
       _activeListeners.add(listener); 
