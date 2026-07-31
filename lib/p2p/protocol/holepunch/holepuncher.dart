@@ -1,8 +1,6 @@
 /// The holepuncher implementation for the holepunch protocol.
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/pb/holepunch.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart';
