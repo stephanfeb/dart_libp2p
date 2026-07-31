@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:dart_libp2p/core/crypto/rsa.dart';
+import 'package:pointycastle/pointycastle.dart' as pc;
 import 'package:test/test.dart';
 
 void main() {
@@ -101,6 +102,41 @@ void main() {
 
       final equal = await publicKey.equals(recreatedKey);
       expect(equal, isTrue);
+    });
+
+    test('Public key from SPKI bytes', () async {
+      final keyPair = await generateRsaKeyPair();
+      final algorithm = pc.ASN1Sequence()
+        ..add(pc.ASN1ObjectIdentifier.fromIdentifierString('1.2.840.113549.1.1.1'))
+        ..add(pc.ASN1Null());
+      final spki = pc.ASN1Sequence()
+        ..add(algorithm)
+        ..add(pc.ASN1BitString(stringValues: keyPair.publicKey.raw));
+
+      final recreatedKey = RsaPublicKey.fromRawBytes(Uint8List.fromList(spki.encode()));
+
+      expect(await keyPair.publicKey.equals(recreatedKey), isTrue);
+    });
+
+    test('rejects SPKI bytes for a non-RSA algorithm', () async {
+      final keyPair = await generateRsaKeyPair();
+      final algorithm = pc.ASN1Sequence()
+        ..add(pc.ASN1ObjectIdentifier.fromIdentifierString('1.2.840.10045.2.1'));
+      final spki = pc.ASN1Sequence()
+        ..add(algorithm)
+        ..add(pc.ASN1BitString(stringValues: keyPair.publicKey.raw));
+
+      expect(
+        () => RsaPublicKey.fromRawBytes(Uint8List.fromList(spki.encode())),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects malformed DER', () {
+      expect(
+        () => RsaPublicKey.fromRawBytes(Uint8List.fromList([0x30, 0x01, 0x00])),
+        throwsFormatException,
+      );
     });
 
     test('Get public key from private key', () async {

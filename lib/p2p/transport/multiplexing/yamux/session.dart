@@ -673,10 +673,20 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       final frame = YamuxFrame.synStream(streamId);
       await _sendFrame(frame);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId, waiting for ACK (timeout=${_config.streamWriteTimeout.inSeconds}s)');
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId');
 
-      await completer.future.timeout(_config.streamWriteTimeout);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      // A yamux initiator may send data immediately after SYN. Rust yamux can
+      // acknowledge lazily on its first data/window-update frame, so waiting
+      // here would deadlock both peers. Bound the bookkeeping lifetime even
+      // when a peer never emits a standalone ACK.
+      completer.future.timeout(_config.streamWriteTimeout).then((_) {
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      }).catchError((error) {
+        if (identical(_pendingStreams[streamId], completer)) {
+          _pendingStreams.remove(streamId);
+        }
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] No standalone ACK for streamID=$streamId: $error');
+      });
 
       await stream.open();
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');
