@@ -104,6 +104,41 @@ void main() {
         await remoteTransport.dispose();
       });
 
+      test('closed listeners are not reused by simultaneous connect', () async {
+        final remoteTransport = UDXTransport(
+          config: config,
+          connManager: ConnectionManager(
+            idleTimeout: const Duration(minutes: 5),
+            shutdownTimeout: const Duration(seconds: 30),
+          ),
+        );
+        final closedListener = await transport.listen(
+          MultiAddr('/ip4/127.0.0.1/udp/0/udx'),
+        );
+        final closedPort = closedListener.addr.valueForProtocol('udp');
+        await closedListener.close();
+        final remoteListener = await remoteTransport.listen(
+          MultiAddr('/ip4/127.0.0.1/udp/0/udx'),
+        );
+        final incomingConnection = remoteListener.connectionStream.first;
+
+        final dialerConnection = await transport.dial(
+          remoteListener.addr,
+          simultaneousConnect: true,
+        );
+        final listenerConnection = await incomingConnection;
+
+        expect(
+          dialerConnection.localMultiaddr.valueForProtocol('udp'),
+          isNot(closedPort),
+        );
+
+        await dialerConnection.close();
+        await listenerConnection.close();
+        await remoteListener.close();
+        await remoteTransport.dispose();
+      });
+
       test('should establish connection between listener and dialer', () async {
         print('Starting connection test...');
         final listenerAddr = MultiAddr('/ip4/127.0.0.1/udp/0/udx');
