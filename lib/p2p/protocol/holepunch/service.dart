@@ -17,6 +17,7 @@ import 'package:synchronized/synchronized.dart';
 import '../../../core/network/context.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/network/stream.dart'; // For P2PStream
+import '../circuitv2/util/io.dart';
 import '../../../core/network/common.dart' show Direction; // Import Direction
 import '../../../core/peer/addr_info.dart';
 import '../../discovery/peer_info.dart';
@@ -213,10 +214,10 @@ class HolePunchServiceImpl implements HolePunchService {
     await str.scope().reserveMemory(maxMsgSize, ReservationPriority.always);
     try {
       str.setDeadline(DateTime.now().add(streamTimeout));
+      final reader = DelimitedReader(str, maxMsgSize);
 
       // Read Connect message
-      final msgBytes = await str.read();
-      final msg = HolePunch.fromBuffer(msgBytes);
+      final msg = await reader.readMsg(HolePunch());
       if (msg.type != HolePunch_Type.CONNECT) {
         throw Exception('Expected CONNECT message from initiator but got ${msg.type}');
       }
@@ -237,12 +238,10 @@ class HolePunchServiceImpl implements HolePunchService {
         ..obsAddrs.addAll(addrsToBytes(ownAddrs));
 
       final tstart = DateTime.now();
-      final responseBytes = response.writeToBuffer();
-      await str.write(Uint8List.fromList(responseBytes));
+      await str.write(encodeDelimitedMessage(response));
 
       // Read SYNC message
-      final syncMsgBytes = await str.read();
-      final syncMsg = HolePunch.fromBuffer(syncMsgBytes);
+      final syncMsg = await reader.readMsg(HolePunch());
       if (syncMsg.type != HolePunch_Type.SYNC) {
         throw Exception('Expected SYNC message from initiator but got ${syncMsg.type}');
       }
@@ -252,6 +251,7 @@ class HolePunchServiceImpl implements HolePunchService {
         obsDial,
         ownAddrs,
       );
+
     } finally {
       str.scope().releaseMemory(maxMsgSize);
     }

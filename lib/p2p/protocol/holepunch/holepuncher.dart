@@ -21,7 +21,9 @@ import '../../../core/network/notifiee.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/peer/addr_info.dart';
 import '../../../core/protocol/protocol.dart';
+import '../circuitv2/util/io.dart';
 import '../../discovery/peer_info.dart';
+
 
 /// Logger for the holepuncher
 final _log = Logger('p2p-holepunch');
@@ -259,13 +261,12 @@ class HolePuncher {
         ..type = HolePunch_Type.CONNECT
         ..obsAddrs.addAll(addrsToBytes(obsAddrs));
 
-      // Serialize and write the message
-      final msgBytes = msg.writeToBuffer();
-      await str.write(Uint8List.fromList(msgBytes));
+      // Serialize and write the length-delimited message
+      await str.write(encodeDelimitedMessage(msg));
 
       // Wait for a CONNECT message from the remote peer
-      final responseBytes = await str.read();
-      final response = HolePunch.fromBuffer(responseBytes);
+      final reader = DelimitedReader(str, maxMsgSize);
+      final response = await reader.readMsg(HolePunch());
       final rtt = DateTime.now().difference(start).inMilliseconds;
 
       if (response.type != HolePunch_Type.CONNECT) {
@@ -283,10 +284,10 @@ class HolePuncher {
 
       final syncMsg = HolePunch()..type = HolePunch_Type.SYNC;
       // Serialize and write the sync message
-      final syncMsgBytes = syncMsg.writeToBuffer();
-      await str.write(Uint8List.fromList(syncMsgBytes));
+      await str.write(encodeDelimitedMessage(syncMsg));
 
       return HolePunchResult(addrs, obsAddrs, rtt);
+
     } finally {
       str.scope().releaseMemory(maxMsgSize);
     }
