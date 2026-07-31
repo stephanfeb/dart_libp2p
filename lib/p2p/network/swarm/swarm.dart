@@ -786,11 +786,24 @@ class Swarm implements Network {
         }
       }
       
-      if (healthyConns.isNotEmpty) {
+      // forceDirectDial is set by holepunch/service.dart and holepuncher.dart
+      // on every punch dial, but nothing in this function previously read it
+      // — DCUtR's entire precondition is an existing RELAY connection, so
+      // dialPeer always returned that relay connection here and the punch
+      // dial below (which would actually reach the transport) never ran.
+      // Only skip the short-circuit when every existing healthy connection
+      // is relayed; an already-direct connection is left alone.
+      final forceDirectDial = context.getForceDirectDial().$1;
+      final onlyRelayed = healthyConns.isNotEmpty &&
+          healthyConns.every((c) => c.remoteMultiaddr.hasProtocol('p2p-circuit'));
+
+      if (healthyConns.isNotEmpty && !(forceDirectDial && onlyRelayed)) {
         // Prefer newest connection - more likely to be alive for relayed paths
         // where the end-to-end path can break without local detection
         _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning newest connection ID: ${healthyConns.last.id}');
         return healthyConns.last;
+      } else if (healthyConns.isNotEmpty) {
+        _logger.fine('Swarm.dialPeer: forceDirectDial set and only relayed connection(s) exist for ${peerId.toString()} — dialing fresh addresses instead of reusing the relay connection.');
       } else {
         _logger.warning('Swarm.dialPeer: No healthy connections found for peer ${peerId.toString()}. Will create new connection.');
       }
@@ -1005,8 +1018,13 @@ class Swarm implements Network {
       }
     }
 
-    // Dial the address
-    final transportConn = await transport.dial(dialAddr);
+    // Dial the address. forceDirectDial marks a DCUtR punch attempt, which
+    // hole-punch-capable transports (e.g. UDX) use to dial from the same
+    // socket whose NAT mapping was already advertised to the peer.
+    final transportConn = await transport.dial(
+      dialAddr,
+      simultaneousConnect: context.getForceDirectDial().$1,
+    );
     
     // Upgrade the connection
     final upgradedConn = await _upgrader.upgradeOutbound(

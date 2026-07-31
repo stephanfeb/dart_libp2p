@@ -500,19 +500,26 @@ class MockCircuitV2Client extends _i1.Mock implements _i17.CircuitV2Client {
   _i16.Future<_i10.TransportConn> dial(
     _i13.MultiAddr? addr, {
     Duration? timeout,
+    bool? simultaneousConnect = false,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
           #dial,
           [addr],
-          {#timeout: timeout},
+          {
+            #timeout: timeout,
+            #simultaneousConnect: simultaneousConnect,
+          },
         ),
         returnValue: _i16.Future<_i10.TransportConn>.value(_FakeTransportConn_9(
           this,
           Invocation.method(
             #dial,
             [addr],
-            {#timeout: timeout},
+            {
+              #timeout: timeout,
+              #simultaneousConnect: simultaneousConnect,
+            },
           ),
         )),
       ) as _i16.Future<_i10.TransportConn>);

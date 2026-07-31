@@ -4,6 +4,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:async' as _i13;
+import 'dart:typed_data' as _i19;
 
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as _i6;
 import 'package:dart_libp2p/core/crypto/keys.dart' as _i18;
@@ -161,6 +162,27 @@ class _FakeConnStats_11 extends _i1.SmartFake implements _i10.ConnStats {
 
 class _FakeConnScope_12 extends _i1.SmartFake implements _i9.ConnScope {
   _FakeConnScope_12(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeStreamStats_13 extends _i1.SmartFake implements _i8.StreamStats {
+  _FakeStreamStats_13(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeStreamManagementScope_14 extends _i1.SmartFake
+    implements _i9.StreamManagementScope {
+  _FakeStreamManagementScope_14(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -693,4 +715,202 @@ class MockConn extends _i1.Mock implements _i10.Conn {
           ),
         )),
       ) as _i13.Future<_i8.P2PStream<dynamic>>);
+}
+
+/// A class which mocks [P2PStream].
+///
+/// See the documentation for Mockito's code generation for more information.
+class MockP2PStream<T> extends _i1.Mock implements _i8.P2PStream<T> {
+  MockP2PStream() {
+    _i1.throwOnMissingStub(this);
+  }
+
+  @override
+  _i10.Conn get conn => (super.noSuchMethod(
+        Invocation.getter(#conn),
+        returnValue: _FakeConn_8(
+          this,
+          Invocation.getter(#conn),
+        ),
+      ) as _i10.Conn);
+
+  @override
+  _i8.P2PStream<_i19.Uint8List> get incoming => (super.noSuchMethod(
+        Invocation.getter(#incoming),
+        returnValue: _FakeP2PStream_6<_i19.Uint8List>(
+          this,
+          Invocation.getter(#incoming),
+        ),
+      ) as _i8.P2PStream<_i19.Uint8List>);
+
+  @override
+  bool get isClosed => (super.noSuchMethod(
+        Invocation.getter(#isClosed),
+        returnValue: false,
+      ) as bool);
+
+  @override
+  bool get isWritable => (super.noSuchMethod(
+        Invocation.getter(#isWritable),
+        returnValue: false,
+      ) as bool);
+
+  @override
+  String id() => (super.noSuchMethod(
+        Invocation.method(
+          #id,
+          [],
+        ),
+        returnValue: _i17.dummyValue<String>(
+          this,
+          Invocation.method(
+            #id,
+            [],
+          ),
+        ),
+      ) as String);
+
+  @override
+  String protocol() => (super.noSuchMethod(
+        Invocation.method(
+          #protocol,
+          [],
+        ),
+        returnValue: _i17.dummyValue<String>(
+          this,
+          Invocation.method(
+            #protocol,
+            [],
+          ),
+        ),
+      ) as String);
+
+  @override
+  _i13.Future<void> setProtocol(String? id) => (super.noSuchMethod(
+        Invocation.method(
+          #setProtocol,
+          [id],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i8.StreamStats stat() => (super.noSuchMethod(
+        Invocation.method(
+          #stat,
+          [],
+        ),
+        returnValue: _FakeStreamStats_13(
+          this,
+          Invocation.method(
+            #stat,
+            [],
+          ),
+        ),
+      ) as _i8.StreamStats);
+
+  @override
+  _i9.StreamManagementScope scope() => (super.noSuchMethod(
+        Invocation.method(
+          #scope,
+          [],
+        ),
+        returnValue: _FakeStreamManagementScope_14(
+          this,
+          Invocation.method(
+            #scope,
+            [],
+          ),
+        ),
+      ) as _i9.StreamManagementScope);
+
+  @override
+  _i13.Future<_i19.Uint8List> read([int? maxLength]) => (super.noSuchMethod(
+        Invocation.method(
+          #read,
+          [maxLength],
+        ),
+        returnValue: _i13.Future<_i19.Uint8List>.value(_i19.Uint8List(0)),
+      ) as _i13.Future<_i19.Uint8List>);
+
+  @override
+  _i13.Future<void> write(_i19.Uint8List? data) => (super.noSuchMethod(
+        Invocation.method(
+          #write,
+          [data],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> close() => (super.noSuchMethod(
+        Invocation.method(
+          #close,
+          [],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> closeWrite() => (super.noSuchMethod(
+        Invocation.method(
+          #closeWrite,
+          [],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> closeRead() => (super.noSuchMethod(
+        Invocation.method(
+          #closeRead,
+          [],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> reset() => (super.noSuchMethod(
+        Invocation.method(
+          #reset,
+          [],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> setDeadline(DateTime? time) => (super.noSuchMethod(
+        Invocation.method(
+          #setDeadline,
+          [time],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> setReadDeadline(DateTime? time) => (super.noSuchMethod(
+        Invocation.method(
+          #setReadDeadline,
+          [time],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
+
+  @override
+  _i13.Future<void> setWriteDeadline(DateTime? time) => (super.noSuchMethod(
+        Invocation.method(
+          #setWriteDeadline,
+          [time],
+        ),
+        returnValue: _i13.Future<void>.value(),
+        returnValueForMissingStub: _i13.Future<void>.value(),
+      ) as _i13.Future<void>);
 }
