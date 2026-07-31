@@ -103,6 +103,15 @@ List<MultiAddr> defaultAddrsFactory(List<MultiAddr> addrs) {
   }).toList();
 }
 
+/// Whether two IP multiaddrs belong to the same address family.
+///
+/// Used when expanding an unspecified listener onto concrete interfaces: an
+/// IPv4-bound socket must never be advertised with an IPv6 interface address,
+/// or vice versa.
+bool addressesShareIPFamily(MultiAddr first, MultiAddr second) =>
+    (first.hasProtocol('ip4') && second.hasProtocol('ip4')) ||
+    (first.hasProtocol('ip6') && second.hasProtocol('ip6'));
+
 // Removed AddrsFactory typedef as it's now imported
 
 // Removed MockProtocolSwitch class definition
@@ -860,6 +869,9 @@ class BasicHost implements Host {
           if (_filteredInterfaceAddrs.isNotEmpty) {
             for (final interfaceAddr in _filteredInterfaceAddrs) {
               // interfaceAddr is a bare IP MultiAddr, e.g., /ip4/192.168.10.118
+              // Never attach an IPv4 listener's transport suffix to an IPv6
+              // interface (or vice versa): no socket is listening there.
+              if (!addressesShareIPFamily(listenAddr, interfaceAddr)) continue;
               try {
                 // Combine the interface address string with the suffix string
                 final combinedAddrString = interfaceAddr.toString() + suffixString;
