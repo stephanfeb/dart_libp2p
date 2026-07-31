@@ -21,7 +21,7 @@ import '../../../core/network/notifiee.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/peer/addr_info.dart';
 import '../../../core/protocol/protocol.dart';
-import '../circuitv2/util/io.dart';
+import '../circuitv2/util/buffered_reader.dart';
 import '../../discovery/peer_info.dart';
 
 
@@ -265,8 +265,13 @@ class HolePuncher {
       await str.write(encodeDelimitedMessage(msg));
 
       // Wait for a CONNECT message from the remote peer
-      final reader = DelimitedReader(str, maxMsgSize);
-      final response = await reader.readMsg(HolePunch());
+      final reader = BufferedP2PStreamReader(str);
+      final responseLength = await reader.readVarint();
+      if (responseLength > maxMsgSize) {
+        throw Exception('HolePunch CONNECT response too large: $responseLength bytes');
+      }
+      final responseBytes = await reader.readExact(responseLength);
+      final response = HolePunch.fromBuffer(responseBytes);
       final rtt = DateTime.now().difference(start).inMilliseconds;
 
       if (response.type != HolePunch_Type.CONNECT) {
@@ -287,6 +292,7 @@ class HolePuncher {
       await str.write(encodeDelimitedMessage(syncMsg));
 
       return HolePunchResult(addrs, obsAddrs, rtt);
+
 
     } finally {
       str.scope().releaseMemory(maxMsgSize);
