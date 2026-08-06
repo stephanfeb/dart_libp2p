@@ -45,8 +45,10 @@ class TCPListener implements Listener {
 
   void _handleConnection(Socket socket) async {
     // Create multiaddrs for local and remote endpoints from the accepted socket
-    final localRealAddr = MultiAddr('/ip4/${socket.address.address}/tcp/${socket.port}');
-    final remoteRealAddr = MultiAddr('/ip4/${socket.remoteAddress.address}/tcp/${socket.remotePort}');
+    final localProtocol = socket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+    final remoteProtocol = socket.remoteAddress.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+    final localRealAddr = MultiAddr('/$localProtocol/${socket.address.address}/tcp/${socket.port}');
+    final remoteRealAddr = MultiAddr('/$remoteProtocol/${socket.remoteAddress.address}/tcp/${socket.remotePort}');
     
     try {
       final connection = await _onConnection(socket, localRealAddr, remoteRealAddr);
