@@ -85,6 +85,7 @@ class Config {
   String? identifyProtocolVersion;
   bool? disableSignedPeerRecord;
   bool? disableObservedAddrManager;
+  int? observedAddrActivationThreshold;
   // We can add a field for MetricsTracer for Identify if needed:
   // MetricsTracer? identifyMetricsTracer;
 
@@ -345,6 +346,13 @@ extension ConfigOptions on Config {
     disableObservedAddrManager = disable;
   }
 
+  Future<void> withObservedAddrActivationThreshold(int threshold) async {
+    if (threshold < 1) {
+      throw ArgumentError.value(threshold, 'threshold', 'must be at least 1');
+    }
+    observedAddrActivationThreshold = threshold;
+  }
+
   /// Configures libp2p to enable/disable the Ping service.
   Future<void> withPing(bool enabled) async {
     enablePing = enabled;
@@ -499,6 +507,10 @@ class Libp2p {
 
   static Option identifyDisableObservedAddrManager(bool disable) {
     return (config) => config.withIdentifyDisableObservedAddrManager(disable);
+  }
+
+  static Option observedAddrActivationThreshold(int threshold) {
+    return (config) => config.withObservedAddrActivationThreshold(threshold);
   }
 
   static Option ambientAutoNATv2Config(AmbientAutoNATv2Config conf){
