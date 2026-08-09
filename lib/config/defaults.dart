@@ -116,6 +116,7 @@ Future<void> applyDefaults(Config config) async {
   config.identifyProtocolVersion ??= 'ipfs/0.1.0';
   config.disableSignedPeerRecord ??= false; // Enable signed records by default
   config.disableObservedAddrManager ??= false;
+  config.observedAddrActivationThreshold ??= 4;
 
   // Default AddrsFactory
   config.addrsFactory ??= _defaultAddrsFactoryInternal; // Use internal version

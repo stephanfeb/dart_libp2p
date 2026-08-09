@@ -192,6 +192,7 @@ class IdentifyService implements IDService {
 
   /// Whether to disable the observed address manager
   final bool disableObservedAddrManager;
+  final int observedAddrActivationThreshold;
 
   /// Setup completed completer
   final _setupCompleted = Completer<void>();
@@ -241,7 +242,9 @@ class IdentifyService implements IDService {
     protocolVersion = options?.protocolVersion ?? '0.0.1',
     metricsTracer = options?.metricsTracer,
     disableSignedPeerRecord = options?.disableSignedPeerRecord ?? false,
-    disableObservedAddrManager = options?.disableObservedAddrManager ?? false {
+    disableObservedAddrManager = options?.disableObservedAddrManager ?? false,
+    observedAddrActivationThreshold =
+        options?.observedAddrActivationThreshold ?? 4 {
 
     // Set up observed address manager if enabled
     if (!disableObservedAddrManager) {
@@ -257,6 +260,7 @@ class IdentifyService implements IDService {
       listenAddrs: () => host.network.listenAddresses,
       hostAddrs: () => host.addrs,
       interfaceListenAddrs: () async => await host.network.interfaceListenAddresses,
+      activationThreshold: observedAddrActivationThreshold,
     );
 
     // Create NAT emitter - use factory method

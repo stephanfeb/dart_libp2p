@@ -26,7 +26,7 @@ final _log = Logger('identify.obsaddr');
 /// can be contacted on. The "seen" events expire by default after 40 minutes
 /// (OwnObservedAddressTTL * ActivationThreshold). The are cleaned up during
 /// the GC rounds set by GCInterval.
-const activationThresh = 4;
+const defaultActivationThreshold = 4;
 
 /// observedAddrManagerWorkerChannelSize defines how many addresses can be enqueued
 /// for adding to an ObservedAddrManager.
@@ -65,16 +65,16 @@ ThinWaist? thinWaistForm(MultiAddr a) {
 
   // Check first component is IP
   final (protocol1, _ ) = components[0];
-  if (protocol1.code != Protocols.ip4 &&
-      protocol1.code != Protocols.ip6) {
+  if (protocol1.code != Protocols.ip4.code &&
+      protocol1.code != Protocols.ip6.code) {
     _log.fine('Not a thinwaist address: $a (first component not IP)');
     return null;
   }
 
   final (protocol2, _ ) = components[1];
   // Check second component is TCP or UDP
-  if (protocol2.code != Protocols.tcp &&
-      protocol2.code != Protocols.udp) {
+  if (protocol2.code != Protocols.tcp.code &&
+      protocol2.code != Protocols.udp.code) {
     _log.fine('Not a thinwaist address: $a (second component not TCP/UDP)');
     return null;
   }
@@ -213,6 +213,8 @@ class ObservedAddrManager {
   // Any normalization required before comparing. Useful to remove certhash
   final MultiAddr Function(MultiAddr) _normalize;
 
+  final int _activationThreshold;
+
   // Worker channel for new observations
   final _observationController = StreamController<Observation>();
 
@@ -239,11 +241,17 @@ class ObservedAddrManager {
     required List<MultiAddr> Function() hostAddrs,
     required Future<List<MultiAddr>> Function() interfaceListenAddrs,
     MultiAddr Function(MultiAddr)? normalize,
+    int activationThreshold = defaultActivationThreshold,
   }) : 
     _listenAddrs = listenAddrs,
     _hostAddrs = hostAddrs,
     _interfaceListenAddrs = interfaceListenAddrs,
-    _normalize = normalize ?? ((addr) => addr) {
+    _normalize = normalize ?? ((addr) => addr),
+    _activationThreshold = activationThreshold {
+
+    if (activationThreshold < 1) {
+      throw ArgumentError.value(activationThreshold, 'activationThreshold', 'must be at least 1');
+    }
 
     // Start the worker
     _startWorker();
@@ -366,7 +374,7 @@ class ObservedAddrManager {
     final observerSets = <ObserverSet>[];
 
     for (final v in _externalAddrs[localTWStr]?.values ?? <ObserverSet>[]) {
-      if (v.observedBy.length >= activationThresh) {
+      if (v.observedBy.length >= _activationThreshold) {
         observerSets.add(v);
       }
     }
@@ -406,27 +414,27 @@ class ObservedAddrManager {
     }
   }
 
-  bool _isRelayedAddress(MultiAddr a) {
-    try {
-      a.valueForProtocol(Protocols.circuit.name);
-      return true;
-    } catch (_) {
-      return false;
-    }
+  /// Narrow test seam for observation selection without a full network Conn.
+  void recordFromMultiaddrs(ConnMultiaddrs conn, MultiAddr observed) {
+    if (_closed) return;
+    _maybeRecordObservation(conn, observed);
   }
 
-  bool _shouldRecordObservation(
-    ConnMultiaddrs? conn, 
-    MultiAddr? observed, 
-    {required ThinWaist? localTW, required ThinWaist? observedTW}
+  bool _isRelayedAddress(MultiAddr a) {
+    return a.hasProtocol(Protocols.circuit.name);
+  }
+
+  (ThinWaist, ThinWaist)? _validatedObservation(
+    ConnMultiaddrs? conn,
+    MultiAddr? observed,
   ) {
     if (conn == null || observed == null) {
-      return false;
+      return null;
     }
 
     // Ignore observations from loopback nodes. We already know our loopback addresses.
     if (observed.isLoopback()) {
-      return false;
+      return null;
     }
 
     // Ignore NAT64 addresses (not implemented in Dart yet)
@@ -435,7 +443,7 @@ class ObservedAddrManager {
     // Ignore p2p-circuit addresses. These are the observed address of the relay.
     // Not useful for us.
     if (_isRelayedAddress(observed)) {
-      return false;
+      return null;
     }
 
     // we should only use ObservedAddr when our connection's LocalAddr is one
@@ -447,44 +455,32 @@ class ObservedAddrManager {
       // This is async in Dart, but we need to make it sync for this method
       // In a real implementation, we would make this method async
       // For now, we'll just use the listen addresses
-      ifaceaddrs = _listenAddrs();
+      ifaceaddrs = _listenAddrs().map(_normalize).toList();
     } catch (e) {
       _log.fine('Failed to get interface listen addrs: $e');
-      return false;
-    }
-
-    for (var i = 0; i < ifaceaddrs.length; i++) {
-      ifaceaddrs[i] = _normalize(ifaceaddrs[i]);
+      return null;
     }
 
     final local = _normalize(conn.localMultiaddr);
 
-    final listenAddrs = _listenAddrs();
-    for (var i = 0; i < listenAddrs.length; i++) {
-      listenAddrs[i] = _normalize(listenAddrs[i]);
-    }
+    final listenAddrs = _listenAddrs().map(_normalize).toList();
 
-    if (!ifaceaddrs.contains(local) && !listenAddrs.contains(local)) {
+    if (!ifaceaddrs.any((addr) => addr.equals(local)) &&
+        !listenAddrs.any((addr) => addr.equals(local))) {
       // not in our list
-      return false;
+      return null;
     }
 
     final localThinWaist = thinWaistForm(local);
     if (localThinWaist == null) {
-      return false;
+      return null;
     }
-    localTW = localThinWaist;
-
     final observedThinWaist = thinWaistForm(_normalize(observed));
     if (observedThinWaist == null) {
-      return false;
+      return null;
     }
-    observedTW = observedThinWaist;
 
-    final hostAddrs = _hostAddrs();
-    for (var i = 0; i < hostAddrs.length; i++) {
-      hostAddrs[i] = _normalize(hostAddrs[i]);
-    }
+    final hostAddrs = _hostAddrs().map(_normalize).toList();
 
     // We should reject the connection if the observation doesn't match the
     // transports of one of our advertised addresses.
@@ -494,10 +490,10 @@ class ObservedAddrManager {
         'Observed multiaddr doesn\'t match the transports of any announced addresses: '
         'from ${conn.remoteMultiaddr}, observed $observed'
       );
-      return false;
+      return null;
     }
 
-    return true;
+    return (localThinWaist, observedThinWaist);
   }
 
   /// HasConsistentTransport returns true if the address 'a' shares a
@@ -531,19 +527,11 @@ class ObservedAddrManager {
   }
 
   void _maybeRecordObservation(ConnMultiaddrs conn, MultiAddr observed) {
-    ThinWaist? localTW;
-    ThinWaist? observedTW;
-
-    final shouldRecord = _shouldRecordObservation(
-      conn, 
-      observed, 
-      localTW: localTW, 
-      observedTW: observedTW
-    );
-
-    if (!shouldRecord || localTW == null || observedTW == null) {
+    final validated = _validatedObservation(conn, observed);
+    if (validated == null) {
       return;
     }
+    final (localTW, observedTW) = validated;
 
     _log.fine('Added own observed listen addr: conn=$conn, observed=$observed');
 
