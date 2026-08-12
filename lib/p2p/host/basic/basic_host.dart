@@ -214,6 +214,8 @@ class BasicHost implements Host {
           config.identifyProtocolVersion, // Use config.identifyProtocolVersion
       disableSignedPeerRecord: config.disableSignedPeerRecord ?? false,
       disableObservedAddrManager: config.disableObservedAddrManager ?? false,
+      observedAddrActivationThreshold:
+          config.observedAddrActivationThreshold ?? 4,
       // metricsTracer: config.identifyMetricsTracer, // If added to Config
     );
     _idService = IdentifyService(this, options: identifyOpts);

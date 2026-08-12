@@ -25,6 +25,9 @@ class IdentifyOptions {
   /// Whether to disable the observed address manager.
   /// This also effectively disables the NAT emitter and EvtNATDeviceTypeChanged.
   final bool disableObservedAddrManager;
+
+  /// Distinct observers required before an observed address is advertised.
+  final int observedAddrActivationThreshold;
   
   /// Creates a new set of identify options.
   const IdentifyOptions({
@@ -33,6 +36,7 @@ class IdentifyOptions {
     this.disableSignedPeerRecord = false,
     this.metricsTracer,
     this.disableObservedAddrManager = false,
+    this.observedAddrActivationThreshold = 4,
   });
   
   /// Creates a copy of these options with the given changes.
@@ -42,6 +46,7 @@ class IdentifyOptions {
     bool? disableSignedPeerRecord,
     MetricsTracer? metricsTracer,
     bool? disableObservedAddrManager,
+    int? observedAddrActivationThreshold,
   }) {
     return IdentifyOptions(
       protocolVersion: protocolVersion ?? this.protocolVersion,
@@ -49,6 +54,7 @@ class IdentifyOptions {
       disableSignedPeerRecord: disableSignedPeerRecord ?? this.disableSignedPeerRecord,
       metricsTracer: metricsTracer ?? this.metricsTracer,
       disableObservedAddrManager: disableObservedAddrManager ?? this.disableObservedAddrManager,
+      observedAddrActivationThreshold: observedAddrActivationThreshold ?? this.observedAddrActivationThreshold,
     );
   }
 }
