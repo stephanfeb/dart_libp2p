@@ -59,6 +59,31 @@ class Context {
     return (false, '');
   }
 
+  /// Creates a new Context with the force fresh dial option. Unlike
+  /// [withForceDirectDial] (which only bypasses `Swarm.dialPeer`'s
+  /// existing-healthy-connection reuse when every healthy connection is
+  /// relayed — it exists to force a *direct* dial past a *relay* conn), this
+  /// unconditionally skips that reuse for one dial attempt regardless of the
+  /// existing connection's type. For a caller that has independent, specific
+  /// reason to believe a particular existing connection is broken (e.g. it
+  /// just observed a fast disconnect right after adopting it) even though
+  /// `_isConnectionHealthy` still reports it healthy — a stream-level RST
+  /// that doesn't close the underlying muxed session isn't reflected there
+  /// until the periodic health-probe loop catches up, which can take several
+  /// probe cycles. See stephanfeb/dart_libp2p#23.
+  Context withForceFreshDial(String reason) {
+    return withValue(_forceFreshDialKey, reason);
+  }
+
+  /// Gets the force fresh dial option from the Context
+  (bool, String) getForceFreshDial() {
+    final value = getValue(_forceFreshDialKey);
+    if (value != null) {
+      return (true, value is String ? value : value.toString());
+    }
+    return (false, '');
+  }
+
   /// Creates a new Context with the simultaneous connect option
   Context withSimultaneousConnect(bool isClient, String reason) {
     return withValue(
@@ -155,6 +180,7 @@ class Context {
 // Context keys
 const _noDialKey = 'noDial';
 const _forceDirectDialKey = 'forceDirectDial';
+const _forceFreshDialKey = 'forceFreshDial';
 const _allowLimitedConnKey = 'allowLimitedConn';
 const _simConnectIsServerKey = 'simConnectIsServer';
 const _simConnectIsClientKey = 'simConnectIsClient';
