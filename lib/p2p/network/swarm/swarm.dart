@@ -807,10 +807,12 @@ class Swarm implements Network {
       if (healthyConns.isNotEmpty &&
           !(forceDirectDial && onlyRelayed) &&
           !forceFreshDial) {
-        // Prefer newest connection - more likely to be alive for relayed paths
-        // where the end-to-end path can break without local detection
-        _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning newest connection ID: ${healthyConns.last.id}');
-        return healthyConns.last;
+        // Prefer direct connections over relayed connections. If direct connections exist,
+        // select the newest direct connection; otherwise fall back to the newest relay connection.
+        final directConns = healthyConns.where((c) => !c.remoteMultiaddr.hasProtocol('p2p-circuit')).toList();
+        final bestConn = directConns.isNotEmpty ? directConns.last : healthyConns.last;
+        _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning best connection ID: ${bestConn.id} (isDirect: ${!bestConn.remoteMultiaddr.hasProtocol('p2p-circuit')})');
+        return bestConn;
       } else if (healthyConns.isNotEmpty && forceFreshDial) {
         _logger.fine('Swarm.dialPeer: forceFreshDial set for ${peerId.toString()} — dialing fresh addresses instead of reusing the existing connection.');
       } else if (healthyConns.isNotEmpty) {
