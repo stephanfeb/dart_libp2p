@@ -573,8 +573,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         _log.fine('$_logPrefix [FRAME-SEND-DONE] streamID=${frame.streamId} dataLen=${frame.data.length} writeDuration=${writeDuration.inMilliseconds}ms');
       }
     } catch (e) {
-      _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
-      if (!_closed) {
+      if (_closed || _connection.isClosed) {
+        _log.fine('$_logPrefix Suppressed write error during connection teardown: $e');
+      } else {
+        _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
         _log.warning('$_logPrefix Error sending frame indicates session issue. Initiating GO_AWAY. Error: $e.');
         _goAway(YamuxCloseReason.internalError);
       }
