@@ -31,6 +31,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/ipfs/go-cid"
+	golog "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
 	"gopkg.in/yaml.v3"
 )
@@ -81,6 +82,8 @@ func yamuxTransport(cfg *PeerConfig) *yamux.Transport {
 }
 
 func main() {
+	golog.SetLogLevel("holepunch", "debug")
+	golog.SetLogLevel("net/identify", "debug")
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 8192)
@@ -193,11 +196,17 @@ func createHostWithRelay(port int, transport string, cfg *PeerConfig) (host.Host
 		return nil, fmt.Errorf("generate key: %w", err)
 	}
 
+	dummyPublic, _ := multiaddr.NewMultiaddr("/ip4/1.2.3.4/tcp/1234")
+
 	opts := []libp2p.Option{
 		libp2p.Identity(priv),
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Muxer("/yamux/1.0.0", yamuxTransport(cfg)),
 		libp2p.EnableRelay(),
+		libp2p.EnableHolePunching(),
+		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			return append(addrs, dummyPublic)
+		}),
 	}
 	opts = append(opts, transportOpts(transport, port)...)
 	return libp2p.New(opts...)

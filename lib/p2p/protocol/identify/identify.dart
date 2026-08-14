@@ -1394,42 +1394,37 @@ class IdentifyService implements IDService {
     final peerId = conn.remotePeer;
     final identifyWaitStart = DateTime.now();
 
-    
     Completer<void>? completerToAwait;
-
+    bool alreadyIdentified = false;
+    bool connClosed = false;
 
     await _connsMutex.synchronized( () async {
       final mutexAcquiredTime = DateTime.now().difference(identifyWaitStart);
 
-      
       var entry = _conns[conn];
 
       if (entry != null) {
         // OPTIMIZATION: If identify already succeeded for this connection, return immediately.
-        // This prevents re-running identify on every newStream call, which would cause
-        // 30-second timeouts when the connection is stale.
+        // This prevents re-running identify on every newStream call.
         if (entry.identifySucceeded) {
           _log.fine(' [IDENTIFY-WAIT-ALREADY-SUCCEEDED] Peer $peerId already identified on this connection, skipping');
-          // completerToAwait remains null, so function will return immediately
+          alreadyIdentified = true;
           return;
         }
 
         if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
-
           completerToAwait = entry.identifyWaitCompleter;
           // No need to spawn _identifyConn again if one is already running for this entry.
         } else {
-
           entry.identifyWaitCompleter = Completer<void>();
           completerToAwait = entry.identifyWaitCompleter;
           // Spawn _identifyConn as this is a new request for this entry or previous one completed/failed.
           _spawnIdentifyConn(conn, entry);
         }
       } else {
-
         if (conn.isClosed) {
           _log.warning(' [IDENTIFY-WAIT-PHASE-1-CONN-CLOSED] Connection to peer=$peerId is already closed. Not creating entry or starting identify.');
-          // Completer to await will remain null, function will return.
+          connClosed = true;
           return;
         }
 
@@ -1439,13 +1434,14 @@ class IdentifyService implements IDService {
         _spawnIdentifyConn(conn, entry);
       }
     });
-    
-    final mutexReleasedTime = DateTime.now().difference(identifyWaitStart);
 
+    if (alreadyIdentified || connClosed) {
+      return;
+    }
 
     if (completerToAwait == null) {
       _log.warning(' [IDENTIFY-WAIT-NO-COMPLETER] No completer to await for peer=$peerId (e.g., connection was closed). Identify will not complete.');
-      return; // Or throw, depending on desired behavior for closed conns.
+      return;
     }
 
 
@@ -1722,28 +1718,7 @@ class _NetNotifiee implements Notifiee {
       _log.finer('Identify.Notifiee.connected: Released _connsMutex for $peerId.');
     });
 
-    // IDENTIFY PROTOCOL COORDINATION FIX:
-    // Only the dialer (outbound connection initiator) should start identify protocol
-    // to prevent bidirectional race conditions where both peers create identify streams simultaneously
-
-    // Skip identify for relay connections. The inbound side's counter-identify
-    // exchange fails (DATA frames don't arrive in time), causing a 30s timeout.
-    // Relay connections are already Noise-authenticated, so identify is not required.
-    final connTransport = conn.state.transport;
-    final isRelayConn = connTransport == 'circuit-relay';
-    if (isRelayConn) {
-      _log.fine('[IDENTIFY-COORDINATION] Relay connection to $peerId (${conn.stat.stats.direction}) — skipping identify');
-      // Mark identify as succeeded so identifyWait returns immediately
-      await _ids._connsMutex.synchronized(() async {
-        final entry = _ids._conns[conn];
-        if (entry != null) {
-          entry.identifySucceeded = true;
-          if (entry.identifyWaitCompleter != null && !entry.identifyWaitCompleter!.isCompleted) {
-            entry.identifyWaitCompleter!.complete();
-          }
-        }
-      });
-    } else if (conn.stat.stats.direction == Direction.outbound) {
+    if (conn.stat.stats.direction == Direction.outbound) {
       _log.fine('🔧 [IDENTIFY-COORDINATION] Outbound connection to $peerId. This peer is the DIALER - initiating identify protocol.');
       // Don't await here to avoid blocking the notifiee callback.
       // identifyWait itself handles its asynchronous nature.

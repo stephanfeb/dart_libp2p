@@ -1487,57 +1487,45 @@ class BasicHost implements Host {
 
     final identifyStartTime = DateTime.now();
 
-    // Skip identify for relay connections. Relay connections are already
-    // Noise-authenticated and the identify exchange fails because the inbound
-    // side's counter-identify DATA frames never reach the outbound side in time,
-    // causing a 30s timeout that blocks all protocol negotiation.
-    final connTransport = stream.conn.state.transport;
-    final isRelayConn = connTransport == 'circuit-relay';
-    if (isRelayConn) {
-      _log.fine(
-        '[newStream Phase 3] Skipping identify for relay connection to ${p.toBase58()} on stream ${stream.id()}',
-      );
-    } else {
-      _log.warning(
-        '🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...',
-      );
+    _log.warning(
+      '🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...',
+    );
 
+    try {
+      await _idService.identifyWait(stream.conn);
+    } on IdentifyTimeoutException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.warning(
+        '⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms',
+      );
+      await stream.reset();
+
+      // CRITICAL: Remove the stale connection to prevent persistent failure loops.
+      // The identify timeout indicates the connection is dead - keeping it would
+      // cause repeated 30-second timeouts on subsequent operations.
       try {
-        await _idService.identifyWait(stream.conn);
-      } on IdentifyTimeoutException catch (e) {
-        final totalTime = DateTime.now().difference(startTime);
         _log.warning(
-          '⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms',
+          '🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}',
         );
-        await stream.reset();
-
-        // CRITICAL: Remove the stale connection to prevent persistent failure loops.
-        // The identify timeout indicates the connection is dead - keeping it would
-        // cause repeated 30-second timeouts on subsequent operations.
-        try {
-          _log.warning(
-            '🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}',
-          );
-          await _network.closePeer(p);
-        } catch (closeError) {
-          _log.warning(
-            '⚠️ [newStream Phase 3] Error closing stale connection: $closeError',
-          );
-        }
-
-        rethrow;
-      } on IdentifyException catch (e) {
-        final totalTime = DateTime.now().difference(startTime);
-        _log.severe(
-          '❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e',
+        await _network.closePeer(p);
+      } catch (closeError) {
+        _log.warning(
+          '⚠️ [newStream Phase 3] Error closing stale connection: $closeError',
         );
-        await stream.reset();
-        rethrow;
       }
-      _log.warning(
-        '✅ [newStream Phase 3] Identify complete for stream ${stream.id()}',
+
+      rethrow;
+    } on IdentifyException catch (e) {
+      final totalTime = DateTime.now().difference(startTime);
+      _log.severe(
+        '❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e',
       );
+      await stream.reset();
+      rethrow;
     }
+    _log.warning(
+      '✅ [newStream Phase 3] Identify complete for stream ${stream.id()}',
+    );
 
     final identifyTime = DateTime.now().difference(identifyStartTime);
 
