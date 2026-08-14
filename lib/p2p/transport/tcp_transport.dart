@@ -40,7 +40,7 @@ class TCPTransport implements Transport {
        _connManager = connManager ?? ConnectionManager();
 
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
+  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
     final host = addr.valueForProtocol('ip4') ?? addr.valueForProtocol('ip6');
     final port = int.parse(addr.valueForProtocol('tcp') ?? '0');
 
@@ -64,8 +64,10 @@ class TCPTransport implements Transport {
       );
 
       // Create multiaddrs for local and remote endpoints
-      final localAddr = MultiAddr('/ip4/${socket.address.address}/tcp/${socket.port}');
-      final remoteAddr = MultiAddr('/ip4/${socket.remoteAddress.address}/tcp/${socket.remotePort}');
+      final localProtocol = socket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final remoteProtocol = socket.remoteAddress.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final localAddr = MultiAddr('/$localProtocol/${socket.address.address}/tcp/${socket.port}');
+      final remoteAddr = MultiAddr('/$remoteProtocol/${socket.remoteAddress.address}/tcp/${socket.remotePort}');
 
       // Placeholder PeerIDs - these should be derived from a security handshake
       // which typically happens before or as part of the transport upgrade process.
@@ -112,7 +114,8 @@ class TCPTransport implements Transport {
     try {
       final server = await ServerSocket.bind(host, port);
       // Create a new multiaddr with the actual port that was assigned
-      final boundAddr = MultiAddr('/ip4/$host/tcp/${server.port}');
+      final boundProtocol = server.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+      final boundAddr = MultiAddr('/$boundProtocol/$host/tcp/${server.port}');
       final listener = TCPListener(
         server,
         addr: boundAddr,

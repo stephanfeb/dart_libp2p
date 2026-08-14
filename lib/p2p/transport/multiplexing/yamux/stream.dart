@@ -447,8 +447,8 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       await Future.delayed(Duration(milliseconds: 10));
       _log.finer('$_logPrefix Applied 10ms pacing for slow transport (avg: ${avgLatency.inMilliseconds}ms)');
     } else {
-      // Fast transport - minimal delay to yield control
-      await Future.delayed(Duration(milliseconds: 1));
+      // Fast transport - minimal yield to event loop without 1ms delay
+      await Future.delayed(Duration.zero);
     }
   }
 
@@ -706,7 +706,6 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
             } catch (e) {
               final completerErrorDuration = DateTime.now().difference(attemptStartTime);
               _readCompleter = null;
-              _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
 
               // Handle all terminal state transitions during read gracefully.
               // When connection closes abruptly, forceReset() sets state to 'reset',
@@ -715,9 +714,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
               if (_state == YamuxStreamState.closing ||
                   _state == YamuxStreamState.closed ||
                   _state == YamuxStreamState.reset) {
-                _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state, returning EOF');
+                _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state after ${completerErrorDuration.inMilliseconds}ms, returning EOF');
                 return Uint8List(0); // Return EOF instead of throwing
               }
+
+              _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
 
               // For other errors, rethrow with context
               rethrow;

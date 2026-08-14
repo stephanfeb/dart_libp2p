@@ -381,6 +381,7 @@ class UDXListener implements Listener {
   final UDXTransport _transport;
   final ConnManager _connManager;
   final UDXSessionConnFactory _sessionConnFactory;
+  final void Function()? _onClosed;
 
   final StreamController<TransportConn> _incomingSessionController = StreamController<TransportConn>.broadcast();
   bool _isClosed = false;
@@ -393,11 +394,13 @@ class UDXListener implements Listener {
     required UDXTransport transport,
     required ConnManager connManager,
     UDXSessionConnFactory? sessionConnFactory,
+    void Function()? onClosed,
   }) : _multiplexer = listeningSocket,
         _boundAddr = boundAddr,
         _transport = transport,
         _connManager = connManager,
-        _sessionConnFactory = sessionConnFactory ?? UDXSessionConn.new {
+        _sessionConnFactory = sessionConnFactory ?? UDXSessionConn.new,
+        _onClosed = onClosed {
     _logger.fine('[UDXListener $addr] Constructor: Initializing for $_boundAddr.');
     _logger.fine('[UDXListener $addr] Constructor: Subscribing to multiplexer connections...');
 
@@ -549,6 +552,7 @@ class UDXListener implements Listener {
     _logger.fine('[UDXListener $addr] close called. Is already closed: $_isClosed');
     if (_isClosed) return;
     _isClosed = true;
+    _onClosed?.call();
 
     if (!_incomingSessionController.isClosed) {
       _logger.fine('[UDXListener $addr] Closing incoming session controller.');

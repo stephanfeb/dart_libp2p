@@ -573,8 +573,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         _log.fine('$_logPrefix [FRAME-SEND-DONE] streamID=${frame.streamId} dataLen=${frame.data.length} writeDuration=${writeDuration.inMilliseconds}ms');
       }
     } catch (e) {
-      _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
-      if (!_closed) {
+      if (_closed || _connection.isClosed) {
+        _log.fine('$_logPrefix Suppressed write error during connection teardown: $e');
+      } else {
+        _log.severe('$_logPrefix Error sending frame: Type=${frame.type}, StreamID=${frame.streamId}. Error: $e');
         _log.warning('$_logPrefix Error sending frame indicates session issue. Initiating GO_AWAY. Error: $e.');
         _goAway(YamuxCloseReason.internalError);
       }
@@ -673,10 +675,20 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     try {
       final frame = YamuxFrame.synStream(streamId);
       await _sendFrame(frame);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId, waiting for ACK (timeout=${_config.streamWriteTimeout.inSeconds}s)');
+      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId');
 
-      await completer.future.timeout(_config.streamWriteTimeout);
-      _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      // A yamux initiator may send data immediately after SYN. Rust yamux can
+      // acknowledge lazily on its first data/window-update frame, so waiting
+      // here would deadlock both peers. Bound the bookkeeping lifetime even
+      // when a peer never emits a standalone ACK.
+      completer.future.timeout(_config.streamWriteTimeout).then((_) {
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
+      }).catchError((error) {
+        if (identical(_pendingStreams[streamId], completer)) {
+          _pendingStreams.remove(streamId);
+        }
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] No standalone ACK for streamID=$streamId: $error');
+      });
 
       await stream.open();
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');

@@ -17,6 +17,7 @@ import 'package:synchronized/synchronized.dart';
 import '../../../core/network/context.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/network/stream.dart'; // For P2PStream
+import '../circuitv2/util/buffered_reader.dart';
 import '../../../core/network/common.dart' show Direction; // Import Direction
 import '../../../core/peer/addr_info.dart';
 import '../../discovery/peer_info.dart';
@@ -213,9 +214,14 @@ class HolePunchServiceImpl implements HolePunchService {
     await str.scope().reserveMemory(maxMsgSize, ReservationPriority.always);
     try {
       str.setDeadline(DateTime.now().add(streamTimeout));
+      final reader = BufferedP2PStreamReader(str);
 
       // Read Connect message
-      final msgBytes = await str.read();
+      final msgLength = await reader.readVarint();
+      if (msgLength > maxMsgSize) {
+        throw Exception('HolePunch CONNECT message too large: $msgLength bytes');
+      }
+      final msgBytes = await reader.readExact(msgLength);
       final msg = HolePunch.fromBuffer(msgBytes);
       if (msg.type != HolePunch_Type.CONNECT) {
         throw Exception('Expected CONNECT message from initiator but got ${msg.type}');
@@ -237,12 +243,15 @@ class HolePunchServiceImpl implements HolePunchService {
         ..obsAddrs.addAll(addrsToBytes(ownAddrs));
 
       final tstart = DateTime.now();
-      final responseBytes = response.writeToBuffer();
-      await str.write(Uint8List.fromList(responseBytes));
+      await str.write(encodeDelimitedMessage(response));
 
       // Read SYNC message
-      final syncMsgBytes = await str.read();
-      final syncMsg = HolePunch.fromBuffer(syncMsgBytes);
+      final syncLength = await reader.readVarint();
+      if (syncLength > maxMsgSize) {
+        throw Exception('HolePunch SYNC message too large: $syncLength bytes');
+      }
+      final syncBytes = await reader.readExact(syncLength);
+      final syncMsg = HolePunch.fromBuffer(syncBytes);
       if (syncMsg.type != HolePunch_Type.SYNC) {
         throw Exception('Expected SYNC message from initiator but got ${syncMsg.type}');
       }
@@ -252,6 +261,8 @@ class HolePunchServiceImpl implements HolePunchService {
         obsDial,
         ownAddrs,
       );
+
+
     } finally {
       str.scope().releaseMemory(maxMsgSize);
     }

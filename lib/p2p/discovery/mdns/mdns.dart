@@ -219,7 +219,7 @@ class MdnsDiscovery implements Discovery {
         domain: 'local',
         timeout: const Duration(seconds: 10), // Extended timeout for better discovery
         wantUnicastResponse: false,
-        reusePort: true,
+        reusePort: defaultMdnsReusePort(isAndroid: Platform.isAndroid),
         reuseAddress: true,
         multicastHops: 1,
       );
@@ -362,3 +362,7 @@ class _CompositeNotifee implements MdnsNotifee {
     }
   }
 }
+/// Returns the mDNS port-reuse policy for the current platform.
+///
+/// Android does not support the `SO_REUSEPORT` behavior used by `mdns_dart`.
+bool defaultMdnsReusePort({required bool isAndroid}) => !isAndroid;

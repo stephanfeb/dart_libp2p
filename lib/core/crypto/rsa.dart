@@ -46,14 +46,60 @@ class RsaPublicKey implements p2pkeys.PublicKey {
 
   /// Creates an RsaPublicKey from raw bytes (DER encoded)
   factory RsaPublicKey.fromRawBytes(Uint8List bytes) {
-    final parser = pc.ASN1Parser(bytes);
-    final asn1Sequence = parser.nextObject() as pc.ASN1Sequence;
-    final publicKey = RSAPublicKey(
-      (asn1Sequence.elements?[0] as pc.ASN1Integer).integer!,
-      (asn1Sequence.elements?[1] as pc.ASN1Integer).integer!,
-    );
-    
-    return RsaPublicKey(publicKey);
+    try {
+      final parser = pc.ASN1Parser(bytes);
+      final topLevel = parser.nextObject();
+      if (topLevel is! pc.ASN1Sequence || parser.hasNext()) {
+        throw const FormatException('Expected one RSA public-key sequence');
+      }
+
+      final elements = topLevel.elements;
+      if (elements == null || elements.length != 2) {
+        throw const FormatException('Invalid RSA public-key sequence');
+      }
+
+      pc.ASN1Sequence keySequence;
+      if (elements[0] is pc.ASN1Integer && elements[1] is pc.ASN1Integer) {
+        keySequence = topLevel; // PKCS#1 RSAPublicKey.
+      } else {
+        final algorithm = elements[0];
+        final subjectPublicKey = elements[1];
+        if (algorithm is! pc.ASN1Sequence ||
+            algorithm.elements == null ||
+            algorithm.elements!.isEmpty ||
+            algorithm.elements!.first is! pc.ASN1ObjectIdentifier ||
+            (algorithm.elements!.first as pc.ASN1ObjectIdentifier).objectIdentifierAsString != '1.2.840.113549.1.1.1' ||
+            subjectPublicKey is! pc.ASN1BitString ||
+            subjectPublicKey.unusedbits != 0 ||
+            subjectPublicKey.stringValues == null) {
+          throw const FormatException('Invalid RSA SubjectPublicKeyInfo');
+        }
+
+        final innerParser = pc.ASN1Parser(Uint8List.fromList(subjectPublicKey.stringValues!));
+        final inner = innerParser.nextObject();
+        if (inner is! pc.ASN1Sequence || innerParser.hasNext()) {
+          throw const FormatException('Invalid RSA key in SubjectPublicKeyInfo');
+        }
+        keySequence = inner;
+      }
+
+      final keyElements = keySequence.elements;
+      if (keyElements == null ||
+          keyElements.length != 2 ||
+          keyElements[0] is! pc.ASN1Integer ||
+          keyElements[1] is! pc.ASN1Integer) {
+        throw const FormatException('Invalid PKCS#1 RSA public key');
+      }
+
+      return RsaPublicKey(RSAPublicKey(
+        (keyElements[0] as pc.ASN1Integer).integer!,
+        (keyElements[1] as pc.ASN1Integer).integer!,
+      ));
+    } on FormatException {
+      rethrow;
+    } catch (error) {
+      throw FormatException('Invalid RSA public key: $error');
+    }
   }
 
   factory RsaPublicKey.unmarshal(Uint8List bytes){
@@ -360,5 +406,4 @@ p2pkeys.PublicKey unmarshalRsaPublicKey(Uint8List bytes) {
   }
   return RsaPublicKey.fromRawBytes(Uint8List.fromList(pbKey.data));
 }
-
 
