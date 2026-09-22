@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2026-09-23
+## [2.0.0] - 2026-09-23
+
+### Breaking
+
+- **Requires dart_udx ^3.0.0, whose wire protocol v3 does not interoperate with v2.** A node on this release cannot connect to a 1.0.x node over UDX: a version mismatch is dropped on receive and looks like an unreachable peer. Both ends of a UDX connection must be upgraded together. No dart_libp2p API changed; the break is on the wire. See dart-udx's changelog for what v3 buys, chiefly per-stream reassembly so a gap on one stream no longer stalls the others, which matters here because UDX carries every libp2p stream.
 
 ### Changed
 - **Default yamux `maxFrameSize` raised from 16KB to 256KB** — Larger frames improve throughput for large responses. The 16KB default limited head-of-line blocking when an encrypted message was lost in transit; dart_udx 2.0.3 reassembles streams on byte offsets rather than packet sequence, so smaller frames buy less than they did. Pass `maxFrameSize` to `MultiplexerConfig` to keep the old value.
