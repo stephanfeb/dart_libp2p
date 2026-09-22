@@ -1,0 +1,39 @@
+# Dart
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+.DS_Store
+
+# Dart package files
+.pub/
+.pub-cache/
+
+# Test coverage
+coverage/
+.test_coverage.dart
+*.lcov
+
+# Documentation
+doc/api/
+
+# Temporary files
+*.swp
+*~ 
+
+*.code-workspace
+
+# Runtime peer identity written by tests/examples
+sf_storage/
+
+# Netem/interop harnesses. They live in bin/ because the test Dockerfiles
+# compile them from there, but they are development tools, not package
+# binaries, and dht_relay_netem_test.dart uses a dev dependency.
+bin/dht_relay_netem_test.dart
+bin/interop_netem_test.dart
