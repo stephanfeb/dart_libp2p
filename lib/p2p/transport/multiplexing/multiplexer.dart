@@ -104,7 +104,7 @@ class MultiplexerConfig {
     this.maxStreams = 1000,
     this.initialStreamWindowSize = 256 * 1024, // 256KB
     this.maxStreamWindowSize = 16 * 1024 * 1024, // 16MB
-    this.maxFrameSize = 16 * 1024, // 16KB - balances throughput vs resilience
+    this.maxFrameSize = 256 * 1024, // 256KB - larger frames improve throughput for feed responses
     this.streamReadTimeout = const Duration(seconds: 30),
     this.streamWriteTimeout = const Duration(seconds: 30),
     this.keepAliveInterval = const Duration(seconds: 10),
