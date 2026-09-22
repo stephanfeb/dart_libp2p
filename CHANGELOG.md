@@ -5,11 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-09-23
+
+### Changed
+- **Default yamux `maxFrameSize` raised from 16KB to 256KB** — Larger frames improve throughput for large responses. The 16KB default limited head-of-line blocking when an encrypted message was lost in transit; dart_udx 2.0.3 reassembles streams on byte offsets rather than packet sequence, so smaller frames buy less than they did. Pass `maxFrameSize` to `MultiplexerConfig` to keep the old value.
 
 ### Fixed
-- **Yamux streams never freed their slot** — A stream that finished (local close, local or remote reset, or remote FIN read to EOF) stayed in the session's stream table until the whole session closed, so `numStreams` only grew and every connection refused new streams with `Bad state: Maximum streams reached` once it had opened `maxStreams` of them. Streams now release their slot when they reach a terminal state, and late frames for a finished stream are dropped at `fine` level instead of logged as a warning.
-- **Uncaught `Session closed while opening stream` error** — If a Yamux session was torn down while `openStream()` was still writing its SYN, the pending ACK completer failed with no listener, so the error escaped to the caller's zone as an uncaught error on top of the error `openStream()` itself returned. The completer is now marked handled; `openStream()` still fails as before.
+- **Yamux streams never freed their slot** — A stream that finished (local close, local or remote reset, or a remote FIN read to EOF) stayed in the session's stream table until the whole session closed, so `numStreams` only grew and every connection refused new streams with `Bad state: Maximum streams reached` once it had opened `maxStreams` of them. Streams now release their slot when they reach a terminal state, and frames arriving for a finished stream are logged at `fine` instead of as a warning.
+- **Uncaught `Session closed while opening stream` error** — If a session was torn down while `openStream()` was still writing its SYN, the pending ACK completer failed with no listener, so the error escaped to the caller's zone as an uncaught error on top of the error `openStream()` itself returned. The completer is now marked handled; `openStream()` still fails as before.
+- **Identify raced with the protocol book** — `ProtoBook.setProtocols`/`addProtocols`/`removeProtocols` were declared `void` but implemented as `Future<void>`, so identify did not await them and the protocol book could still be empty right after `connect()` returned. These now return `Future<void>` and every caller awaits them.
+- **Stalled inbound protocol negotiations hung forever** — The active inbound path in `Swarm._handleIncomingStreams` called `mux.handle()` without a deadline, bypassing the one `BasicHost` sets. It now applies a configurable deadline (10s by default) and clears it afterwards.
+- **DHT streams failed after a relay reservation over UDX** — Incoming yamux streams arriving between `acceptStream()` calls were dropped by a broadcast controller and are now buffered in a queue; `SecuredConnection` separates encryption (locked) from UDX transmission (lock-free) through an async write queue, so the Noise lock no longer blocks yamux; and identify refreshes its snapshot in `start()` and `sendIdentifyResp()` so the first exchange advertises the protocols actually registered.
+- **UDX transport error handling on macOS** — Transient errors (connection refused, no route to host, connection timed out) are recognised by their macOS errno values as well as the Linux ones, and the raw socket is closed when a connection fails, which leaked a socket before.
+
+### Changed (internal)
+- Diagnostic logging added while debugging UDX relay issues is back at `fine` level, removing per-frame and timing noise from production logs.
+- Test infrastructure: Docker plus netem harness reproducing the production DHT stream failure against the go-ricochet binary.
 
 ## [1.0.3] - 2026-02-22
 
