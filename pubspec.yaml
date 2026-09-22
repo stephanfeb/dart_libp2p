@@ -41,8 +41,10 @@ dependencies:
   stack_trace: ^1.12.1
 
 dev_dependencies:
-  dart_libp2p_kad_dht: ^1.2.0
-  dart_libp2p_pubsub: ^1.1.0
+  # 1.3.0 is the first release of each that accepts dart_libp2p 2.x; the
+  # overrides below keep development on the local checkouts.
+  dart_libp2p_kad_dht: ^1.3.0
+  dart_libp2p_pubsub: ^1.3.0
   mockito: ^5.4.5
   build_runner: ^2.4.15
   protoc_builder: ^0.4.1
@@ -53,3 +55,7 @@ dev_dependencies:
 dependency_overrides:
   dart_udx:
     path: ../dart-udx
+  dart_libp2p_kad_dht:
+    path: ../dart-libp2p-kad-dht
+  dart_libp2p_pubsub:
+    path: ../dart-libp2p-pubsub
