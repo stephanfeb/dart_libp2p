@@ -76,6 +76,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   String get _logPrefix => "[$_instanceId][${_isClient ? "Client" : "Server"}]";
   int _lastPingId = 0;
   final _pendingStreams = <int, Completer<void>>{};
+  // Highest stream ID the remote has opened, so a late frame for one of its
+  // finished streams can be told apart from a frame for a stream that never
+  // existed.
+  int _highestRemoteStreamId = 0;
   
   // Ping-pong timeout detection
   final Map<int, DateTime> _pendingPings = {};
@@ -388,6 +392,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       final streamHandleStart = DateTime.now();
       await streamData.handleFrame(frame);
       final streamHandleDuration = DateTime.now().difference(streamHandleStart);
+    } else if (_isFinishedStream(frame.streamId)) {
+      // Normal after a local close or reset: the remote's FIN, or data it
+      // sent before it saw our FIN, arrives after the stream was released.
+      _log.fine('$_logPrefix Dropping ${frame.type} for finished stream ID ${frame.streamId}. Flags: ${frame.flags}, Length: ${frame.length}');
     } else {
       _log.warning('$_logPrefix 🔧 [YAMUX-HANDLE-FRAME-DATA-ERROR] Received ${frame.type} for unknown/closed stream ID ${frame.streamId}. Flags: ${frame.flags}, Length: ${frame.length}');
       // If it's a DATA for a non-existent stream, it could be a protocol error.
@@ -459,10 +467,14 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       remotePeer: _remotePeerOrNull,
       maxFrameSize: _config.maxFrameSize,
       metricsObserver: metricsObserver,
+      onClosed: _releaseStream,
       logPrefix: "$_logPrefix StreamID=${frame.streamId}",
     );
 
     _streams[frame.streamId] = stream;
+    if (frame.streamId > _highestRemoteStreamId) {
+      _highestRemoteStreamId = frame.streamId;
+    }
 
     // Fire-and-forget SYN-ACK: don't block the read loop waiting for the
     // write to complete. If the UDX congestion controller is stalled,
@@ -504,6 +516,22 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       _streams.remove(frame.streamId);
       await stream.reset().catchError((_) {});
     }
+  }
+
+  /// Frees a finished stream's slot. The identity check keeps a late call
+  /// from removing a different stream registered under the same ID.
+  void _releaseStream(YamuxStream stream) {
+    if (identical(_streams[stream.streamId], stream)) {
+      _streams.remove(stream.streamId);
+    }
+  }
+
+  /// Whether [streamId] belongs to a stream this session once had open.
+  bool _isFinishedStream(int streamId) {
+    final ours = (streamId % 2 == 1) == _isClient;
+    return ours
+        ? streamId < _nextStreamId
+        : streamId > 0 && streamId <= _highestRemoteStreamId;
   }
 
   Future<void> _handlePing(YamuxFrame frame) async {
@@ -658,6 +686,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       remotePeer: _remotePeerOrNull, // May be null before security handshake
       maxFrameSize: _config.maxFrameSize, // Limit frame size for resilience
       metricsObserver: metricsObserver, // For metrics reporting
+      onClosed: _releaseStream,
       logPrefix: "$_logPrefix StreamID=$streamId",
     );
 
@@ -668,6 +697,11 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     
 
     final completer = Completer<void>();
+    // Session cleanup can fail this completer while the SYN write below is
+    // still pending, before anything awaits the completer. Marking it handled
+    // stops that error escaping as an uncaught error in the caller's zone;
+    // the await below still sees it.
+    completer.future.ignore();
     _pendingStreams[streamId] = completer;
 
     try {

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Yamux streams never freed their slot** — A stream that finished (local close, local or remote reset, or remote FIN read to EOF) stayed in the session's stream table until the whole session closed, so `numStreams` only grew and every connection refused new streams with `Bad state: Maximum streams reached` once it had opened `maxStreams` of them. Streams now release their slot when they reach a terminal state, and late frames for a finished stream are dropped at `fine` level instead of logged as a warning.
+- **Uncaught `Session closed while opening stream` error** — If a Yamux session was torn down while `openStream()` was still writing its SYN, the pending ACK completer failed with no listener, so the error escaped to the caller's zone as an uncaught error on top of the error `openStream()` itself returned. The completer is now marked handled; `openStream()` still fails as before.
+
 ## [1.0.3] - 2026-02-22
 
 ### Fixed

@@ -72,6 +72,14 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   
   /// Metrics observer for reporting stream events
   final YamuxMetricsObserver? _metricsObserver;
+
+  /// Called once when the stream reaches a terminal state, so the session
+  /// can free the stream's slot. Without it a finished stream would count
+  /// against maxStreams until the whole session closed.
+  final void Function(YamuxStream stream)? _onClosed;
+
+  /// Whether [_onClosed] has been called.
+  bool _released = false;
   
   /// Remote peer ID for metrics reporting
   final PeerId? _remotePeer;
@@ -193,6 +201,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     PeerId? remotePeer, // For metrics reporting (null before security handshake)
     required int maxFrameSize, // Maximum DATA frame payload size
     YamuxMetricsObserver? metricsObserver, // For metrics reporting
+    void Function(YamuxStream stream)? onClosed,
     String? logPrefix,
   })  : streamId = id,
         streamProtocol = protocol,
@@ -204,6 +213,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
         _remotePeer = remotePeer,
         _maxFrameSize = maxFrameSize,
         _metricsObserver = metricsObserver,
+        _onClosed = onClosed,
         _logPrefix = logPrefix ?? "StreamID=$id" {
     _log.fine('$_logPrefix Constructor. Initial local window: $_localReceiveWindow, Initial remote window (our send): $_remoteReceiveWindow, Max frame size: $_maxFrameSize');
   }
@@ -1012,6 +1022,11 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     }
     // _outgoingController is managed by the session, not closed here.
     _log.fine('$_logPrefix _cleanup() finished. Final state: $_state');
+
+    if (!_released) {
+      _released = true;
+      _onClosed?.call(this);
+    }
   }
 
   @override

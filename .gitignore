@@ -28,3 +28,6 @@ doc/api/
 *~ 
 
 *.code-workspace
+
+# Runtime peer identity written by tests/examples
+sf_storage/
