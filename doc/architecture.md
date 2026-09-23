@@ -29,10 +29,6 @@ graph TD
     M --> S
     S --> T
     T --> NW[Physical Network]
-
-    style H fill:#f9f,stroke:#333,stroke-width:2px
-    style N fill:#ccf,stroke:#333,stroke-width:2px
-    style T fill:#cfc,stroke:#333,stroke-width:2px
 ```
 
 ### Core Components
