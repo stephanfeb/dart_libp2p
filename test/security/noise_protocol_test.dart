@@ -21,7 +21,7 @@ import 'package:test/test.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/security/security_protocol.dart';
-import 'package:dart_libp2p/pb/noise/payload.pb.dart';
+import 'package:dart_libp2p/p2p/security/noise/pb/payload.pb.dart';
 import '../mocks/noise_mock_connection.dart';
 import 'package:dart_libp2p/p2p/security/noise/xx_pattern.dart';
 import 'package:collection/collection.dart'; // For ListEquality

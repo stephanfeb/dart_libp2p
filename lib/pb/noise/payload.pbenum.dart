@@ -1,11 +1,5 @@
-//
-//  Generated code. Do not modify.
-//  source: proto/noise/payload.proto
-//
-// @dart = 2.12
+/// Moved to `package:dart_libp2p/p2p/security/noise/pb/payload.pbenum.dart`.
+@Deprecated('Import package:dart_libp2p/p2p/security/noise/pb/payload.pbenum.dart')
+library;
 
-// ignore_for_file: annotate_overrides, camel_case_types, comment_references
-// ignore_for_file: constant_identifier_names, library_prefixes
-// ignore_for_file: non_constant_identifier_names, prefer_final_fields
-// ignore_for_file: unnecessary_import, unnecessary_this, unused_import
-
+export '../../p2p/security/noise/pb/payload.pbenum.dart';
