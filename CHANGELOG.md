@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking
+
+- **RSA and ECDSA peer IDs change.** `PeerId.fromPublicKey`/`fromPrivateKey` stored the marshalled key under a sha2-256 multihash code without hashing it, so any key over 42 bytes got a long `22…` ID that no other libp2p implementation produces or accepts. Keys are now hashed, and RSA public keys marshal to PKIX (SubjectPublicKeyInfo) as the spec requires, so RSA IDs match go-libp2p's `Qm…` IDs. Ed25519 IDs are unchanged. Any stored RSA or ECDSA peer ID produced by an earlier release must be re-derived.
+
+### Fixed
+- **Noise rejected non-Ed25519 peers** — the handshake payload's identity key was always decoded as Ed25519, so RSA peers such as the IPFS bootstrap relays could not connect. Any supported key type is now accepted, and RSA keys in SPKI form are parsed. (Darren Warner)
+- **Yamux streams deadlocked against rust-libp2p** — `openStream()` waited for the remote's ACK before returning, but rust-libp2p sends its ACK with its first frame on the stream, which it only sends after reading ours. `openStream()` now returns once the SYN is sent, as the yamux spec allows and go-yamux does. (Darren Warner)
+
 ## [2.0.0] - 2026-09-23
 
 ### Breaking

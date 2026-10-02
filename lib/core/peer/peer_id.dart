@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:bs58/bs58.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:dcid/dcid.dart' as cid_lib; // Added alias
 import 'package:dart_libp2p/core/routing/routing.dart';
 import 'package:dart_multihash/dart_multihash.dart';
@@ -18,19 +19,18 @@ class PeerId {
   PeerId(this._multihash);
 
   /// Creates a PeerId from a public key
-  PeerId.fromPublicKey(PublicKey publicKey) {
-    final keyBytes = publicKey.marshal();
+  PeerId.fromPublicKey(PublicKey publicKey)
+      : _multihash = _multihashOfKey(publicKey.marshal());
 
-    // If key is small enough, use identity multihash
+  /// Derives a peer ID multihash from a marshalled public key: the key itself
+  /// (identity) when it fits inline, otherwise its SHA2-256 digest.
+  static Uint8List _multihashOfKey(Uint8List keyBytes) {
     if (keyBytes.length <= _maxInlineKeyLength) {
-      final identityMultihash = Multihash.encode('identity', keyBytes);
-      _multihash = identityMultihash.toBytes();
-      return;
+      return Multihash.encode('identity', keyBytes).toBytes();
     }
-
-    // Otherwise use SHA2-256
-    final sha256Multihash = Multihash.encode('sha2-256', keyBytes);
-    _multihash = sha256Multihash.toBytes();
+    // Multihash.encode takes a digest, not the data to hash.
+    final digest = Uint8List.fromList(sha256.convert(keyBytes).bytes);
+    return Multihash.encode('sha2-256', digest).toBytes();
   }
 
   /// Decode accepts an encoded peer ID and returns the decoded ID if the input is
@@ -104,21 +104,8 @@ class PeerId {
   }
 
   /// Creates a PeerId from a private key
-  PeerId.fromPrivateKey(PrivateKey privateKey) {
-    final publicKey = privateKey.publicKey;
-    final keyBytes = publicKey.marshal();
-
-    // If key is small enough, use identity multihash
-    if (keyBytes.length <= _maxInlineKeyLength) {
-      final identityMultihash = Multihash.encode('identity', keyBytes);
-      _multihash = identityMultihash.toBytes();
-      return;
-    }
-
-    // Otherwise use SHA2-256
-    final sha256Multihash = Multihash.encode('sha2-256', keyBytes);
-    _multihash = sha256Multihash.toBytes();
-  }
+  PeerId.fromPrivateKey(PrivateKey privateKey)
+      : _multihash = _multihashOfKey(privateKey.publicKey.marshal());
 
   /// Creates a PeerId from a multihash
   static PeerId fromMultihash(Uint8List bytes) {

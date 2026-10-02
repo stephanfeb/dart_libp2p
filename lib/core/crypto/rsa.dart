@@ -87,12 +87,21 @@ class RsaPublicKey implements p2pkeys.PublicKey {
   @override
   pb.KeyType get type => pb.KeyType.RSA;
 
+  /// The DER-encoded PKIX (SubjectPublicKeyInfo) form of the key, as the
+  /// libp2p spec requires and go-libp2p produces. Peer IDs are derived from
+  /// these bytes, so any other encoding yields IDs other peers reject.
   @override
   Uint8List get raw {
-    final asn1Sequence = pc.ASN1Sequence();
-    asn1Sequence.add(pc.ASN1Integer(_key.modulus));
-    asn1Sequence.add(pc.ASN1Integer(_key.exponent));
-    return Uint8List.fromList(asn1Sequence.encode());
+    final pkcs1 = pc.ASN1Sequence()
+      ..add(pc.ASN1Integer(_key.modulus))
+      ..add(pc.ASN1Integer(_key.exponent));
+    final algorithm = pc.ASN1Sequence()
+      ..add(pc.ASN1ObjectIdentifier.fromIdentifierString('1.2.840.113549.1.1.1'))
+      ..add(pc.ASN1Null());
+    final spki = pc.ASN1Sequence()
+      ..add(algorithm)
+      ..add(pc.ASN1BitString(stringValues: pkcs1.encode()));
+    return Uint8List.fromList(spki.encode());
   }
 
   @override
