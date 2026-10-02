@@ -378,6 +378,10 @@ class Swarm implements Network {
             // Mark this peer as being upgraded to prevent race condition
             final peerIdStr = remotePeerIdStr; // Capture non-null value
             upgradingCompleter = Completer<SwarmConn>();
+            // A dial that finds this peer upgrading waits on the future; when
+            // none does, a failed upgrade's error would go unhandled and
+            // reach the isolate's error handler. The dial still sees it.
+            upgradingCompleter.future.ignore();
             await _connLock.synchronized(() {
               _upgradingConnections[peerIdStr] = upgradingCompleter!;
               _relayConnectedPeers.add(peerIdStr);
