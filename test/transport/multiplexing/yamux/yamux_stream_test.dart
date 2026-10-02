@@ -618,6 +618,45 @@ void main() {
         expect(readResult.isEmpty, isTrue);
       });
 
+      // go-yamux and js-libp2p half-close with WINDOW_UPDATE|FIN (length 0)
+      // rather than an empty DATA|FIN; both are valid Yamux.
+      YamuxFrame windowUpdateFin(int delta) => YamuxFrame(
+            type: YamuxFrameType.windowUpdate,
+            flags: YamuxFlags.fin,
+            streamId: 1,
+            length: delta,
+            data: Uint8List(0),
+          );
+
+      test('handles remote closure sent on a WINDOW_UPDATE', () async {
+        if (stream.streamState == YamuxStreamState.init) {
+          await stream.open();
+        }
+        await stream.handleFrame(windowUpdateFin(0));
+        expect(stream.streamState, equals(YamuxStreamState.closing));
+        expect((await stream.read()).isEmpty, isTrue);
+      });
+
+      test('a pending read gets EOF from a WINDOW_UPDATE FIN', () async {
+        if (stream.streamState == YamuxStreamState.init) {
+          await stream.open();
+        }
+        final pending = stream.read();
+        await Future.delayed(const Duration(milliseconds: 10));
+        await stream.handleFrame(windowUpdateFin(0));
+        expect((await pending.timeout(const Duration(seconds: 2))).isEmpty, isTrue);
+      });
+
+      test('data sent before a WINDOW_UPDATE FIN is read before EOF', () async {
+        if (stream.streamState == YamuxStreamState.init) {
+          await stream.open();
+        }
+        await stream.handleFrame(YamuxFrame.createData(1, Uint8List.fromList([1, 2, 3])));
+        await stream.handleFrame(windowUpdateFin(1000));
+        expect(await stream.read(), equals([1, 2, 3]));
+        expect((await stream.read().timeout(const Duration(seconds: 2))).isEmpty, isTrue);
+      });
+
       test('closes cleanly with pending reads', () async {
 
         //FIXME: Should revisit this test. It looks like this requirement

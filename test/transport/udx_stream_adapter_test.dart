@@ -162,6 +162,21 @@ void main() {
       expect(adapter.isClosed, isTrue);
     });
 
+    // A peer resetting the stream (or the whole connection) surfaces as an
+    // error on the UDX data stream. Nothing has to be watching onClose for
+    // that: an error nobody listened for used to escape as an unhandled
+    // exception and kill the process.
+    test('a remote reset with nobody watching onClose is not an unhandled error', () async {
+      when(mockUdxStream.close()).thenAnswer((_) async {});
+
+      udxDataController.addError(StreamResetError(1));
+      await pumpEventQueue();
+
+      expect(adapter.isClosed, isTrue);
+      // A later listener still learns why.
+      await expectLater(adapter.onClose, throwsA(anything));
+    });
+
     test('remote close event closes the adapter', () async {
       when(mockUdxStream.close()).thenAnswer((_) async {});
       

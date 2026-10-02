@@ -833,6 +833,10 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     if (!_closedCompleter.isCompleted) {
         _logger.fine('[UDXSessionConn $id] Completing close completer with error: $error');
+        // The error is for whoever watches onClose, and usually nobody does. Mark
+        // it handled, or a peer resetting the stream crashes the process with
+        // an unhandled exception; a later onClose listener still receives it.
+        _closedCompleter.future.ignore();
         _closedCompleter.completeError(error, stackTrace);
     }
     await close(); 

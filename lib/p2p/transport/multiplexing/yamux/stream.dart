@@ -808,6 +808,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       switch (frame.type) {
         case YamuxFrameType.windowUpdate:
           await _handleWindowUpdateFrame(frame);
+          // go-yamux and js-libp2p half-close with WINDOW_UPDATE|FIN rather
+          // than an empty DATA|FIN. Ignoring the flag meant a Dart stream never
+          // saw them end. Hand it to the DATA path so it takes effect exactly
+          // as a DATA FIN does, behind any data frames still queued there.
+          if (frame.flags & YamuxFlags.fin != 0) {
+            await _handleDataFrameOptimized(YamuxFrame.createData(frame.streamId, Uint8List(0), fin: true));
+          }
           break;
 
         case YamuxFrameType.ping:

@@ -591,19 +591,26 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       ) as _i22.Future<void>);
 
   @override
-  void deliverData(_i23.Uint8List? data) => super.noSuchMethod(
+  void deliverData(
+    int? offset,
+    _i23.Uint8List? data,
+  ) =>
+      super.noSuchMethod(
         Invocation.method(
           #deliverData,
-          [data],
+          [
+            offset,
+            data,
+          ],
         ),
         returnValueForMissingStub: null,
       );
 
   @override
-  void deliverFin() => super.noSuchMethod(
+  void deliverFin(int? finalSize) => super.noSuchMethod(
         Invocation.method(
           #deliverFin,
-          [],
+          [finalSize],
         ),
         returnValueForMissingStub: null,
       );
@@ -680,6 +687,15 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
         returnValue: _i22.Future<void>.value(),
         returnValueForMissingStub: _i22.Future<void>.value(),
       ) as _i22.Future<void>);
+
+  @override
+  void deliverStreamDataBlocked() => super.noSuchMethod(
+        Invocation.method(
+          #deliverStreamDataBlocked,
+          [],
+        ),
+        returnValueForMissingStub: null,
+      );
 
   @override
   void setWindow(int? newSize) => super.noSuchMethod(
@@ -1183,10 +1199,22 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as _i13.ConnectionCids);
 
   @override
+  bool get isServer => (super.noSuchMethod(
+        Invocation.getter(#isServer),
+        returnValue: false,
+      ) as bool);
+
+  @override
   _i22.Future<void> get handshakeComplete => (super.noSuchMethod(
         Invocation.getter(#handshakeComplete),
         returnValue: _i22.Future<void>.value(),
       ) as _i22.Future<void>);
+
+  @override
+  bool get isHandshakeCompleted => (super.noSuchMethod(
+        Invocation.getter(#isHandshakeCompleted),
+        returnValue: false,
+      ) as bool);
 
   @override
   bool get closing => (super.noSuchMethod(
@@ -1400,6 +1428,15 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
         returnValue: _i22.Future<void>.value(),
         returnValueForMissingStub: _i22.Future<void>.value(),
       ) as _i22.Future<void>);
+
+  @override
+  int allocateIncomingStreamId(int? requested) => (super.noSuchMethod(
+        Invocation.method(
+          #allocateIncomingStreamId,
+          [requested],
+        ),
+        returnValue: 0,
+      ) as int);
 
   @override
   void registerStream(_i15.UDXStream? stream) => super.noSuchMethod(
