@@ -23,7 +23,7 @@ Add `dart_libp2p` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  dart_libp2p: ^0.5.2
+  dart_libp2p: ^3.0.0
 ```
 
 Then run:

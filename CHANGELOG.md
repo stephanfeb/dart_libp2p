@@ -5,13 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] - 2026-10-02
 
 ### Breaking
 
 - **RSA and ECDSA peer IDs change.** `PeerId.fromPublicKey`/`fromPrivateKey` stored the marshalled key under a sha2-256 multihash code without hashing it, so any key over 42 bytes got a long `22…` ID that no other libp2p implementation produces or accepts. Keys are now hashed, and RSA public keys marshal to PKIX (SubjectPublicKeyInfo) as the spec requires, so RSA IDs match go-libp2p's `Qm…` IDs. Ed25519 IDs are unchanged. Any stored RSA or ECDSA peer ID produced by an earlier release must be re-derived.
 
+### Changed
+
+- **Requires dart_udx ^3.1.0**, which fixes interoperability with go-udx and js-udx: frame type codes, STREAM_DATA_BLOCKED, ACK range overflow, connections from one address, and several streams on one connection (go-udx and js-udx open every stream to destination 0, and 3.0.0 merged them all into the first). The wire version is unchanged.
+
 ### Fixed
+- **Yamux never saw go-libp2p or js-libp2p end a stream** — they half-close with a WINDOW_UPDATE carrying FIN rather than an empty DATA frame with FIN; both are valid Yamux, but the FIN flag on WINDOW_UPDATE was ignored. `read()` kept waiting, protocol handlers that read to EOF never finished, and js-libp2p's connection monitor aborted idle connections to Dart nodes after ~20 s because its half-open ping streams piled up. The FIN now takes the DATA path, so it lands behind any data still queued.
+- **A peer resetting a UDX stream crashed the process** — `UDXP2PStreamAdapter` and `UDXSessionConn` completed their `onClose` future with the error, and usually nothing listens to it, so a remote reset escaped as an unhandled `UDXTransportException`. The future is now marked handled; an `onClose` listener still receives the error.
 - **Noise rejected non-Ed25519 peers** — the handshake payload's identity key was always decoded as Ed25519, so RSA peers such as the IPFS bootstrap relays could not connect. Any supported key type is now accepted, and RSA keys in SPKI form are parsed. (Darren Warner)
 - **Yamux streams deadlocked against rust-libp2p** — `openStream()` waited for the remote's ACK before returning, but rust-libp2p sends its ACK with its first frame on the stream, which it only sends after reading ours. `openStream()` now returns once the SYN is sent, as the yamux spec allows and go-yamux does. (Darren Warner)
 
