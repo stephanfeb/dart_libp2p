@@ -281,6 +281,10 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _logger.fine('[UDXP2PStreamAdapter ${id()}] _closeWithError called with error: $error');
     if (!_closedCompleter.isCompleted) {
       _logger.fine('[UDXP2PStreamAdapter ${id()}] Completing close completer with error.');
+      // The error is for whoever watches onClose, and usually nobody does. Mark
+      // it handled, or a peer resetting the stream crashes the process with
+      // an unhandled exception; a later onClose listener still receives it.
+      _closedCompleter.future.ignore();
       _closedCompleter.completeError(error, stackTrace);
     }
     await _close();
