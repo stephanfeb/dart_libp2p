@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **DCUtR punches got their port rewritten by the NAT** — the uncoordinated direct dial DCUtR makes before punching was flagged as a simultaneous connect, so UDX sent it from the listener socket. Its unanswered packets left a NAT entry for that port pair at the peer's NAT, and the real punch from the same port was then given a different external port. Only punch dials are now simultaneous connects (`Context.withSimultaneousConnect`, which the hole punch code had been setting under keys nothing read); a force-direct dial alone uses a fresh socket. With this, two Dart peers behind cone NATs establish a direct UDX connection in the holepunch docker harness.
+- **AutoNAT v2 dropped connections to the peers it probed** — the server dialed back through the host itself, so a dial-back could reuse an existing (even relayed) connection and confirm an address it never dialed, and its cleanup closed every connection to the peer and cleared its addresses. In a DCUtR exchange this removed the relayed connection the punch was coordinated over. AutoNAT v2 now dials back from a separate host with its own identity, swarm and peerstore, as go-libp2p does.
+- **AutoNAT v2 never confirmed an address** — the client looked up the dial-back nonce, a protobuf `Int64`, in a map keyed by `int`, so every dial-back was rejected and every probe failed.
+
 ## [4.0.0] - 2026-10-03
 
 ### Breaking
