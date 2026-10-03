@@ -27,7 +27,7 @@ dependencies:
 
   # Wire protocol v3; not interoperable with 2.x. The override below keeps
   # local development on the checkout, and is removed before publishing.
-  dart_udx: ^3.1.0
+  dart_udx: ^4.0.0
 
   dcid: ^1.0.0
 

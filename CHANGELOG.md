@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-04
+
+DCUtR hole punching interoperates with go-libp2p over UDX, and ECDSA keys, identify and AutoNAT v2 now behave as in go-libp2p.
+
 ### Breaking
 
+- **`Transport.dial` takes a `simultaneousConnect` parameter.** `dial(addr, {Duration? timeout, bool simultaneousConnect = false})` tells a transport that the dial is a DCUtR hole punch. Every `Transport` implementation must add the parameter; transports that cannot hole punch can ignore it. (Dmytro Naumenko)
 - **ECDSA keys and signatures now match go-libp2p.** Public keys marshalled as a bare `SEQUENCE { x, y }` and private keys as `SEQUENCE { d, x, y }`; they now marshal as PKIX (SubjectPublicKeyInfo) and SEC 1 `ECPrivateKey`, as the spec and go-libp2p require, so ECDSA peer IDs change again and now equal go-libp2p's. Signatures were made and checked over SHA-256(SHA-256(data)), because pointycastle's signer hashed data the code had already hashed, so no other implementation could verify them; they now cover SHA-256(data) with an RFC 6979 nonce. Both legacy key forms still unmarshal (P-256 only); P-256, P-384 and P-521 keys from go-libp2p are accepted. Points off the curve and SEC 1 keys whose public key does not match the private value are rejected.
 
 ### Added
@@ -18,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Requires dart_udx ^4.0.0**, in which crossing dials stay two connections, as with go-udx and js-udx; a hole punch to a go-libp2p peer needs it. The wire version is unchanged.
 - **A fresh clone builds from published packages.** The dev dependencies on `dart_libp2p_kad_dht` and `dart_libp2p_pubsub` were circular: both depend on dart_libp2p and accept only `<3.0.0`, so pub could not resolve them for 4.0.0, and the committed path overrides hid this only on machines with all the sibling repos checked out. The DHT and GossipSub Go interop tests moved to those packages; a local dart-udx override now goes in a git-ignored `pubspec_overrides.yaml` (see README).
 
 ### Fixed
@@ -37,17 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AutoNAT v2 dropped connections to the peers it probed** — the server dialed back through the host itself, so a dial-back could reuse an existing (even relayed) connection and confirm an address it never dialed, and its cleanup closed every connection to the peer and cleared its addresses. In a DCUtR exchange this removed the relayed connection the punch was coordinated over. AutoNAT v2 now dials back from a separate host with its own identity, swarm and peerstore, as go-libp2p does.
 - **go-libp2p could not reserve on a Dart relay** — the relay sent the reservation voucher as a bare protobuf, but relay v2 requires an envelope signed by the relay under `libp2p-relay-rsvp`, and go-libp2p rejected the reservation with `MALFORMED_MESSAGE`. The voucher is now sealed with the relay's key.
 - **AutoRelay never reserved on a relay connected after start** — RelayFinder asked its peer source for candidates once at start and never again, because each later tick was skipped while the finder was listening, which is always. Hosts also advertised the circuit client's bare `/p2p-circuit` listen address, which no peer can dial; it is no longer advertised.
-- **The UDX listener dropped a second connection from the same address** — it kept one session per `host:port` and closed any later connection from that address as a duplicate. go-udx and js-udx dial every connection from one socket, and a hole punch leaves an inbound and an outbound connection to the same peer; sessions are now kept per connection. Together with dart-udx's fix for crossing dials (unreleased), a Dart peer and a go-libp2p peer establish a direct UDX connection by hole punching.
+- **The UDX listener dropped a second connection from the same address** — it kept one session per `host:port` and closed any later connection from that address as a duplicate. go-udx and js-udx dial every connection from one socket, and a hole punch leaves an inbound and an outbound connection to the same peer; sessions are now kept per connection. Together with dart_udx 4.0.0's fix for crossing dials, a Dart peer and a go-libp2p peer establish a direct UDX connection by hole punching.
 - **AutoNAT v2 never confirmed an address** — the client looked up the dial-back nonce, a protobuf `Int64`, in a map keyed by `int`, so every dial-back was rejected and every probe failed.
-
-## [4.0.0] - 2026-10-03
-
-### Breaking
-
-- **`Transport.dial` takes a `simultaneousConnect` parameter.** `dial(addr, {Duration? timeout, bool simultaneousConnect = false})` tells a transport that the dial is a DCUtR hole punch. Every `Transport` implementation must add the parameter; transports that cannot hole punch can ignore it. (Dmytro Naumenko)
-
-### Fixed
-
 - **DCUtR did not interoperate with go-libp2p** — holepunch messages were written without a length prefix and read with a single unbounded `read()`, but go-libp2p frames them with an unsigned varint length. A Dart peer failed with `InvalidProtocolBufferException` on go's CONNECT and go reset the stream. Messages are now length-delimited and read through a buffered reader. (Dmytro Naumenko)
 - **The punch dial never ran** — `BasicHost.connect` and `Swarm.dialPeer` returned the existing relayed connection, which DCUtR always starts from, so the holepuncher logged a successful direct connection without dialing. Force-direct dials now skip a relayed connection and never dial `/p2p-circuit` addresses; previously a new relayed connection could win the race and be reported as a hole punch. (Dmytro Naumenko)
 - **The answering side of DCUtR threw before dialing** — `Context.getForceDirectDial()` cast its value to `String`, but the hole punch service stores `true`. (Dmytro Naumenko)
