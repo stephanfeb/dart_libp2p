@@ -59,6 +59,20 @@ class MockContext implements Context {
   }
 
   @override
+  Context withForceFreshDial(String reason) {
+    return withValue(_forceFreshDialKey, reason);
+  }
+
+  @override
+  (bool, String) getForceFreshDial() {
+    final value = getValue(_forceFreshDialKey);
+    if (value != null) {
+      return (true, value as String);
+    }
+    return (false, '');
+  }
+
+  @override
   Context withSimultaneousConnect(bool isClient, String reason) {
     return withValue(
       isClient ? _simConnectIsClientKey : _simConnectIsServerKey,
@@ -158,6 +172,7 @@ class MockContext implements Context {
 // Context keys (copied from Context class)
 const _noDialKey = 'noDial';
 const _forceDirectDialKey = 'forceDirectDial';
+const _forceFreshDialKey = 'forceFreshDial';
 const _allowLimitedConnKey = 'allowLimitedConn';
 const _simConnectIsServerKey = 'simConnectIsServer';
 const _simConnectIsClientKey = 'simConnectIsClient';
