@@ -1718,19 +1718,15 @@ class _NetNotifiee implements Notifiee {
       _log.finer('Identify.Notifiee.connected: Released _connsMutex for $peerId.');
     });
 
-    if (conn.stat.stats.direction == Direction.outbound) {
-      _log.fine('🔧 [IDENTIFY-COORDINATION] Outbound connection to $peerId. This peer is the DIALER - initiating identify protocol.');
-      // Don't await here to avoid blocking the notifiee callback.
-      // identifyWait itself handles its asynchronous nature.
-      _ids.identifyWait(conn).catchError((e, st) {
-        _log.warning('Identify.Notifiee.connected: identifyWait for outbound $peerId failed in background: $e\n$st');
-        // Error is already handled and emitted by identifyWait/spawnIdentifyConn
-      });
-    } else {
-      _log.fine('🔧 [IDENTIFY-COORDINATION] Inbound connection from $peerId. This peer is the LISTENER - waiting for remote to initiate identify protocol.');
-      // Listener side: Do NOT initiate identify protocol
-      // The remote dialer will initiate identify protocol and we'll handle it via handleIdentifyRequest()
-    }
+    // Identify from both ends, as go-libp2p does. The protocol only informs
+    // the side that opens the stream, so a listener that left identify to
+    // the dialer never learned the dialer's addresses, protocols or key.
+    // Don't await here to avoid blocking the notifiee callback.
+    _ids.identifyWait(conn).catchError((e, st) {
+      final direction = conn.stat.stats.direction == Direction.outbound ? 'outbound' : 'inbound';
+      _log.warning('Identify.Notifiee.connected: identifyWait for $direction $peerId failed in background: $e\n$st');
+      // Error is already handled and emitted by identifyWait/spawnIdentifyConn
+    });
   }
 
   @override

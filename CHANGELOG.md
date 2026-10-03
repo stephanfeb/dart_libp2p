@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A host never identified peers that dialed it** — identify ran only on outbound connections, but the protocol informs only the side that opens the stream, so the listener never learned a dialer's listen addresses, protocols, agent version or public key, and got no observed address from it, until it happened to open a stream itself. Identify now runs on every new connection from both ends, as go-libp2p does.
 - **`generateEcdsaKeyPair()` never returned** — it called itself instead of the commented-out generator it meant to use. It now generates a P-256 key pair.
 - **A refused TCP dial seemed to go to a random port** — Dart's `SocketException` for a failed connect reports the socket's local ephemeral port, and the TCP transport passed that text through, so the error named a port the library never dialed. The error now names the dialed multiaddr. (#14, reported by cloudabe)
 - **AmbientAutoNATv2 left its event bus subscription open after `close()`** — it cancelled its listener but never closed the subscription, so the bus kept delivering events into it.
