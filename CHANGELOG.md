@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Context.withForceFreshDial`** makes `Swarm.dialPeer` dial a new connection even when a healthy one exists, for a caller that knows a connection is broken before the swarm's health checks notice. (Dmytro Naumenko)
+
 ### Fixed
 
+- **IPv6 TCP listeners crashed `host.start()`** — TCP built its local, remote and listen addresses with `/ip4/` whatever the socket's family, so an IPv6 socket produced `/ip4/::1/...`, which fails to parse. Addresses now take the socket's family, as UDX already did. (Dmytro Naumenko)
 - **DCUtR punches got their port rewritten by the NAT** — the uncoordinated direct dial DCUtR makes before punching was flagged as a simultaneous connect, so UDX sent it from the listener socket. Its unanswered packets left a NAT entry for that port pair at the peer's NAT, and the real punch from the same port was then given a different external port. Only punch dials are now simultaneous connects (`Context.withSimultaneousConnect`, which the hole punch code had been setting under keys nothing read); a force-direct dial alone uses a fresh socket. With this, two Dart peers behind cone NATs establish a direct UDX connection in the holepunch docker harness.
 - **AutoNAT v2 dropped connections to the peers it probed** — the server dialed back through the host itself, so a dial-back could reuse an existing (even relayed) connection and confirm an address it never dialed, and its cleanup closed every connection to the peer and cleared its addresses. In a DCUtR exchange this removed the relayed connection the punch was coordinated over. AutoNAT v2 now dials back from a separate host with its own identity, swarm and peerstore, as go-libp2p does.
 - **go-libp2p could not reserve on a Dart relay** — the relay sent the reservation voucher as a bare protobuf, but relay v2 requires an envelope signed by the relay under `libp2p-relay-rsvp`, and go-libp2p rejected the reservation with `MALFORMED_MESSAGE`. The voucher is now sealed with the relay's key.
