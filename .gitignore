@@ -31,3 +31,6 @@ doc/api/
 
 # Runtime peer identity written by tests/examples
 sf_storage/
+
+# Local dependency overrides (see README)
+pubspec_overrides.yaml

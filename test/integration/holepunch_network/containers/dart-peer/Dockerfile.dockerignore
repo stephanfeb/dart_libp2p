@@ -3,8 +3,6 @@
 *
 !dart-libp2p
 !dart-udx
-!dart-libp2p-kad-dht
-!dart-libp2p-pubsub
 **/.dart_tool
 **/.git
 **/build

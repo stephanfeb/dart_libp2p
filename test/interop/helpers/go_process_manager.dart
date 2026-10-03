@@ -36,20 +36,18 @@ class GoProcessManager {
 
   List<String> get output => List.unmodifiable(_output);
 
-  /// Builds the Go peer binary if it doesn't exist.
+  /// Builds the Go peer binary. Go builds incrementally, so this is quick
+  /// when nothing changed, and a binary left from older sources is never
+  /// reused.
   static Future<String> ensureBinary(String goSourceDir) async {
     final binaryPath = '$goSourceDir/go-peer';
-    final binary = File(binaryPath);
-
-    if (!await binary.exists()) {
-      final result = await Process.run(
-        'go',
-        ['build', '-o', 'go-peer', '.'],
-        workingDirectory: goSourceDir,
-      );
-      if (result.exitCode != 0) {
-        throw Exception('Failed to build Go peer: ${result.stderr}');
-      }
+    final result = await Process.run(
+      'go',
+      ['build', '-o', 'go-peer', '.'],
+      workingDirectory: goSourceDir,
+    );
+    if (result.exitCode != 0) {
+      throw Exception('Failed to build Go peer: ${result.stderr}');
     }
     return binaryPath;
   }

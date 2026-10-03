@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Libp2p.observedAddrActivationThreshold`** sets how many peers must report the same observed address before it is used (default 4), for a host that trusts fewer observers. (Dmytro Naumenko)
 - **`Context.withForceFreshDial`** makes `Swarm.dialPeer` dial a new connection even when a healthy one exists, for a caller that knows a connection is broken before the swarm's health checks notice. (Dmytro Naumenko)
 
+### Changed
+
+- **A fresh clone builds from published packages.** The dev dependencies on `dart_libp2p_kad_dht` and `dart_libp2p_pubsub` were circular: both depend on dart_libp2p and accept only `<3.0.0`, so pub could not resolve them for 4.0.0, and the committed path overrides hid this only on machines with all the sibling repos checked out. The DHT and GossipSub Go interop tests moved to those packages; a local dart-udx override now goes in a git-ignored `pubspec_overrides.yaml` (see README).
+
 ### Fixed
 
 - **Observed addresses were never activated** — three logic errors in the observed-address manager (protocol codes compared with `Protocol` objects, a missing circuit component treated as present, and parsed values assigned through parameters Dart cannot return through) rejected every observation. (Dmytro Naumenko)

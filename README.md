@@ -185,6 +185,22 @@ Run the test suite:
 dart test
 ```
 
+A fresh clone builds against the published packages. To develop against a
+local [dart-udx](https://github.com/stephanfeb/dart-udx) checkout, create a
+`pubspec_overrides.yaml` (git-ignored) next to `pubspec.yaml`:
+
+```yaml
+dependency_overrides:
+  dart_udx:
+    path: ../dart-udx
+```
+
+The Go interop tests in `test/interop` build the go-libp2p peer in
+`interop/go-peer`, which needs Go. The Kademlia DHT and GossipSub interop
+tests live in [dart_libp2p_kad_dht](https://github.com/stephanfeb/dart_libp2p_kad_dht)
+and [dart_libp2p_pubsub](https://github.com/stephanfeb/dart_libp2p_pubsub), which
+depend on this package.
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see our contributing guidelines and code of conduct.
