@@ -295,7 +295,7 @@ class CircuitV2Client implements Transport {
 
 
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout}) async {
+  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
     _log.info('[CircuitV2Client.dial] 🔌 Starting circuit dial to $addr');
     
     // 1. Parse the /p2p-circuit address.

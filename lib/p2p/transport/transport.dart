@@ -10,9 +10,16 @@ abstract class Transport {
   /// The configuration for this transport
   TransportConfig get config;
 
-  /// Dials a peer at the given multiaddress with optional timeout override
-  /// Returns a connection to the peer if successful
-  Future<Conn> dial(MultiAddr addr, {Duration? timeout});
+  /// Dials a peer at the given multiaddress with optional timeout override.
+  /// Returns a connection to the peer if successful.
+  ///
+  /// [simultaneousConnect] signals that this dial is a DCUtR
+  /// simultaneous-connect (hole-punch) attempt rather than an ordinary dial.
+  /// Transports that support NAT hole-punching may use this to change how
+  /// the dial is performed — e.g. reusing an active listener's socket so
+  /// the dial originates from the address already advertised to the peer.
+  /// Transports that don't support hole-punching may ignore it.
+  Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false});
 
   /// Starts listening on the given multiaddress
   /// Returns a listener that can accept incoming connections

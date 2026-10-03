@@ -103,6 +103,15 @@ List<MultiAddr> defaultAddrsFactory(List<MultiAddr> addrs) {
   }).toList();
 }
 
+/// Whether two IP multiaddrs belong to the same address family.
+///
+/// Used when expanding an unspecified listener onto concrete interfaces: an
+/// IPv4-bound socket must never be advertised with an IPv6 interface address,
+/// or vice versa.
+bool addressesShareIPFamily(MultiAddr first, MultiAddr second) =>
+    (first.hasProtocol('ip4') && second.hasProtocol('ip4')) ||
+    (first.hasProtocol('ip6') && second.hasProtocol('ip6'));
+
 // Removed AddrsFactory typedef as it's now imported
 
 // Removed MockProtocolSwitch class definition
@@ -379,7 +388,13 @@ class BasicHost implements Host {
       _holePunchService = holepunch_impl.HolePunchServiceImpl(
         this,
         _idService, // Pass the existing IDService instance
-        () => publicAddrs, // Pass a function that returns only public/observed addrs
+        // `publicAddrs` only reflects observed/AutoNAT-confirmed addresses,
+        // so it misses addresses injected via the host's AddrsFactory (e.g.
+        // an operator-supplied external address on a host AutoNAT can't
+        // observe directly). Use `addrs` (which already runs AddrsFactory)
+        // minus relay addresses instead, so HolePunchService advertises
+        // those addresses too.
+        () => addrs.where((a) => !isRelayAddress(a)).toList(),
         options: const holepunch_impl.HolePunchOptions(), // Default options for now
       );
       await _holePunchService!.start(); // Call start as per its interface
@@ -854,6 +869,9 @@ class BasicHost implements Host {
           if (_filteredInterfaceAddrs.isNotEmpty) {
             for (final interfaceAddr in _filteredInterfaceAddrs) {
               // interfaceAddr is a bare IP MultiAddr, e.g., /ip4/192.168.10.118
+              // Never attach an IPv4 listener's transport suffix to an IPv6
+              // interface (or vice versa): no socket is listening there.
+              if (!addressesShareIPFamily(listenAddr, interfaceAddr)) continue;
               try {
                 // Combine the interface address string with the suffix string
                 final combinedAddrString = interfaceAddr.toString() + suffixString;
@@ -1045,7 +1063,16 @@ class BasicHost implements Host {
 
     final filterStartTime = DateTime.now();
     
-    final filteredAddrs = _addrsFactory(pi.addrs);
+    // _addrsFactory transforms how THIS host presents its OWN addresses to
+    // others (see `get addrs => _addrsFactory(allAddrs)` above) — it must
+    // never run on `pi.addrs`, the addresses of the PEER being connected to.
+    // The original code called it here anyway, so every connect() to any
+    // peer (relay, hole-punch target, anyone) appended this host's own
+    // AddrsFactory-derived addresses into THAT PEER's peerstore entry.
+    // Swarm.dialPeer then raced this host's own address as a bogus dial
+    // candidate for every subsequent dial to that peer — observed as a host
+    // attempting to dial its own external address.
+    final filteredAddrs = pi.addrs;
 
     
     await peerStore.addrBook.addAddrs(pi.id, filteredAddrs, Duration(minutes: 5));
@@ -1057,8 +1084,15 @@ class BasicHost implements Host {
 
     final connectedness = _network.connectedness(pi.id);
 
-    
-    if (connectedness == Connectedness.connected) {
+    // This early return fires even for a *relay* connection
+    // (Connectedness.limited-worthy, but connectedness() doesn't distinguish
+    // it from a full connection here) — meaning DCUtR's forceDirectDial punch
+    // dial never even reached Swarm.dialPeer (where its own forceDirectDial
+    // check applies). ForceDirectDial's entire purpose is "dial anyway, even
+    // though a connection exists" — honor that here, one layer up from where
+    // it was already checked.
+    final skipEarlyReturn = context?.getForceDirectDial().$1 ?? false;
+    if (connectedness == Connectedness.connected && !skipEarlyReturn) {
       final totalTime = DateTime.now().difference(startTime);
 
       return;

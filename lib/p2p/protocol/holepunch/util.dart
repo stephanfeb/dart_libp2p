@@ -6,6 +6,9 @@ import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
+import 'package:dart_libp2p/p2p/multiaddr/codec.dart';
+import 'package:protobuf/protobuf.dart';
+
 
 
 /// Protocol ID for the holepunch protocol
@@ -65,4 +68,14 @@ Conn? getDirectConnection(Host host, PeerId peerId) {
     }
   }
   return null;
+}
+
+/// Encodes a protocol buffer message with a varint length prefix for go-libp2p pbio compatibility.
+Uint8List encodeDelimitedMessage(GeneratedMessage message) {
+  final messageBytes = message.writeToBuffer();
+  final lengthBytes = MultiAddrCodec.encodeVarint(messageBytes.length);
+  final result = Uint8List(lengthBytes.length + messageBytes.length);
+  result.setAll(0, lengthBytes);
+  result.setAll(lengthBytes.length, messageBytes);
+  return result;
 }

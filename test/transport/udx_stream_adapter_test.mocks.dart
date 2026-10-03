@@ -1739,12 +1739,16 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
   _i22.Future<_i18.TransportConn> dial(
     _i4.MultiAddr? addr, {
     Duration? timeout,
+    bool? simultaneousConnect = false,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
           #dial,
           [addr],
-          {#timeout: timeout},
+          {
+            #timeout: timeout,
+            #simultaneousConnect: simultaneousConnect,
+          },
         ),
         returnValue:
             _i22.Future<_i18.TransportConn>.value(_FakeTransportConn_20(
@@ -1752,7 +1756,10 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
           Invocation.method(
             #dial,
             [addr],
-            {#timeout: timeout},
+            {
+              #timeout: timeout,
+              #simultaneousConnect: simultaneousConnect,
+            },
           ),
         )),
       ) as _i22.Future<_i18.TransportConn>);

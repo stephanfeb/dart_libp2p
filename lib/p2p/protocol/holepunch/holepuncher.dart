@@ -1,8 +1,6 @@
 /// The holepuncher implementation for the holepunch protocol.
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/pb/holepunch.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart';
@@ -21,7 +19,9 @@ import '../../../core/network/notifiee.dart';
 import '../../../core/network/rcmgr.dart';
 import '../../../core/peer/addr_info.dart';
 import '../../../core/protocol/protocol.dart';
+import '../circuitv2/util/buffered_reader.dart';
 import '../../discovery/peer_info.dart';
+
 
 /// Logger for the holepuncher
 final _log = Logger('p2p-holepunch');
@@ -259,12 +259,16 @@ class HolePuncher {
         ..type = HolePunch_Type.CONNECT
         ..obsAddrs.addAll(addrsToBytes(obsAddrs));
 
-      // Serialize and write the message
-      final msgBytes = msg.writeToBuffer();
-      await str.write(Uint8List.fromList(msgBytes));
+      // Serialize and write the length-delimited message
+      await str.write(encodeDelimitedMessage(msg));
 
       // Wait for a CONNECT message from the remote peer
-      final responseBytes = await str.read();
+      final reader = BufferedP2PStreamReader(str);
+      final responseLength = await reader.readVarint();
+      if (responseLength > maxMsgSize) {
+        throw Exception('HolePunch CONNECT response too large: $responseLength bytes');
+      }
+      final responseBytes = await reader.readExact(responseLength);
       final response = HolePunch.fromBuffer(responseBytes);
       final rtt = DateTime.now().difference(start).inMilliseconds;
 
@@ -283,10 +287,11 @@ class HolePuncher {
 
       final syncMsg = HolePunch()..type = HolePunch_Type.SYNC;
       // Serialize and write the sync message
-      final syncMsgBytes = syncMsg.writeToBuffer();
-      await str.write(Uint8List.fromList(syncMsgBytes));
+      await str.write(encodeDelimitedMessage(syncMsg));
 
       return HolePunchResult(addrs, obsAddrs, rtt);
+
+
     } finally {
       str.scope().releaseMemory(maxMsgSize);
     }
