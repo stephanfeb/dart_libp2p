@@ -97,8 +97,14 @@ class TCPTransport implements Transport {
       return connection;
     } on TimeoutException catch (e) {
       throw e;
+    } on SocketException catch (e) {
+      // A failed connect's SocketException reports the socket's local
+      // ephemeral port, not the port that was dialed, so its toString()
+      // misleads. Name the dialed address instead.
+      final osError = e.osError != null ? ' (${e.osError})' : '';
+      throw Exception('Failed to connect to $addr: ${e.message}$osError');
     } catch (e) {
-      throw Exception('Failed to connect: $e');
+      throw Exception('Failed to connect to $addr: $e');
     }
   }
 

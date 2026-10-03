@@ -272,4 +272,29 @@ void main() {
       });
     });
   });
+
+  group('TCPTransport dial errors', () {
+    // GitHub #14: a refused connect's SocketException names the local
+    // ephemeral port, which read as if the dial had gone to a random port.
+    test('a refused dial names the dialed address', () async {
+      final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final closedPort = probe.port;
+      await probe.close();
+
+      final transport = TCPTransport(
+        resourceManager: NullResourceManager(),
+        connManager: NullConnMgr(),
+      );
+      final addr = MultiAddr('/ip4/127.0.0.1/tcp/$closedPort');
+
+      await expectLater(
+        transport.dial(addr),
+        throwsA(predicate((e) {
+          final text = e.toString();
+          return text.contains('Failed to connect to $addr') &&
+              !text.contains('port = ');
+        }, 'an error that names $addr and no other port')),
+      );
+    });
+  });
 }
