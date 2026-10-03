@@ -19,6 +19,28 @@ Future<T> withTimeout<T>(Future<T> future, String operation) {
 }
 
 void main() {
+  test('opens a stream without waiting for a standalone ACK', () async {
+    final (clientConnection, unusedPeerConnection) =
+        YamuxMockConnection.createPair(autoRespondToSyn: false);
+    final session = YamuxSession(
+      clientConnection,
+      const MultiplexerConfig(
+        keepAliveInterval: Duration.zero,
+        streamWriteTimeout: Duration(milliseconds: 50),
+      ),
+      true,
+    );
+
+    final stream = await session
+        .openStream(core_context.Context())
+        .timeout(const Duration(milliseconds: 250));
+
+    expect(stream, isA<YamuxStream>());
+    await session.close();
+    await clientConnection.close();
+    await unusedPeerConnection.close();
+  });
+
   group('Yamux Multiplexing', () {
     late YamuxMockConnection conn1;
     late YamuxMockConnection conn2;

@@ -720,11 +720,15 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // We still track the ACK via the completer so _handleFrame can
       // resolve it when/if it arrives, and we log if it never comes.
       // If the remote rejects the stream (RST), the stream will be
-      // reset through the normal RST handling path.
-      completer.future.then((_) {
+      // reset through the normal RST handling path. The bookkeeping is
+      // bounded, so a peer that never acknowledges doesn't leave it behind.
+      completer.future.timeout(_config.streamWriteTimeout).then((_) {
         _log.fine('$_logPrefix [OPEN-STREAM-DIAG] ACK received for streamID=$streamId');
       }).catchError((e) {
-        _log.warning('$_logPrefix [OPEN-STREAM-DIAG] ACK error for streamID=$streamId: $e');
+        if (identical(_pendingStreams[streamId], completer)) {
+          _pendingStreams.remove(streamId);
+        }
+        _log.fine('$_logPrefix [OPEN-STREAM-DIAG] No standalone ACK for streamID=$streamId: $e');
       });
 
       await stream.open();
