@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-10-03
+
+### Breaking
+
+- **`Transport.dial` takes a `simultaneousConnect` parameter.** `dial(addr, {Duration? timeout, bool simultaneousConnect = false})` tells a transport that the dial is a DCUtR hole punch. Every `Transport` implementation must add the parameter; transports that cannot hole punch can ignore it. (Dmytro Naumenko)
+
+### Fixed
+
+- **DCUtR did not interoperate with go-libp2p** — holepunch messages were written without a length prefix and read with a single unbounded `read()`, but go-libp2p frames them with an unsigned varint length. A Dart peer failed with `InvalidProtocolBufferException` on go's CONNECT and go reset the stream. Messages are now length-delimited and read through a buffered reader. (Dmytro Naumenko)
+- **The punch dial never ran** — `BasicHost.connect` and `Swarm.dialPeer` returned the existing relayed connection, which DCUtR always starts from, so the holepuncher logged a successful direct connection without dialing. Force-direct dials now skip a relayed connection and never dial `/p2p-circuit` addresses; previously a new relayed connection could win the race and be reported as a hole punch. (Dmytro Naumenko)
+- **The answering side of DCUtR threw before dialing** — `Context.getForceDirectDial()` cast its value to `String`, but the hole punch service stores `true`. (Dmytro Naumenko)
+- **UDX punch dials came from the wrong port** — every dial bound a fresh UDP socket, so the NAT mapping did not match the address sent in CONNECT. A punch dial now reuses the open listener's socket for that address family. (Dmytro Naumenko)
+- **`BasicHost.connect` stored this host's own addresses under the peer** — it ran the host's `addrsFactory` over the peer's addresses, so later dials to that peer tried this host's external address. (Dmytro Naumenko)
+- **Hosts advertised addresses no socket listens on** — an unspecified listener was expanded onto interfaces of the other IP family, e.g. an IPv4 port on an IPv6 address. (Dmytro Naumenko)
+- **The hole punch service advertised only observed addresses** — it now uses `host.addrs` without relay addresses, so addresses supplied through `addrsFactory` are offered in CONNECT. (Dmytro Naumenko)
+- **A failed inbound upgrade raised an unhandled error** when no dial was waiting for that peer.
+
 ## [3.0.0] - 2026-10-02
 
 ### Breaking
