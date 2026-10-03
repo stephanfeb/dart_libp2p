@@ -190,6 +190,7 @@ services:
     environment:
       - LISTEN_UDX=/ip4/192.168.2.100/udp/4001/udx
       - EXTERNAL_ADDRS=/ip4/11.70.1.20/udp/4001/udx
+      - GOLOG_LOG_LEVEL=${GOLOG_LOG_LEVEL:-error}
       - RELAY_SERVERS=/ip4/11.70.3.10/tcp/4001/p2p/12D3KooWKZA9C2aY5vhvmNGHapv4aXXKUHTz3TpQGhmGNwRgQh9P
       - NAT_GATEWAY=192.168.2.10
       - PUBLIC_NET_SUBNET=11.70.0.0/16
