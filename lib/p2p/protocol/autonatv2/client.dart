@@ -311,7 +311,9 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
       return;
     }
 
-    final nonce = dialBack.nonce;
+    // The wire nonce is an Int64; _dialBackQueues is keyed by int, and the
+    // two never compare equal as map keys.
+    final nonce = dialBack.nonce.toInt();
 
     // Find the completer for this nonce
     final completer = _dialBackQueues[nonce];

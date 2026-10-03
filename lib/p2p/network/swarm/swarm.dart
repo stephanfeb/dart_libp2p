@@ -691,6 +691,12 @@ class Swarm implements Network {
   @override
   Peerstore get peerstore => _peerstore;
 
+  /// The configuration this swarm upgrades connections with.
+  Config get config => _config;
+
+  /// The transports this swarm dials with.
+  List<Transport> get transports => List.unmodifiable(_transports);
+
   @override
   PeerId get localPeer => _localPeer;
 

@@ -49,6 +49,11 @@ import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart'; // Added for Bas
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // Added for AutoRelay
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay_config.dart'; // Added for AutoRelayConfig
 import 'package:dart_libp2p/p2p/protocol/circuitv2/client/client.dart'; // Added for CircuitV2Client
+import 'package:dart_libp2p/core/crypto/ed25519.dart' show generateEd25519KeyPair;
+import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
+import 'package:dart_libp2p/p2p/transport/listener.dart';
+import 'package:dart_libp2p/p2p/transport/transport.dart';
+import 'package:dart_libp2p/p2p/transport/transport_config.dart';
 
 final _log = Logger('basichost');
 
@@ -140,6 +145,7 @@ class BasicHost implements Host {
   /// Access the Circuit Relay v2 client, if relay is enabled.
   CircuitV2Client? get circuitV2Client => _circuitV2Client;
   AmbientAutoNATv2? _autoNATService; // Changed to AmbientAutoNATv2 orchestrator
+  Host? _autoNATDialerHost;
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
   
@@ -352,13 +358,20 @@ class BasicHost implements Host {
 
     // Initialize AutoNAT v2 service if enabled
     if (_config.enableAutoNAT) {
+      try {
+        _autoNATDialerHost = await _newAutoNATDialerHost();
+      } catch (e) {
+        _log.warning('AutoNAT disabled: could not create its dial-back host: $e');
+      }
+    }
+    if (_autoNATDialerHost != null) {
       _log.fine('[BasicHost start] Before AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       
       // First create the underlying AutoNATv2 protocol implementation
       // This starts the AutoNAT v2 SERVER (to provide service to other peers)
       final autoNATv2 = AutoNATv2Impl(
-        this, // host
-        this, // dialerHost - same as host since they have same dialing capabilities
+        this,
+        _autoNATDialerHost!,
         options: _config.autoNATv2Options, // Use options from config
       );
       await autoNATv2.start();
@@ -1418,6 +1431,38 @@ class BasicHost implements Host {
     }
   }
 
+  /// Creates the host AutoNAT v2 dials back from, as go-libp2p does: a
+  /// separate swarm and peerstore under a fresh identity, with no listeners
+  /// or services. On this host a dial-back would reuse any existing
+  /// connection to the peer, even a relayed one, and so confirm an address
+  /// that was never dialed; and the server's cleanup (closePeer, clearAddrs)
+  /// would drop every connection to the peer and forget its addresses.
+  Future<Host> _newAutoNATDialerHost() async {
+    // Copy the dial stack from the swarm, which may have been built from a
+    // different Config than this host's.
+    final swarm = _network is Swarm ? _network as Swarm : null;
+    final dialConfig = swarm?.config ?? _config;
+    final dialerKey = await generateEd25519KeyPair();
+    final dialerConfig = Config()
+      ..peerKey = dialerKey
+      ..transports = (swarm?.transports ?? _config.transports)
+          .where((t) => t is! CircuitV2Client)
+          .map<Transport>((t) => _BorrowedTransport(t))
+          .toList()
+      ..securityProtocols = [await NoiseSecurity.create(dialerKey)]
+      ..insecure = dialConfig.insecure
+      ..muxers = dialConfig.muxers
+      ..dialTimeout = dialConfig.dialTimeout
+      ..enablePing = false
+      ..enableRelay = false
+      ..enableAutoRelay = false
+      ..enableAutoNAT = false
+      ..enableHolePunching = false;
+    final dialerHost = await dialerConfig.newNode();
+    await dialerHost.start();
+    return dialerHost;
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;
@@ -1441,6 +1486,7 @@ class BasicHost implements Host {
 
     // Close AutoNATService if initialized
     await _autoNATService?.close();
+    await _autoNATDialerHost?.close();
 
     // Close HolePunchService if initialized
     await _holePunchService?.close();
@@ -1564,6 +1610,36 @@ class BasicHost implements Host {
 }
 
 /// Network notifiee for address changes.
+/// A transport lent to another swarm: dials and listens through [_inner] but
+/// leaves disposing it to its owner.
+class _BorrowedTransport implements Transport {
+  final Transport _inner;
+
+  _BorrowedTransport(this._inner);
+
+  @override
+  TransportConfig get config => _inner.config;
+
+  @override
+  Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) =>
+      _inner.dial(addr, timeout: timeout, simultaneousConnect: simultaneousConnect);
+
+  @override
+  Future<Listener> listen(MultiAddr addr) => _inner.listen(addr);
+
+  @override
+  List<String> get protocols => _inner.protocols;
+
+  @override
+  bool canDial(MultiAddr addr) => _inner.canDial(addr);
+
+  @override
+  bool canListen(MultiAddr addr) => _inner.canListen(addr);
+
+  @override
+  Future<void> dispose() async {}
+}
+
 class _AddressChangeNotifiee implements Notifiee {
   final BasicHost _host;
 
