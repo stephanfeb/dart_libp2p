@@ -6,8 +6,8 @@
 # go-libp2p only hole punches from addresses it considers public, and it
 # treats 100.64.0.0/10 as private. The networks stay isolated in Docker.
 #
-# The relay is go-libp2p because go clients cannot yet reserve on a Dart
-# relay (beads dart-libp2p-6qi).
+# The relay is go-libp2p too, so the Dart peer is the only Dart component;
+# the Dart relay in docker-compose.yml also serves go clients.
 
 networks:
   public_net:

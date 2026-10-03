@@ -403,8 +403,7 @@ class IntegrationTestPeer {
   }
 
   /// Reserves a slot on the first configured relay directly and returns our
-  /// full circuit address. Works around AutoRelay not selecting the relay
-  /// (beads dart-libp2p-52c).
+  /// full circuit address, without waiting for AutoRelay to find the relay.
   /// Lists every open connection as {peer_id, remote_addr, relayed}, so a
   /// scenario can tell a hole-punched connection from a relayed one.
   Future<void> _handleConnsRequest(HttpRequest request) async {

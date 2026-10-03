@@ -838,6 +838,9 @@ class BasicHost implements Host {
     // 1. Resolve unspecified listen addresses using filtered interface addresses
     //    (obtained by _updateLocalIpAddr)
     for (final listenAddr in currentListenAddrs) {
+      // The circuit client listens on a bare /p2p-circuit, which no peer can
+      // dial; relay addresses come from AutoRelay reservations instead.
+      if (listenAddr.components.length == 1 && listenAddr.hasProtocol('p2p-circuit')) continue;
       final listenIp4 = listenAddr.valueForProtocol('ip4');
       final listenIp6 = listenAddr.valueForProtocol('ip6');
       final isUnspecified = (listenIp4 == '0.0.0.0' || listenIp4 == '0.0.0.0.0.0') || (listenIp6 == '::' || listenIp6 == '0:0:0:0:0:0:0:0');

@@ -217,7 +217,11 @@ class RelayFinder {
     }
     
     if (now.isAfter(_scheduledWorkTimes.nextAllowedCallToPeerSource)) {
-        if (!peerSourceRateLimiter.isClosed && !peerSourceRateLimiter.hasListener) {
+        // _findNodes listens for the whole run and skips a tick while a
+        // peer-source call is still in flight, so tick whenever allowed.
+        // (Gating on !hasListener meant only the initial tick ever fired,
+        // and it usually comes before any relay is connected.)
+        if (!peerSourceRateLimiter.isClosed) {
             try { peerSourceRateLimiter.add(null); } catch (e) { /* already closed or full */ }
             _scheduledWorkTimes = ScheduledWorkTimes(
                 nextAllowedCallToPeerSource: now.add(config.minInterval),

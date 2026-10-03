@@ -84,7 +84,7 @@ This test setup simulates real-world NAT scenarios within a local Docker environ
 1. **Simulated public addresses**: the "internet" is `100.70.0.0/16` (carrier-grade NAT space, never routed on the real internet). RFC 1918 ranges such as `10.0.0.0/8` would not work: `MultiAddr.isPublic()` rejects them, so DCUtR would have no addresses to exchange.
 2. **Operator-supplied external addresses**: each peer is told its NAT gateway's public address through `EXTERNAL_ADDRS` (added to `host.addrs` with an `addrsFactory`). The cone NAT keeps the source port, so the UDX listener's port 4001 maps to port 4001 on the gateway.
 3. **Interface detection**: Docker does not guarantee interface order, so the NAT gateway finds its internal interface by `INTERNAL_SUBNET` and treats the other as external.
-4. **Relay reservation via `/reserve`**: peers reserve on the relay through the control API, because AutoRelay does not yet pick the relay up on its own (beads `dart-libp2p-52c`).
+4. **Relay reservation via `/reserve`**: the scenario script reserves on the relay through the control API so it gets each peer's circuit address straight away, rather than waiting for AutoRelay's next candidate check.
 5. **Host-Mapped Control APIs**: Test orchestration requires host port mappings to coordinate scenarios.
 6. **Container Warmup Time**: Infrastructure needs 15-20 seconds to establish NAT rules and relay connections on cold starts.
 
@@ -153,7 +153,7 @@ test/integration/holepunch_network/scripts/run_dcutr_scenario.sh /tmp/dcutr-dart
 test/integration/holepunch_network/scripts/run_dcutr_scenario.sh --go /tmp/dcutr-go
 ```
 
-The go variant uses `11.70.0.0/16` as its simulated internet, because go-libp2p only hole punches from addresses it considers public and treats `100.64.0.0/10` as private. Its relay is go-libp2p because go clients cannot yet reserve on a Dart relay (beads `dart-libp2p-6qi`).
+The go variant uses `11.70.0.0/16` as its simulated internet, because go-libp2p only hole punches from addresses it considers public and treats `100.64.0.0/10` as private. Its relay is go-libp2p too, so the Dart peer is the only Dart component.
 
 Peer containers accept `DEBUG_LOGGERS` (comma-separated logger names, e.g. `p2p-holepunch,UDXTransport`) to raise those loggers to `ALL`, and expose `GET /conns` listing every connection with a `relayed` flag.
 
