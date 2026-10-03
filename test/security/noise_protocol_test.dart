@@ -16,6 +16,7 @@ import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, 
 import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer_id;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/crypto/key_generator.dart';
+import 'package:dart_libp2p/core/crypto/rsa.dart' as rsa;
 import 'package:dart_libp2p/p2p/security/secured_connection.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
@@ -614,6 +615,21 @@ void main() {
         expect(e, isA<NoiseProtocolException>());
         expect((e as NoiseProtocolException).message, contains('Ed25519 compatible'));
       }
+    });
+
+    test('decodes RSA remote identity keys', () async {
+      final rsaKeyPair = await rsa.generateRsaKeyPair();
+
+      final decoded = decodeNoiseIdentityKey(rsaKeyPair.publicKey.marshal());
+
+      expect(await decoded.equals(rsaKeyPair.publicKey), isTrue);
+    });
+
+    test('rejects malformed remote identity keys', () {
+      expect(
+        () => decodeNoiseIdentityKey(Uint8List.fromList([0xff, 0x00])),
+        throwsA(anything),
+      );
     });
 
     test('handles disposal correctly', () async {

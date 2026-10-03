@@ -39,39 +39,29 @@ class PeerId {
   /// The encoded peer ID can either be a CID of a key or a raw multihash (identity
   /// or sha256-256).
   static Uint8List _parseStringToMultihash(String s) {
+    cid_lib.CID? parsedCid;
     try {
-      // Use CID.fromString to parse, which returns a CID object directly.
-      final actualCid = cid_lib.CID.fromString(s);
+      parsedCid = cid_lib.CID.fromString(s);
+    } catch (_) {
+      // Some valid legacy PeerIds are raw base58 multihashes, not CIDs.
+    }
 
-      // Use constants CID.V1, CID.V0 and properties from the actualCid object.
-      // Access codec from cid_lib.codecs map.
-      if (actualCid.version == cid_lib.CID.V1 && actualCid.codec == cid_lib.codecNameToCode['libp2p-key']!) {
-        return actualCid.multihash;
+    if (parsedCid != null) {
+      if (parsedCid.version == cid_lib.CID.V1 && parsedCid.codec == cid_lib.codecNameToCode['libp2p-key']!) {
+        return parsedCid.multihash;
       }
-      if (actualCid.version == cid_lib.CID.V0) {
-        // CIDv0's multihash is what a legacy PeerID (Qm...) contains.
-        return actualCid.multihash;
+      if (parsedCid.version == cid_lib.CID.V0) {
+        return parsedCid.multihash;
       }
-      // It's a CID, but not one we recognize for PeerIDs
-      throw FormatException('CID "$s" is not a valid libp2p PeerID format (version ${actualCid.version}/codec ${actualCid.codec} mismatch)');
-    } catch (e) {
-      // CID.fromString failed or threw the FormatException above.
-      // Try parsing as a legacy raw base58 multihash if 's' starts with '1' (identity).
-      // 'Qm...' (CIDv0) should have been handled by CID.decodeCid.
-      if (s.startsWith('1')) { // Legacy base58 encoded identity multihash
-        try {
-          final bytes = base58.decode(s);
-          Multihash.decode(bytes); // Validates if it's a proper multihash
-          return Uint8List.fromList(bytes);
-        } catch (err) {
-          throw FormatException('Failed to parse legacy base58 peer ID "$s": $err');
-        }
-      }
-      // If it wasn't a valid PeerID CID and not a legacy '1...' identity multihash.
-      if (e is FormatException && e.message.contains('libp2p PeerID format')) {
-        rethrow; // Our specific error from above
-      }
-      throw FormatException('Invalid peer ID format for "$s": $e');
+      throw FormatException('CID "$s" is not a valid libp2p PeerID format (version ${parsedCid.version}/codec ${parsedCid.codec} mismatch)');
+    }
+
+    try {
+      final bytes = base58.decode(s);
+      Multihash.decode(bytes);
+      return Uint8List.fromList(bytes);
+    } catch (error) {
+      throw FormatException('Invalid peer ID format for "$s": $error');
     }
   }
 

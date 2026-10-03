@@ -17,6 +17,13 @@ import 'package:logging/logging.dart'; // Added for logging
 
 final _log = Logger('NoiseProtocol');
 
+/// Decodes the protobuf identity key carried in a Noise handshake payload.
+///
+/// Noise uses Curve25519 for the handshake itself, but libp2p identity keys
+/// may be Ed25519, RSA, or ECDSA.
+keys.PublicKey decodeNoiseIdentityKey(Uint8List encodedKey) =>
+    keys.publicKeyFromProto(crypto_key_pb.PublicKey.fromBuffer(encodedKey));
+
 /// Exceptions specific to the Noise Protocol implementation
 class NoiseProtocolException implements Exception {
   final String message;
@@ -114,9 +121,9 @@ class NoiseSecurity implements SecurityProtocol {
     if (!payload.hasIdentityKey()) throw NoiseProtocolException('Remote payload missing identity key');
     if (!payload.hasIdentitySig()) throw NoiseProtocolException('Remote payload missing signature');
 
-    // Use the generic unmarshaller to support Ed25519, RSA, and ECDSA peers.
-    final protoPubKey = crypto_key_pb.PublicKey.fromBuffer(payload.identityKey);
-    final remoteLibp2pPublicKey = keys.publicKeyFromProto(protoPubKey);
+    final remoteLibp2pPublicKey = decodeNoiseIdentityKey(
+      Uint8List.fromList(payload.identityKey),
+    );
 
     // Verify: "noise-libp2p-static-key:" + remote_static_noise_key
     final dataToVerify = Uint8List.fromList([
@@ -173,9 +180,11 @@ class NoiseSecurity implements SecurityProtocol {
       _log.info('secureOutbound: Handshake complete. Remote peer: ${remotePeerId.toBase58()}');
 
       // Session keys are now derived. Nonces start at 0 (no post-handshake exchange).
-      final remoteProtoKey = crypto_key_pb.PublicKey.fromBuffer(
-          noise_pb.NoiseHandshakePayload.fromBuffer(msg2Payload).identityKey);
-      final remoteLibp2pPublicKey = keys.publicKeyFromProto(remoteProtoKey);
+      final remoteLibp2pPublicKey = decodeNoiseIdentityKey(
+        Uint8List.fromList(
+          noise_pb.NoiseHandshakePayload.fromBuffer(msg2Payload).identityKey,
+        ),
+      );
 
       return SecuredConnection(
         connection,
@@ -233,9 +242,11 @@ class NoiseSecurity implements SecurityProtocol {
 
       _log.info('secureInbound: Handshake complete. Remote peer: ${remotePeerId.toBase58()}');
 
-      final remoteProtoKey = crypto_key_pb.PublicKey.fromBuffer(
-          noise_pb.NoiseHandshakePayload.fromBuffer(msg3Payload).identityKey);
-      final remoteLibp2pPublicKey = keys.publicKeyFromProto(remoteProtoKey);
+      final remoteLibp2pPublicKey = decodeNoiseIdentityKey(
+        Uint8List.fromList(
+          noise_pb.NoiseHandshakePayload.fromBuffer(msg3Payload).identityKey,
+        ),
+      );
 
       // Nonces start at 0 (no post-handshake exchange needed).
       return SecuredConnection(

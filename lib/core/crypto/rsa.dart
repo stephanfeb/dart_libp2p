@@ -46,30 +46,59 @@ class RsaPublicKey implements p2pkeys.PublicKey {
 
   /// Creates an RsaPublicKey from raw bytes (DER encoded)
   factory RsaPublicKey.fromRawBytes(Uint8List bytes) {
-    final parser = pc.ASN1Parser(bytes);
-    final topLevel = parser.nextObject() as pc.ASN1Sequence;
-    final elements = topLevel.elements!;
+    try {
+      final parser = pc.ASN1Parser(bytes);
+      final topLevel = parser.nextObject();
+      if (topLevel is! pc.ASN1Sequence || parser.hasNext()) {
+        throw const FormatException('Expected one RSA public-key sequence');
+      }
 
-    // Handle both PKCS#1 (modulus, exponent) and SPKI (algorithmId, bitString) formats.
-    if (elements[0] is pc.ASN1Integer) {
-      // PKCS#1: sequence of [modulus, exponent]
-      final publicKey = RSAPublicKey(
-        (elements[0] as pc.ASN1Integer).integer!,
-        (elements[1] as pc.ASN1Integer).integer!,
-      );
-      return RsaPublicKey(publicKey);
-    } else {
-      // SPKI: sequence of [algorithmIdentifier, bitString(PKCS#1 key)]
-      final bitString = elements[1] as pc.ASN1BitString;
-      // stringValues is the bit string content without the unused-bits byte
-      final keyBytes = Uint8List.fromList(bitString.stringValues!);
-      final innerParser = pc.ASN1Parser(keyBytes);
-      final innerSeq = innerParser.nextObject() as pc.ASN1Sequence;
-      final publicKey = RSAPublicKey(
-        (innerSeq.elements![0] as pc.ASN1Integer).integer!,
-        (innerSeq.elements![1] as pc.ASN1Integer).integer!,
-      );
-      return RsaPublicKey(publicKey);
+      final elements = topLevel.elements;
+      if (elements == null || elements.length != 2) {
+        throw const FormatException('Invalid RSA public-key sequence');
+      }
+
+      pc.ASN1Sequence keySequence;
+      if (elements[0] is pc.ASN1Integer && elements[1] is pc.ASN1Integer) {
+        keySequence = topLevel; // PKCS#1 RSAPublicKey.
+      } else {
+        final algorithm = elements[0];
+        final subjectPublicKey = elements[1];
+        if (algorithm is! pc.ASN1Sequence ||
+            algorithm.elements == null ||
+            algorithm.elements!.isEmpty ||
+            algorithm.elements!.first is! pc.ASN1ObjectIdentifier ||
+            (algorithm.elements!.first as pc.ASN1ObjectIdentifier).objectIdentifierAsString != '1.2.840.113549.1.1.1' ||
+            subjectPublicKey is! pc.ASN1BitString ||
+            subjectPublicKey.unusedbits != 0 ||
+            subjectPublicKey.stringValues == null) {
+          throw const FormatException('Invalid RSA SubjectPublicKeyInfo');
+        }
+
+        final innerParser = pc.ASN1Parser(Uint8List.fromList(subjectPublicKey.stringValues!));
+        final inner = innerParser.nextObject();
+        if (inner is! pc.ASN1Sequence || innerParser.hasNext()) {
+          throw const FormatException('Invalid RSA key in SubjectPublicKeyInfo');
+        }
+        keySequence = inner;
+      }
+
+      final keyElements = keySequence.elements;
+      if (keyElements == null ||
+          keyElements.length != 2 ||
+          keyElements[0] is! pc.ASN1Integer ||
+          keyElements[1] is! pc.ASN1Integer) {
+        throw const FormatException('Invalid PKCS#1 RSA public key');
+      }
+
+      return RsaPublicKey(RSAPublicKey(
+        (keyElements[0] as pc.ASN1Integer).integer!,
+        (keyElements[1] as pc.ASN1Integer).integer!,
+      ));
+    } on FormatException {
+      rethrow;
+    } catch (error) {
+      throw FormatException('Invalid RSA public key: $error');
     }
   }
 
@@ -386,5 +415,4 @@ p2pkeys.PublicKey unmarshalRsaPublicKey(Uint8List bytes) {
   }
   return RsaPublicKey.fromRawBytes(Uint8List.fromList(pbKey.data));
 }
-
 
