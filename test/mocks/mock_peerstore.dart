@@ -240,17 +240,17 @@ class _MockProtoBook implements ProtoBook {
   Future<List<ProtocolID>> getProtocols(PeerId id) async => _peerstore.protocols(id);
 
   @override
-  void addProtocols(PeerId id, List<ProtocolID> protocols) {
+  Future<void> addProtocols(PeerId id, List<ProtocolID> protocols) async {
     _peerstore.addProtocols(id, protocols);
   }
 
   @override
-  void setProtocols(PeerId id, List<ProtocolID> protocols) {
+  Future<void> setProtocols(PeerId id, List<ProtocolID> protocols) async {
     _peerstore.setProtocols(id, protocols);
   }
 
   @override
-  void removeProtocols(PeerId id, List<ProtocolID> protocols) {
+  Future<void> removeProtocols(PeerId id, List<ProtocolID> protocols) async {
     final currentProtocols = _peerstore.protocols(id);
     final updatedProtocols = currentProtocols.where((p) => !protocols.contains(p)).toList();
     _peerstore.setProtocols(id, updatedProtocols);

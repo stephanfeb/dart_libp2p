@@ -1087,11 +1087,11 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
       ) as _i9.Future<List<String>>);
 
   @override
-  void addProtocols(
+  _i9.Future<void> addProtocols(
     _i4.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #addProtocols,
           [
@@ -1099,15 +1099,16 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i9.Future<void>.value(),
+        returnValueForMissingStub: _i9.Future<void>.value(),
+      ) as _i9.Future<void>);
 
   @override
-  void setProtocols(
+  _i9.Future<void> setProtocols(
     _i4.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #setProtocols,
           [
@@ -1115,15 +1116,16 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i9.Future<void>.value(),
+        returnValueForMissingStub: _i9.Future<void>.value(),
+      ) as _i9.Future<void>);
 
   @override
-  void removeProtocols(
+  _i9.Future<void> removeProtocols(
     _i4.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #removeProtocols,
           [
@@ -1131,8 +1133,9 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i9.Future<void>.value(),
+        returnValueForMissingStub: _i9.Future<void>.value(),
+      ) as _i9.Future<void>);
 
   @override
   _i9.Future<List<String>> supportsProtocols(

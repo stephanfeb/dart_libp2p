@@ -686,11 +686,11 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
       ) as _i15.Future<List<String>>);
 
   @override
-  void addProtocols(
+  _i15.Future<void> addProtocols(
     _i2.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #addProtocols,
           [
@@ -698,15 +698,16 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  void setProtocols(
+  _i15.Future<void> setProtocols(
     _i2.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #setProtocols,
           [
@@ -714,15 +715,16 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
-  void removeProtocols(
+  _i15.Future<void> removeProtocols(
     _i2.PeerId? id,
     List<String>? protocols,
   ) =>
-      super.noSuchMethod(
+      (super.noSuchMethod(
         Invocation.method(
           #removeProtocols,
           [
@@ -730,8 +732,9 @@ class MockProtoBook extends _i1.Mock implements _i3.ProtoBook {
             protocols,
           ],
         ),
-        returnValueForMissingStub: null,
-      );
+        returnValue: _i15.Future<void>.value(),
+        returnValueForMissingStub: _i15.Future<void>.value(),
+      ) as _i15.Future<void>);
 
   @override
   _i15.Future<List<String>> supportsProtocols(
@@ -782,6 +785,12 @@ class MockAutoNATv2 extends _i1.Mock implements _i10.AutoNATv2 {
   MockAutoNATv2() {
     _i1.throwOnMissingStub(this);
   }
+
+  @override
+  bool get hasPeers => (super.noSuchMethod(
+        Invocation.getter(#hasPeers),
+        returnValue: false,
+      ) as bool);
 
   @override
   _i15.Future<void> start() => (super.noSuchMethod(
