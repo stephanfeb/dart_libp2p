@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
+import 'package:dart_libp2p/core/record/envelope.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/circuit.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/relay/resources.dart';
@@ -148,8 +149,15 @@ class Relay {
           _host.addrs
               .where((addr) => !addr.toString().contains('/p2p-circuit'))  // ← Filter!
               .map((addr) => addr.toBytes())
-      )
-      ..voucher = voucher.marshalRecord();
+      );
+    // The voucher must be a signed envelope (relay v2 spec); go-libp2p
+    // rejects the reservation if it cannot consume it.
+    final privKey = await _host.peerStore.keyBook.privKey(_host.id);
+    if (privKey != null) {
+      reservation.voucher = await (await Envelope.seal(voucher, privKey)).marshal();
+    } else {
+      _log.warning('[RELAY] No private key for ${_host.id}; sending the reservation without a voucher');
+    }
 
   // Create a limit message
   final limit = Limit()

@@ -6,11 +6,13 @@ import 'dart:typed_data';
 import 'package:fixnum/fixnum.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/pb/voucher.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/circuitv2/proto.dart';
+import 'package:dart_libp2p/core/record/record_registry.dart';
 
 import '../../../core/peer/peer_id.dart';
 
-/// A reservation voucher for circuit relay.
-class ReservationVoucherData {
+/// A reservation voucher for circuit relay. Relays sign it into an
+/// [Envelope] under [CircuitV2Protocol.recordDomain].
+class ReservationVoucherData implements RecordBase {
   /// The ID of the peer providing relay service.
   final PeerId relay;
 
@@ -27,10 +29,13 @@ class ReservationVoucherData {
     required this.expiration,
   });
 
+  @override
   String domain() => CircuitV2Protocol.recordDomain;
 
-  List<int> codec() => CircuitV2Protocol.recordCodec;
+  @override
+  Uint8List codec() => Uint8List.fromList(CircuitV2Protocol.recordCodec);
 
+  @override
   Uint8List marshalRecord() {
     final expiration = Int64(this.expiration.millisecondsSinceEpoch ~/ 1000);
     final pb = ReservationVoucher(
