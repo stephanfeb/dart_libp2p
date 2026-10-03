@@ -1036,12 +1036,12 @@ class Swarm implements Network {
       }
     }
 
-    // Dial the address. forceDirectDial marks a DCUtR punch attempt, which
-    // hole-punch-capable transports (e.g. UDX) use to dial from the same
-    // socket whose NAT mapping was already advertised to the peer.
+    // Dial the address. A simultaneous connect is a DCUtR punch, which
+    // hole-punch-capable transports (e.g. UDX) dial from the socket whose NAT
+    // mapping was advertised to the peer. A plain forceDirectDial is not.
     final transportConn = await transport.dial(
       dialAddr,
-      simultaneousConnect: context.getForceDirectDial().$1,
+      simultaneousConnect: context.getSimultaneousConnect().$1,
     );
     
     // Upgrade the connection

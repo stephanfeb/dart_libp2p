@@ -322,11 +322,8 @@ class HolePunchServiceImpl implements HolePunchService {
   /// Performs a hole punch connection
   Future<void> _holePunchConnect(PeerInfo pi, bool isClient) async {
     final holePunchCtx = Context()
-        .withValue('simultaneousConnect', true)
-        .withValue('simultaneousConnectIsClient', isClient)
-        .withValue('simultaneousConnectReason', 'hole-punching')
-        .withValue('forceDirectDial', true)
-        .withValue('forceDirectDialReason', 'hole-punching');
+        .withSimultaneousConnect(isClient, 'hole-punching')
+        .withForceDirectDial('hole-punching');
 
     try {
       final addrInfo = AddrInfo(pi.peerId, pi.addrs.toList());

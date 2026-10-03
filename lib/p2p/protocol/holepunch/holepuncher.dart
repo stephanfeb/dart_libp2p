@@ -140,7 +140,11 @@ class HolePuncher {
     // Attempt a direct connection ONLY if we have a public address for the remote peer
     for (final addr in await _host.peerStore.addrBook.addrs(peerId)) {
       if (!isRelayAddress(addr) && addr.isPublic()) {
-        final dialCtx = Context().withValue('forceDirectDial', 'hole-punching');
+        // Force-direct only, not simultaneous-connect: this dial is not
+        // coordinated with the peer, so it must not go out from the socket
+        // the punch will use. Its unanswered packets would leave a NAT entry
+        // for that port pair at the peer's NAT and get our punch remapped.
+        final dialCtx = Context().withForceDirectDial('hole-punching');
 
         final tstart = DateTime.now();
         try {
@@ -299,11 +303,9 @@ class HolePuncher {
 
   /// Performs a hole punch connection
   Future<void> _holePunchConnect(PeerInfo pi, bool isClient) async {
-    // Create a context with the appropriate options
-
     final combinedCtx = Context()
-        .withValue('simultaneousConnect', isClient ? 'client' : 'server')
-        .withValue('forceDirectDial', 'hole-punching');
+        .withSimultaneousConnect(isClient, 'hole-punching')
+        .withForceDirectDial('hole-punching');
 
     try {
       // Convert PeerInfo to AddrInfo
