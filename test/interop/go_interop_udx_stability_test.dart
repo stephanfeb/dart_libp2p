@@ -332,12 +332,13 @@ void main() {
 
       // Verify RTTs are valid (positive, reasonable for loopback)
       for (final pong in metricsObserver.pongs) {
-        expect(pong.rtt.inMilliseconds, greaterThan(0),
+        // A loopback round trip can take under 1 ms.
+        expect(pong.rtt, greaterThan(Duration.zero),
             reason: 'RTT should be positive');
         expect(pong.rtt.inSeconds, lessThan(5),
             reason: 'RTT should be under 5s for loopback');
         print(
-            '  Ping ${pong.pingId}: RTT=${pong.rtt.inMilliseconds}ms');
+            '  Ping ${pong.pingId}: RTT=${pong.rtt.inMicroseconds}us');
       }
 
       // Verify no session errors
