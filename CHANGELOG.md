@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **ECDSA keys and signatures now match go-libp2p.** Public keys marshalled as a bare `SEQUENCE { x, y }` and private keys as `SEQUENCE { d, x, y }`; they now marshal as PKIX (SubjectPublicKeyInfo) and SEC 1 `ECPrivateKey`, as the spec and go-libp2p require, so ECDSA peer IDs change again and now equal go-libp2p's. Signatures were made and checked over SHA-256(SHA-256(data)), because pointycastle's signer hashed data the code had already hashed, so no other implementation could verify them; they now cover SHA-256(data) with an RFC 6979 nonce. Both legacy key forms still unmarshal (P-256 only); P-256, P-384 and P-521 keys from go-libp2p are accepted. Points off the curve and SEC 1 keys whose public key does not match the private value are rejected.
+
 ### Added
 
 - **`Libp2p.observedAddrActivationThreshold`** sets how many peers must report the same observed address before it is used (default 4), for a host that trusts fewer observers. (Dmytro Naumenko)
@@ -18,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`generateEcdsaKeyPair()` never returned** — it called itself instead of the commented-out generator it meant to use. It now generates a P-256 key pair.
 - **A refused TCP dial seemed to go to a random port** — Dart's `SocketException` for a failed connect reports the socket's local ephemeral port, and the TCP transport passed that text through, so the error named a port the library never dialed. The error now names the dialed multiaddr. (#14, reported by cloudabe)
 - **AmbientAutoNATv2 left its event bus subscription open after `close()`** — it cancelled its listener but never closed the subscription, so the bus kept delivering events into it.
 - **Observed addresses were never activated** — three logic errors in the observed-address manager (protocol codes compared with `Protocol` objects, a missing circuit component treated as present, and parsed values assigned through parameters Dart cannot return through) rejected every observation. (Dmytro Naumenko)
