@@ -157,7 +157,7 @@ The go variant uses `11.70.0.0/16` as its simulated internet, because go-libp2p 
 
 Peer containers accept `DEBUG_LOGGERS` (comma-separated logger names, e.g. `p2p-holepunch,UDXTransport`) to raise those loggers to `ALL`, and expose `GET /conns` listing every connection with a `relayed` flag.
 
-**Known issue:** the direct connection does not yet form. The remote's punch packet reaches the local NAT about a second before the local punch dial leaves, so the NAT has already used the 4001↔4001 mapping and rewrites the local source port (visible in `nat-gateway-*.pcap.txt`). Tracked in beads `dart-libp2p-021`.
+**Simulated WAN latency:** the NAT gateways delay outgoing packets by `WAN_DELAY` (default `20ms`, `0` disables). Without it the "internet" has almost no latency, so one peer's punch packet always reaches the other NAT before that peer's own punch leaves; Linux conntrack then records the inbound flow and rewrites the outbound punch to another port, and the punch fails however well-timed it is. DCUtR's RTT/2 synchronisation assumes a real one-way delay.
 
 ### Manual Container Management
 
@@ -212,6 +212,7 @@ docker-compose down -v --remove-orphans
 | `VERBOSE_LOGGING` | `false` | Enable detailed logging |
 | `PEER_STARTUP_TIMEOUT` | `30` | Peer startup timeout (seconds) |
 | `HOLEPUNCH_TIMEOUT` | `60` | Holepunch attempt timeout (seconds) |
+| `WAN_DELAY` | `20ms` | netem delay on each NAT gateway's external interface (`0` disables) |
 
 ### Port Mappings (Fixed)
 

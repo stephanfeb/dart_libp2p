@@ -65,6 +65,7 @@ services:
         ipv4_address: 192.168.1.10
     environment:
       - NAT_TYPE=${NAT_A_TYPE:-cone}
+      - WAN_DELAY=${WAN_DELAY:-20ms}
       - INTERNAL_SUBNET=192.168.1.0/24
     cap_add:
       - NET_ADMIN
@@ -91,6 +92,7 @@ services:
         ipv4_address: 192.168.2.10
     environment:
       - NAT_TYPE=${NAT_B_TYPE:-cone}
+      - WAN_DELAY=${WAN_DELAY:-20ms}
       - INTERNAL_SUBNET=192.168.2.0/24
     cap_add:
       - NET_ADMIN

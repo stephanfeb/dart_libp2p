@@ -34,7 +34,10 @@ status() {
 }
 
 cleanup() { $DC down -v --remove-orphans >/dev/null 2>&1; }
-trap cleanup EXIT
+collect_logs() {
+  for c in peer-a peer-b relay-server nat-gateway-a nat-gateway-b; do docker logs $c >"$OUT/$c.log" 2>&1; done
+}
+trap 'collect_logs; cleanup' EXIT
 
 echo "Building and starting containers ($PROJECT)..."
 cleanup
@@ -71,7 +74,6 @@ sleep 25
 CONNS=$(curl -s -m 5 localhost:8081/conns)
 echo "$CONNS" >"$OUT/peer-a-conns.json"
 for g in a b; do docker exec nat-gateway-$g sh -c "tcpdump -n -r /tmp/dcutr.pcap 2>/dev/null" >"$OUT/nat-gateway-$g.pcap.txt" 2>/dev/null; done
-for c in peer-a peer-b relay-server nat-gateway-a nat-gateway-b; do docker logs $c >"$OUT/$c.log" 2>&1; done
 
 DIRECT=$(python3 -c 'import sys,json; print("\n".join(c["remote_addr"] for c in json.loads(sys.argv[1]) if c["peer_id"]==sys.argv[2] and not c["relayed"]))' "$CONNS" "$BID")
 echo "logs: $OUT"
