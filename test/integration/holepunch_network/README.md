@@ -157,7 +157,7 @@ The go variant uses `11.70.0.0/16` as its simulated internet, because go-libp2p 
 
 Peer containers accept `DEBUG_LOGGERS` (comma-separated logger names, e.g. `p2p-holepunch,UDXTransport`) to raise those loggers to `ALL`, and expose `GET /conns` listing every connection with a `relayed` flag.
 
-**Simulated WAN latency:** the NAT gateways delay outgoing packets by `WAN_DELAY` (default `20ms`, `0` disables). Without it the "internet" has almost no latency, so one peer's punch packet always reaches the other NAT before that peer's own punch leaves; Linux conntrack then records the inbound flow and rewrites the outbound punch to another port, and the punch fails however well-timed it is. DCUtR's RTT/2 synchronisation assumes a real one-way delay.
+**Simulated WAN latency:** the NAT gateways delay outgoing packets by `WAN_DELAY` (default `50ms`, about a 100 ms RTT; `0` disables). Without it the "internet" has almost no latency, so one peer's punch packet always reaches the other NAT before that peer's own punch leaves; Linux conntrack then records the inbound flow and rewrites the outbound punch to another port, and the punch fails however well-timed it is. DCUtR's RTT/2 synchronisation assumes a real one-way delay, and it tolerates timing skew up to that delay: the initiator's RTT estimate includes the responder's processing time, so with too little delay a busy host loses the race. A failed punch also leaves conntrack entries that make a retry within 30 seconds fail the same way.
 
 ### Manual Container Management
 
@@ -212,7 +212,7 @@ docker-compose down -v --remove-orphans
 | `VERBOSE_LOGGING` | `false` | Enable detailed logging |
 | `PEER_STARTUP_TIMEOUT` | `30` | Peer startup timeout (seconds) |
 | `HOLEPUNCH_TIMEOUT` | `60` | Holepunch attempt timeout (seconds) |
-| `WAN_DELAY` | `20ms` | netem delay on each NAT gateway's external interface (`0` disables) |
+| `WAN_DELAY` | `50ms` | netem delay on each NAT gateway's external interface (`0` disables) |
 
 ### Port Mappings (Fixed)
 
@@ -222,10 +222,7 @@ docker-compose down -v --remove-orphans
 | `peer-b` | 8082 | 8080 | 172.25.0.11 | Control API for test orchestration |
 | `relay-server` | 8083 | 8080 | 172.25.0.12 | Control API for test orchestration |
 
-**Note**: Control APIs bind to the control_net (172.25.0.0/16) which is separate from libp2p traffic networks. This ensures:
-- Test orchestrator can coordinate scenarios via HTTP
-- Peers remain isolated from each other for libp2p traffic
-- NAT traversal is properly enforced
+**Note**: Control APIs listen on all of a container's interfaces. Docker may forward a published port to the container's address on any network it is attached to, so binding only the control_net address (172.25.0.0/16) made them intermittently unreachable. The control APIs carry no libp2p traffic, so the peers stay isolated from each other and NAT traversal is still enforced.
 
 ### NAT Types Explained
 

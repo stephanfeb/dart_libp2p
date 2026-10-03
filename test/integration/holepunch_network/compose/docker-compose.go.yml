@@ -62,7 +62,7 @@ services:
         ipv4_address: 192.168.1.10
     environment:
       - NAT_TYPE=${NAT_A_TYPE:-cone}
-      - WAN_DELAY=${WAN_DELAY:-20ms}
+      - WAN_DELAY=${WAN_DELAY:-50ms}
       - INTERNAL_SUBNET=192.168.1.0/24
     cap_add:
       - NET_ADMIN
@@ -89,7 +89,7 @@ services:
         ipv4_address: 192.168.2.10
     environment:
       - NAT_TYPE=${NAT_B_TYPE:-cone}
-      - WAN_DELAY=${WAN_DELAY:-20ms}
+      - WAN_DELAY=${WAN_DELAY:-50ms}
       - INTERNAL_SUBNET=192.168.2.0/24
     cap_add:
       - NET_ADMIN
@@ -134,7 +134,6 @@ services:
         ipv4_address: 172.26.0.12
     environment:
       - ROLE=relay
-      - CONTROL_BIND_IP=172.26.0.12
 
   # Peer A (Behind NAT-A)
   peer-a:
@@ -165,7 +164,6 @@ services:
       - ENABLE_AUTORELAY=true
       - STUN_SERVERS=11.70.2.10:3478
       - NAT_GATEWAY=192.168.1.10
-      - CONTROL_BIND_IP=172.26.0.10  # Bind control API to control network
       - PUBLIC_NET_SUBNET=11.70.0.0/16  # Route to public network through NAT gateway
     depends_on:
       - nat-gateway-a
@@ -194,7 +192,6 @@ services:
       - EXTERNAL_ADDRS=/ip4/11.70.1.20/udp/4001/udx
       - RELAY_SERVERS=/ip4/11.70.3.10/tcp/4001/p2p/12D3KooWKZA9C2aY5vhvmNGHapv4aXXKUHTz3TpQGhmGNwRgQh9P
       - NAT_GATEWAY=192.168.2.10
-      - CONTROL_BIND_IP=172.26.0.11
       - PUBLIC_NET_SUBNET=11.70.0.0/16
     depends_on:
       - nat-gateway-b

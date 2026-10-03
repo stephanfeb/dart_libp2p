@@ -35,7 +35,7 @@ else
     # that peer's own punch leaves it; the NAT then records the inbound flow
     # and gives the outbound punch a different port. DCUtR's timing assumes
     # a real one-way delay; set WAN_DELAY=0 to disable.
-    WAN_DELAY=${WAN_DELAY:-20ms}
+    WAN_DELAY=${WAN_DELAY:-50ms}
     if [ "$WAN_DELAY" != "0" ]; then
         tc qdisc add dev "$EXTERNAL_INTERFACE" root netem delay "$WAN_DELAY" \
             && echo "WAN delay: $WAN_DELAY on $EXTERNAL_INTERFACE" \

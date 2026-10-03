@@ -4,7 +4,7 @@
 // it is a DCUtR peer behind a NAT: it reserves on the relay, advertises
 // EXTERNAL_ADDRS, and starts DCUtR itself when it accepts a relayed
 // connection, as go-libp2p does. Either way it serves a small control API on
-// CONTROL_BIND_IP:8080 compatible with scripts/run_dcutr_scenario.sh.
+// port 8080 compatible with scripts/run_dcutr_scenario.sh.
 package main
 
 import (
