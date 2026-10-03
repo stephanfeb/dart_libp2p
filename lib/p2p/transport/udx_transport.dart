@@ -53,7 +53,7 @@ class UDXTransport implements Transport {
   // family, _performDial reuses its multiplexer (dart_udx routes by CID, so
   // one physical socket safely hosts both the listener's inbound sessions
   // and this outbound dial).
-  final Map<bool, UDXMultiplexer> _listenerMultiplexers = {};
+  final Map<bool, (UDXListener, UDXMultiplexer)> _listenerMultiplexers = {};
 
   /// Optional metrics observer for UDX transport events
   UdxMetricsObserver? metricsObserver;
@@ -129,7 +129,10 @@ class UDXTransport implements Transport {
       // active listener, as in-process tests do — on their own fresh
       // socket, where they belong.
       final isIPv6 = UDX.getAddressFamily(host) == 6;
-      final reused = simultaneousConnect ? _listenerMultiplexers[isIPv6] : null;
+      // A listener closed on its own (not via dispose) also closes its
+      // multiplexer, so only reuse one whose listener is still open.
+      final listenerEntry = simultaneousConnect ? _listenerMultiplexers[isIPv6] : null;
+      final reused = (listenerEntry != null && !listenerEntry.$1.isClosed) ? listenerEntry.$2 : null;
 
       if (reused != null) {
         _logger.fine('[UDXTransport._performDial] Reusing active listener multiplexer (${reused.socket.address.address}:${reused.socket.port}) for dial to $host:$port — required for DCUtR simultaneous-connect.');
@@ -311,11 +314,6 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport.listen] UDXMultiplexer created');
 
       final isIPv6 = rawSocket.address.type == InternetAddressType.IPv6;
-      // Register this listener's multiplexer so a subsequent DCUtR punch
-      // dial to a peer of the same address family reuses this socket's NAT
-      // mapping instead of opening a fresh, unadvertised one.
-      _listenerMultiplexers[isIPv6] = multiplexer;
-
       final protocol = isIPv6 ? 'ip6' : 'ip4';
       final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
       _logger.fine('[UDXTransport.listen] Creating UDXListener for $boundMa');
@@ -329,6 +327,10 @@ class UDXTransport implements Transport {
       );
 
       _activeListeners.add(listener); 
+      // Register this listener's multiplexer so a subsequent DCUtR punch
+      // dial to a peer of the same address family reuses this socket's NAT
+      // mapping instead of opening a fresh, unadvertised one.
+      _listenerMultiplexers[isIPv6] = (listener, multiplexer);
       _logger.fine('[UDXTransport.listen] UDXListener created successfully for $boundMa and added to active listeners.');
       return listener;
     } catch (e) {
@@ -603,16 +605,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     final expectedRemoteHost = _remoteMultiaddr.valueForProtocol(remoteAddress.type == InternetAddressType.IPv4 ? 'ip4' : 'ip6');
     final expectedRemotePort = int.parse(_remoteMultiaddr.valueForProtocol('udp')!);
 
-    // Accept on port-only match as a fallback. Through NAT, the source IP a
-    // punch/new-stream packet actually arrives from can differ from what was
-    // advertised (the peer's NAT may egress a different address than the one
-    // it's mapped as); the port is the more reliable identifier here.
-    if (remotePort != expectedRemotePort) {
+    if (remoteAddress.address != expectedRemoteHost || remotePort != expectedRemotePort) {
       _logger.fine('[UDXSessionConn $id] (Dialer): Received unmatched packet from unexpected source ${remoteAddress.address}:$remotePort. Expected $expectedRemoteHost:$expectedRemotePort. Ignoring.');
       return;
-    }
-    if (remoteAddress.address != expectedRemoteHost) {
-      _logger.info('[UDXSessionConn $id] (Dialer): Accepting unmatched packet on port-only match — source IP ${remoteAddress.address} differs from expected $expectedRemoteHost (through-NAT discrepancy), port $remotePort matches.');
     }
     
     try {

@@ -878,6 +878,14 @@ class Swarm implements Network {
       return true;
     }).toList();
 
+    // A forceDirectDial (e.g. a DCUtR punch) must never be satisfied by a new
+    // relayed connection, so drop circuit addresses from the dial set.
+    if (context.getForceDirectDial().$1) {
+      dialableAddrs = dialableAddrs
+          .where((addr) => !addr.hasProtocol('p2p-circuit'))
+          .toList();
+    }
+
     if (dialableAddrs.isEmpty) {
       _logger.warning('Swarm.dialPeer: No dialable addresses found for peer: $peerId. Original addrs: $allAddrs');
       throw Exception('No dialable addresses found for peer: $peerId');

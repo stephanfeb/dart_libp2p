@@ -68,7 +68,7 @@ class MockTransport implements Transport {
   }
 
   @override
-  Future<Conn> dial(MultiAddr addr, {Duration? timeout}) async {
+  Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
     if (!canDial(addr)) {
       throw Exception('Cannot dial address: $addr');
     }

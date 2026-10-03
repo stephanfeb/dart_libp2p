@@ -515,7 +515,7 @@ class MockTransport implements p2p_transport.Transport {
   MultiAddr? _listenAddrVal;
 
   @override
-  Future<Conn> dial(MultiAddr raddr, {Duration? timeout, PeerId? p}) async {
+  Future<Conn> dial(MultiAddr raddr, {Duration? timeout, PeerId? p, bool simultaneousConnect = false}) async {
     _pendingDialCompleter = Completer<core_transport_conn.TransportConn>();
     return _pendingDialCompleter!.future;
   }
