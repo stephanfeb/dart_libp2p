@@ -807,11 +807,21 @@ class Swarm implements Network {
       final onlyRelayed = healthyConns.isNotEmpty &&
           healthyConns.every((c) => c.remoteMultiaddr.hasProtocol('p2p-circuit'));
 
-      if (healthyConns.isNotEmpty && !(forceDirectDial && onlyRelayed)) {
+      // forceFreshDial (stephanfeb/dart_libp2p#23): a caller sets this when
+      // it has independent, specific reason to believe a particular existing
+      // connection is actually broken even though `_isConnectionHealthy`
+      // still reports it healthy (e.g. it just observed a fast disconnect
+      // right after adopting the connection) — bypasses the healthy-conn
+      // reuse below unconditionally for one dial attempt.
+      final forceFreshDial = context.getForceFreshDial().$1;
+
+      if (healthyConns.isNotEmpty && !forceFreshDial && !(forceDirectDial && onlyRelayed)) {
         // Prefer newest connection - more likely to be alive for relayed paths
         // where the end-to-end path can break without local detection
         _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning newest connection ID: ${healthyConns.last.id}');
         return healthyConns.last;
+      } else if (healthyConns.isNotEmpty && forceFreshDial) {
+        _logger.fine('Swarm.dialPeer: forceFreshDial set for ${peerId.toString()} — dialing fresh addresses instead of reusing the existing connection.');
       } else if (healthyConns.isNotEmpty) {
         _logger.fine('Swarm.dialPeer: forceDirectDial set and only relayed connection(s) exist for ${peerId.toString()} — dialing fresh addresses instead of reusing the relay connection.');
       } else {
