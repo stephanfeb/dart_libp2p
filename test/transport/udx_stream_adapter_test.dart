@@ -325,6 +325,34 @@ void main() {
       await streamController.close();
     });
 
+    test('keeps two connections from the same address apart', () async {
+      // go-udx and js-udx dial every connection from one socket, so a
+      // listener sees several connections from one address.
+      final sockets = [mockSocket, MockUDPSocket()];
+      for (final (i, socket) in sockets.indexed) {
+        final stream = MockUDXStream();
+        when(stream.id).thenReturn(100 + i);
+        when(socket.remoteAddress).thenReturn(InternetAddress('192.168.1.10'));
+        when(socket.remotePort).thenReturn(54321);
+        when(socket.getStreamBuffer()).thenReturn(<UDXStream>[stream]);
+        when(socket.close()).thenAnswer((_) async {});
+      }
+
+      final accepted = <TransportConn>[];
+      final sub = listener.connectionStream.listen(accepted.add);
+      for (final socket in sockets) {
+        connectionsController.add(socket);
+      }
+      await Future.delayed(const Duration(milliseconds: 10));
+      await sub.cancel();
+
+      expect(accepted, hasLength(2));
+      verify(mockConnManager.registerConnection(any)).called(2);
+      for (final socket in sockets) {
+        verifyNever(socket.close());
+      }
+    });
+
     test('ignores incoming connection if listener is closed', () async {
       when(mockSocket.close()).thenAnswer((_) async {});
       when(mockSocket.remoteAddress).thenReturn(InternetAddress('192.168.1.10'));

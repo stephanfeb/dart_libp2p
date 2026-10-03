@@ -388,7 +388,10 @@ class UDXListener implements Listener {
 
   final StreamController<TransportConn> _incomingSessionController = StreamController<TransportConn>.broadcast();
   bool _isClosed = false;
-  final Map<String, UDXSessionConn> _activeSessions = {};
+  // Keyed by socket, not address: one address can hold several connections
+  // (go-udx and js-udx dial them all from one socket, and a hole punch can
+  // leave an inbound and an outbound connection to the same peer).
+  final Map<UDPSocket, UDXSessionConn> _activeSessions = Map.identity();
 
   UDXListener({
     required UDXMultiplexer listeningSocket,
@@ -442,10 +445,8 @@ class UDXListener implements Listener {
     final remotePort = socket.remotePort;
     final sessionKey = "$remoteHost:$remotePort";
 
-    // Check if we already have a session for this peer
-    if (_activeSessions.containsKey(sessionKey)) {
-      _logger.fine('[UDXListener $addr] Session for $sessionKey already exists. Closing duplicate connection.');
-      socket.close();
+    if (_activeSessions.containsKey(socket)) {
+      _logger.fine('[UDXListener $addr] Session for this $sessionKey connection already exists, ignoring.');
       return;
     }
 
@@ -500,13 +501,13 @@ class UDXListener implements Listener {
           connManager: _connManager,
           isDialer: false,
           onClosed: (conn) {
-            _activeSessions.remove(sessionKey);
+            _activeSessions.remove(socket);
             _logger.fine('[UDXListener $addr] Session ${conn.id} closed and removed from active sessions.');
           }
       );
       _logger.fine('[UDXListener $addr] UDXSessionConn created for new session ${sessionConn.id}.');
 
-      _activeSessions[sessionKey] = sessionConn;
+      _activeSessions[socket] = sessionConn;
       _logger.fine('[UDXListener $addr] Added new session ${sessionConn.id} to active sessions.');
 
       _connManager.registerConnection(sessionConn);
@@ -518,7 +519,7 @@ class UDXListener implements Listener {
       } else {
         _logger.fine("[UDXListener $addr] Incoming session controller closed, closing new session to $sessionKey");
         sessionConn.close();
-        _activeSessions.remove(sessionKey);
+        _activeSessions.remove(socket);
       }
     } catch (e, s) {
       _logger.fine("[UDXListener $addr] Error creating new UDX session for $sessionKey: $e\n$s");
