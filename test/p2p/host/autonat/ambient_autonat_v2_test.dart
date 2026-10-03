@@ -69,6 +69,8 @@ void main() {
       when(mockSubscription.close()).thenAnswer((_) async {});
       when(mockAutoNATv2.start()).thenAnswer((_) async {});
       when(mockAutoNATv2.close()).thenAnswer((_) async {});
+      // Probes are skipped until AutoNAT v2 knows a server peer.
+      when(mockAutoNATv2.hasPeers).thenReturn(true);
     });
 
     tearDown(() {
@@ -280,8 +282,8 @@ void main() {
         ),
       );
       
-      // Wait a bit for processing
-      await Future.delayed(const Duration(milliseconds: 100));
+      // The rescheduled probe runs after retryInterval (1s in this config)
+      await Future.delayed(const Duration(milliseconds: 1300));
 
       // New probe should be scheduled
       // Verify by checking that getReachability was called again

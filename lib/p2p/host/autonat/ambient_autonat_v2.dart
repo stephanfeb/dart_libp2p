@@ -41,6 +41,7 @@ class AmbientAutoNATv2 {
   
   // Background processing
   Future<void>? _scheduledProbe;
+  Subscription? _busSubscription;
   StreamSubscription? _eventSubscription;
   bool _closed = false;
   int _probeGeneration = 0; // Track probe generations for cancellation
@@ -74,10 +75,11 @@ class AmbientAutoNATv2 {
     _emitter = await _host.eventBus.emitter(EvtLocalReachabilityChanged);
     
     // Subscribe to relevant events
-    _eventSubscription = _host.eventBus.subscribe([
+    _busSubscription = _host.eventBus.subscribe([
       EvtLocalAddressesUpdated,
       EvtPeerIdentificationCompleted,
-    ]).stream.listen(_handleEvent);
+    ]);
+    _eventSubscription = _busSubscription!.stream.listen(_handleEvent);
     
     _log.fine('AmbientAutoNATv2 initialized, scheduling first probe after boot delay (${_config.bootDelay.inSeconds}s)');
     
@@ -331,6 +333,9 @@ class AmbientAutoNATv2 {
     }
     
     await _eventSubscription?.cancel();
+    // Cancelling the listener alone leaves the subscription registered with
+    // the bus, which keeps delivering events into it.
+    await _busSubscription?.close();
     await _emitter.close();
   }
 }
