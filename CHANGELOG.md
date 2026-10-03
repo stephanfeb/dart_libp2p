@@ -9,10 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Libp2p.observedAddrActivationThreshold`** sets how many peers must report the same observed address before it is used (default 4), for a host that trusts fewer observers. (Dmytro Naumenko)
 - **`Context.withForceFreshDial`** makes `Swarm.dialPeer` dial a new connection even when a healthy one exists, for a caller that knows a connection is broken before the swarm's health checks notice. (Dmytro Naumenko)
 
 ### Fixed
 
+- **Observed addresses were never activated** — three logic errors in the observed-address manager (protocol codes compared with `Protocol` objects, a missing circuit component treated as present, and parsed values assigned through parameters Dart cannot return through) rejected every observation. (Dmytro Naumenko)
+- **Identify was skipped on relayed connections** — a peer reached over a relay never learned the other side's protocols or observed addresses, unlike go-libp2p, which identifies before DCUtR. Identify now runs on relayed connections too; the 30-second timeout that once motivated the skip does not occur in the holepunch harness. (Dmytro Naumenko)
+- **New streams could go over a relayed connection while a direct one existed** — `dialPeer` returned the newest healthy connection, which may be the relayed one; it now prefers the newest direct connection. (Dmytro Naumenko)
+- **RSA public keys and PeerIds were parsed too loosely or not at all** — `RsaPublicKey.fromRawBytes` validates PKCS#1 and RSA SubjectPublicKeyInfo and rejects other input with a `FormatException`, and `PeerId.decode` accepts any raw base58 identity or sha256 multihash. (Dmytro Naumenko)
+- **A punch dial could miss an open UDX listener** — only the most recent listener per address family was remembered; closed listeners are now dropped from a per-family list. (Dmytro Naumenko)
+- **Yamux logged teardown errors as SEVERE and slept 1 ms per frame on fast transports**, and a stream whose peer never sent a standalone ACK kept its pending-ACK entry forever. (Dmytro Naumenko)
 - **IPv6 TCP listeners crashed `host.start()`** — TCP built its local, remote and listen addresses with `/ip4/` whatever the socket's family, so an IPv6 socket produced `/ip4/::1/...`, which fails to parse. Addresses now take the socket's family, as UDX already did. (Dmytro Naumenko)
 - **DCUtR punches got their port rewritten by the NAT** — the uncoordinated direct dial DCUtR makes before punching was flagged as a simultaneous connect, so UDX sent it from the listener socket. Its unanswered packets left a NAT entry for that port pair at the peer's NAT, and the real punch from the same port was then given a different external port. Only punch dials are now simultaneous connects (`Context.withSimultaneousConnect`, which the hole punch code had been setting under keys nothing read); a force-direct dial alone uses a fresh socket. With this, two Dart peers behind cone NATs establish a direct UDX connection in the holepunch docker harness.
 - **AutoNAT v2 dropped connections to the peers it probed** — the server dialed back through the host itself, so a dial-back could reuse an existing (even relayed) connection and confirm an address it never dialed, and its cleanup closed every connection to the peer and cleared its addresses. In a DCUtR exchange this removed the relayed connection the punch was coordinated over. AutoNAT v2 now dials back from a separate host with its own identity, swarm and peerstore, as go-libp2p does.
