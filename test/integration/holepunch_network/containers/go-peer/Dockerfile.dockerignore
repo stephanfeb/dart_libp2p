@@ -1,0 +1,6 @@
+# The build context is the parent of dart-libp2p; send only what the build needs.
+*
+!go-udx
+!go-libp2p-udx-transport
+!dart-libp2p/test/integration/holepunch_network/containers/go-peer
+**/.git

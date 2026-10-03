@@ -32,14 +32,10 @@ iptables -I FORWARD 2 -i ${EXTERNAL_IF} -o ${INTERNAL_IF} -m state --state ESTAB
 
 # Cone NAT: Source NAT with consistent port mapping
 # This creates endpoint-independent mapping (same external port regardless of destination)
-# Try --random for port randomization, fall back to MASQUERADE without flags if not supported
-set +e  # Temporarily disable exit on error
-iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE --random 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "⚠️  --random flag not supported, using basic MASQUERADE"
-    iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE
-fi
-set -e  # Re-enable exit on error
+# Plain MASQUERADE keeps the source port when it is free. Do NOT add --random:
+# that picks a new external port per flow, which is symmetric NAT behaviour
+# and makes hole punching impossible.
+iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE
 
 # Allow established and related connections back in
 # Note: MASQUERADE already handles return traffic routing for established connections

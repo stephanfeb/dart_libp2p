@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:dart_libp2p/p2p/protocol/circuitv2/client/reservation.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -21,6 +22,7 @@ import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
 import 'package:dart_libp2p/p2p/transport/tcp_transport.dart';
+import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
 import 'package:dart_libp2p/p2p/host/peerstore/pstoremem.dart';
 
@@ -61,6 +63,12 @@ class IntegrationTestPeer {
   Future<void> initialize() async {
     // Setup logging
     Logger.root.level = Level.INFO;
+    // DEBUG_LOGGERS: comma-separated logger names to log at ALL, e.g.
+    // "p2p-holepunch,UDXTransport".
+    hierarchicalLoggingEnabled = true;
+    for (final name in (Platform.environment['DEBUG_LOGGERS'] ?? '').split(',')) {
+      if (name.trim().isNotEmpty) Logger(name.trim()).level = Level.ALL;
+    }
     Logger.root.onRecord.listen((record) {
       print('${DateTime.now().toIso8601String()} [${record.level}] ${record.loggerName}: ${record.message}');
       if (record.error != null) print('ERROR: ${record.error}');
@@ -134,6 +142,18 @@ class IntegrationTestPeer {
         .map((addr) => MultiAddr(addr.trim()))
         .toList();
 
+    // EXTERNAL_ADDRS: operator-supplied external addresses (the NAT gateway's
+    // public address and the port it maps the listener to), advertised on
+    // top of the listen addresses.
+    final externalAddrs = (Platform.environment['EXTERNAL_ADDRS'] ?? '')
+        .split(',').where((s) => s.trim().isNotEmpty).map((s) => MultiAddr(s.trim())).toList();
+    if (externalAddrs.isNotEmpty) {
+      config.addrsFactory = (addrs) => [
+            ...addrs,
+            ...externalAddrs.where((e) => !addrs.any((a) => a.toString() == e.toString())),
+          ];
+    }
+
     // Create network infrastructure
     final peerstore = MemoryPeerstore();
     
@@ -161,6 +181,7 @@ class IntegrationTestPeer {
           resourceManager: resourceManager,
           connManager: connManager,
         ),
+        UDXTransport(connManager: connManager),
       ],
     );
 
@@ -365,6 +386,12 @@ class IntegrationTestPeer {
       case '/holepunch':
         await _handleHolepunchRequest(request);
         break;
+      case '/reserve':
+        await _handleReserveRequest(request);
+        break;
+      case '/conns':
+        await _handleConnsRequest(request);
+        break;
       case '/ping':
         await _handlePingRequest(request);
         break;
@@ -373,6 +400,42 @@ class IntegrationTestPeer {
         request.response.write('Not found');
         await request.response.close();
     }
+  }
+
+  /// Reserves a slot on the first configured relay directly and returns our
+  /// full circuit address. Works around AutoRelay not selecting the relay
+  /// (beads dart-libp2p-52c).
+  /// Lists every open connection as {peer_id, remote_addr, relayed}, so a
+  /// scenario can tell a hole-punched connection from a relayed one.
+  Future<void> _handleConnsRequest(HttpRequest request) async {
+    final conns = host.network.conns
+        .map((c) => {
+              'peer_id': c.remotePeer.toBase58(),
+              'remote_addr': c.remoteMultiaddr.toString(),
+              'relayed': c.remoteMultiaddr.hasProtocol('p2p-circuit'),
+            })
+        .toList();
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(jsonEncode(conns));
+    await request.response.close();
+  }
+
+  Future<void> _handleReserveRequest(HttpRequest request) async {
+    try {
+      final relayAddr = MultiAddr(Platform.environment['RELAY_SERVERS']!.split(',').first.trim());
+      final relayId = PeerId.fromString(relayAddr.valueForProtocol('p2p')!);
+      final client = host.circuitV2Client!;
+      final res = await client.reserve(relayId);
+      final circuit = '${relayAddr.toString()}/p2p-circuit/p2p/${host.id.toBase58()}';
+      print('RESERVE ok expire=${res.expire} circuit=$circuit');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'success': true, 'circuit': circuit}));
+    } catch (e, st) {
+      print('RESERVE failed: $e\n$st');
+      request.response.statusCode = 500;
+      request.response.write(jsonEncode({'success': false, 'message': '$e'}));
+    }
+    await request.response.close();
   }
 
   Future<void> _handleStatusRequest(HttpRequest request) async {

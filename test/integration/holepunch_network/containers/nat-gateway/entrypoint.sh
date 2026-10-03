@@ -17,6 +17,19 @@ else
     # Wait for network interfaces to be available
     sleep 2
 
+    # Docker does not guarantee interface order, so find the internal
+    # interface by INTERNAL_SUBNET (assumed /24) and take the other one as
+    # external. With the two swapped, MASQUERADE never matches and packets
+    # leave with their private source address.
+    INTERNAL_PREFIX="${INTERNAL_SUBNET%.*}."
+    DETECTED_INTERNAL=$(ip -o -4 addr show | awk -v p="$INTERNAL_PREFIX" 'index($4, p) == 1 {print $2; exit}')
+    DETECTED_EXTERNAL=$(ip -o -4 addr show | awk -v i="$DETECTED_INTERNAL" '$2 ~ /^eth/ && $2 != i {print $2; exit}')
+    if [ -n "$DETECTED_INTERNAL" ] && [ -n "$DETECTED_EXTERNAL" ]; then
+        export INTERNAL_INTERFACE="$DETECTED_INTERNAL"
+        export EXTERNAL_INTERFACE="$DETECTED_EXTERNAL"
+    fi
+    echo "Internal interface: ${INTERNAL_INTERFACE} (${INTERNAL_SUBNET}), external interface: ${EXTERNAL_INTERFACE}"
+
     # Configure NAT rules based on NAT_TYPE
     case "${NAT_TYPE}" in
         "cone")

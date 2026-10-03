@@ -19,7 +19,7 @@
   },
   "discovery": {
     "stun_servers": [
-      "10.10.2.10:3478"
+      "100.70.2.10:3478"
     ],
     "bootstrap_peers": []
   },

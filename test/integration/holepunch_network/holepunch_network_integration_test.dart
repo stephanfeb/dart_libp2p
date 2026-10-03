@@ -226,7 +226,7 @@ void main() {
         print('✅ Both peers connected to relay: A=$initialConnA, B=$initialConnB');
         
         // Step 2: Check for circuit addresses
-        // Circuit addresses should look like: /ip4/10.10.3.10/tcp/4001/p2p/RELAY_ID/p2p-circuit
+        // Circuit addresses should look like: /ip4/100.70.3.10/tcp/4001/p2p/RELAY_ID/p2p-circuit
         print('\n🔍 Step 2: Checking for circuit relay addresses...');
         
         final peerAHasCircuitAddr = peerAAddrs.any((addr) => addr.contains('/p2p-circuit'));

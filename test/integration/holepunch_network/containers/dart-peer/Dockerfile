@@ -14,8 +14,10 @@ WORKDIR /app
 # Copy dart-libp2p project (build context is parent of dart-libp2p)
 COPY dart-libp2p/ ./
 
-# Copy dart_udx as a sibling directory (path dependency: ../dart-udx)
+# Copy the sibling packages pubspec.yaml's dependency_overrides point at
 COPY dart-udx/ ../dart-udx/
+COPY dart-libp2p-kad-dht/ ../dart-libp2p-kad-dht/
+COPY dart-libp2p-pubsub/ ../dart-libp2p-pubsub/
 
 # Install dependencies
 # mdns_dart will be fetched from pub.dev automatically

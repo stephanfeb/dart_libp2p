@@ -27,8 +27,9 @@ iptables -P FORWARD ACCEPT  # Keep Docker networking working
 # Enable forwarding for outbound traffic
 iptables -A FORWARD -i ${INTERNAL_IF} -o ${EXTERNAL_IF} -j ACCEPT
 
-# Port-Restricted NAT: endpoint-independent mapping but port-dependent filtering
-iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE --random
+# Port-Restricted NAT: endpoint-independent mapping but port-dependent filtering.
+# No --random: that would give a new external port per flow (symmetric).
+iptables -t nat -A POSTROUTING -s ${INTERNAL_SUBNET} -o ${EXTERNAL_IF} -j MASQUERADE
 
 # Only allow inbound traffic that matches EXACTLY the same destination IP:port
 # that was previously contacted from inside

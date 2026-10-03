@@ -1,0 +1,10 @@
+# The build context is the parent of dart-libp2p, so send only the packages
+# the image needs (BuildKit reads <Dockerfile>.dockerignore).
+*
+!dart-libp2p
+!dart-udx
+!dart-libp2p-kad-dht
+!dart-libp2p-pubsub
+**/.dart_tool
+**/.git
+**/build

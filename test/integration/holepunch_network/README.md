@@ -16,16 +16,16 @@ This directory contains comprehensive integration tests for the dart-libp2p hole
 │                  CONTAINER NETWORK TOPOLOGY                          │
 │                        (4 Isolated Docker Networks)                  │
 │                                                                      │
-│  PUBLIC NETWORK (10.10.0.0/16) - Relay, STUN, NAT Gateways          │
+│  PUBLIC NETWORK (100.70.0.0/16) - Relay, STUN, NAT Gateways          │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
 │  │   NAT-A     │    │ RELAY SERVER│    │   NAT-B     │             │
-│  │ 10.10.1.10  │    │ 10.10.3.10  │    │ 10.10.1.20  │             │
+│  │ 100.70.1.10  │    │ 100.70.3.10  │    │ 100.70.1.20  │             │
 │  │ (Gateway)   │    └─────┬───────┘    │ (Gateway)   │             │
 │  └─────┬───────┘          │            └─────┬───────┘             │
 │        │                  │                  │                      │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
 │  │ STUN SERVER │    │             │    │             │             │
-│  │ 10.10.2.10  │    │             │    │             │             │
+│  │ 100.70.2.10  │    │             │    │             │             │
 │  └─────────────┘    │             │    │             │             │
 │                     │             │    │             │             │
 │  PRIVATE NETWORK A (192.168.1.0/24) - Isolated                      │
@@ -65,12 +65,12 @@ Key:
 - **Port-Restricted NAT**: Same external port but port-dependent filtering
 
 ### Infrastructure Services  
-- **STUN Server**: **INTERNAL** address discovery (coturn-based at 10.10.2.10:3478)
+- **STUN Server**: **INTERNAL** address discovery (coturn-based at 100.70.2.10:3478)
 - **Relay Server**: Circuit relay for initial connectivity
 - **Control APIs**: HTTP endpoints for test coordination (exposed via host port mappings)
 
 ### 🔒 **Network Isolation & NAT Enforcement**
-- **No External STUN**: Uses internal STUN server (10.10.2.10:3478), NOT stun.google.com
+- **No External STUN**: Uses internal STUN server (100.70.2.10:3478), NOT stun.google.com
 - **True NAT Isolation**: Peers ONLY have access to their private networks + control_net
 - **No Direct Peer-to-Peer**: Peers cannot reach each other directly - must use NAT traversal
 - **Separate Control Network**: Test orchestration uses dedicated control_net (172.25.0.0/16)
@@ -81,10 +81,12 @@ Key:
 ### 🏠 **Local Network Adaptations**
 This test setup simulates real-world NAT scenarios within a local Docker environment. Key adaptations:
 
-1. **No Real Public IPs**: All "public" addresses are actually internal Docker network IPs
-2. **Fallback Address Discovery**: `BasicHost.publicAddrs` falls back to listening addresses when no truly public addresses are discovered
-3. **Host-Mapped Control APIs**: Test orchestration requires host port mappings to coordinate scenarios
-4. **Container Warmup Time**: Infrastructure needs 15-20 seconds to establish NAT rules and relay connections on cold starts
+1. **Simulated public addresses**: the "internet" is `100.70.0.0/16` (carrier-grade NAT space, never routed on the real internet). RFC 1918 ranges such as `10.0.0.0/8` would not work: `MultiAddr.isPublic()` rejects them, so DCUtR would have no addresses to exchange.
+2. **Operator-supplied external addresses**: each peer is told its NAT gateway's public address through `EXTERNAL_ADDRS` (added to `host.addrs` with an `addrsFactory`). The cone NAT keeps the source port, so the UDX listener's port 4001 maps to port 4001 on the gateway.
+3. **Interface detection**: Docker does not guarantee interface order, so the NAT gateway finds its internal interface by `INTERNAL_SUBNET` and treats the other as external.
+4. **Relay reservation via `/reserve`**: peers reserve on the relay through the control API, because AutoRelay does not yet pick the relay up on its own (beads `dart-libp2p-52c`).
+5. **Host-Mapped Control APIs**: Test orchestration requires host port mappings to coordinate scenarios.
+6. **Container Warmup Time**: Infrastructure needs 15-20 seconds to establish NAT rules and relay connections on cold starts.
 
 ### Test Scenarios
 - **Cone-to-Cone**: Should succeed with direct holepunch
@@ -138,6 +140,24 @@ export NAT_B_TYPE=symmetric
 
 dart test test/integration/holepunch_network/holepunch_network_integration_test.dart
 ```
+
+### DCUtR Scenario Script (UDX, cone-to-cone)
+
+`scripts/run_dcutr_scenario.sh` builds the containers, reserves both peers on the relay, opens a relayed connection from peer-a to peer-b, runs DCUtR and checks whether peer-a ends up with a **direct (non-`/p2p-circuit`) connection** to peer-b. It exits 0 only in that case, and writes container logs, the NAT gateways' UDP packet captures and the control API responses to an output directory.
+
+```bash
+# Dart <-> Dart (compose/docker-compose.yml)
+test/integration/holepunch_network/scripts/run_dcutr_scenario.sh /tmp/dcutr-dart
+
+# Dart <-> go-libp2p, with a go-libp2p relay (compose/docker-compose.go.yml)
+test/integration/holepunch_network/scripts/run_dcutr_scenario.sh --go /tmp/dcutr-go
+```
+
+The go variant uses `11.70.0.0/16` as its simulated internet, because go-libp2p only hole punches from addresses it considers public and treats `100.64.0.0/10` as private. Its relay is go-libp2p because go clients cannot yet reserve on a Dart relay (beads `dart-libp2p-6qi`).
+
+Peer containers accept `DEBUG_LOGGERS` (comma-separated logger names, e.g. `p2p-holepunch,UDXTransport`) to raise those loggers to `ALL`, and expose `GET /conns` listing every connection with a `relayed` flag.
+
+**Known issue:** the direct connection does not yet form. The remote's punch packet reaches the local NAT about a second before the local punch dial leaves, so the NAT has already used the 4001↔4001 mapping and rewrites the local source port (visible in `nat-gateway-*.pcap.txt`). Tracked in beads `dart-libp2p-021`.
 
 ### Manual Container Management
 
@@ -395,17 +415,7 @@ This indicates infrastructure timing issues:
 ## 🔧 **Local Network Testing Implementation**
 
 ### Public Address Simulation
-Since this setup runs entirely within Docker networks without real public IPs, the `dart-libp2p` library includes testing compensations:
-
-```dart
-// In BasicHost.publicAddrs getter
-// TESTING FALLBACK: If no public addresses found, use non-relay addresses for testing
-// This allows holepunching to work in controlled NAT environments like Docker
-if (result.isEmpty) {
-  final fallbackAddrs = allAddrs.where((addr) => !isRelayAddress(addr)).toList();
-  return fallbackAddrs;
-}
-```
+The library has no testing fallback for public addresses. Peers get their public address from `EXTERNAL_ADDRS` (see Local Network Adaptations), which is how an operator would configure a host behind a NAT with a known port mapping.
 
 ### Why This Works
 - **NAT Simulation**: Docker NAT gateways simulate real NAT behavior using iptables
