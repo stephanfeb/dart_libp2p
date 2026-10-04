@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-10-04
+
+### Fixed
+
+- **A peer on the same port number got a dial from an ephemeral socket.** 4.1.0 kept a fresh socket for a dial to one of the host's own listeners, but it compared only the port number. A dial to a remote peer that listens on the same port number, as nodes on a fixed port all do, therefore still left from an ephemeral socket, and that peer observed an address that leads nowhere. The check now compares the address too: a dial counts as one to the host's own listener only for the listener's own address, or, for a listener on all interfaces, for a loopback or unspecified address with its port.
+
 ## [4.1.0] - 2026-10-04
 
 A host behind NAT now learns its public address and can hole-punch without being told its external address.

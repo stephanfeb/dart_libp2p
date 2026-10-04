@@ -149,15 +149,18 @@ class UDXTransport implements Transport {
       //  - DCUtR's simultaneous-connect must originate from the socket whose
       //    external mapping was advertised in the CONNECT message; a fresh
       //    socket gets a different mapping and the punch times out.
-      // A dial to one of our own listener ports (a transport dialing its own
-      // listener, as in-process tests do) keeps its own fresh socket, and so
-      // does [dialFromEphemeralSocket].
+      // A dial to one of our own listeners (a transport dialing itself, as
+      // in-process tests do) keeps its own fresh socket, and so does
+      // [dialFromEphemeralSocket]. A remote peer that listens on the same
+      // port number as we do is not one of our listeners.
       final isIPv6 = UDX.getAddressFamily(host) == 6;
       final familyListeners = _listenerMultiplexers[isIPv6];
-      final dialsOwnPort = familyListeners?.any((m) => m.socket.port == port) ?? false;
+      final dialsOwnListener = familyListeners?.any(
+              (m) => isOwnListenAddress(m.socket.address, m.socket.port, host, port)) ??
+          false;
       final reused = familyListeners != null &&
               familyListeners.isNotEmpty &&
-              (simultaneousConnect || (reuseListenSocket && !dialsOwnPort))
+              (simultaneousConnect || (reuseListenSocket && !dialsOwnListener))
           ? familyListeners.last
           : null;
 
@@ -993,4 +996,30 @@ class _UDXConnStatsImpl extends ConnStats {
     required Stats stats,
     required int numStreams,
   }) : super(stats: stats, numStreams: numStreams);
+}
+
+/// Whether a dial to [host]:[port] reaches the listener whose socket is bound
+/// to [listenAddress]:[listenPort]: the same address and port, or, for a
+/// listener on all interfaces, a loopback or unspecified address with its
+/// port. A peer on another host that listens on the same port number is not
+/// our listener.
+@visibleForTesting
+bool isOwnListenAddress(InternetAddress listenAddress, int listenPort, String host, int port) {
+  if (listenPort != port) return false;
+  final target = InternetAddress.tryParse(host);
+  if (target == null) return false;
+  if (target.rawAddress.length == listenAddress.rawAddress.length &&
+      _sameBytes(target.rawAddress, listenAddress.rawAddress)) {
+    return true;
+  }
+  return _isUnspecified(listenAddress) && (target.isLoopback || _isUnspecified(target));
+}
+
+bool _isUnspecified(InternetAddress a) => a.rawAddress.every((b) => b == 0);
+
+bool _sameBytes(List<int> a, List<int> b) {
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
