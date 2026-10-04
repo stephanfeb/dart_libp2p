@@ -623,7 +623,9 @@ await host.peerStore.addrBook.addAddrs(
    ```dart
    // For relay servers
    config.enableRelay = true;
-   config.enableAutoNAT = false; // Assumes public
+   // The relay service starts only once the host knows it is publicly
+   // reachable. Turning AutoNAT off does not tell it so; declare it:
+   config.forceReachability = Reachability.public;
    ```
 
 3. **Check connection to relay is stable:**

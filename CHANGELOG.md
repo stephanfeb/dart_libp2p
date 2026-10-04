@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-10-04
+
+A host behind NAT now learns its public address and can hole-punch without being told its external address.
+
+### Fixed
+
+- **A UDX host never learned its public address from the peers it dialed.** Every ordinary UDX dial left from a new ephemeral socket, so the peer saw the NAT mapping of a port nobody listens on, and the observed address manager rightly discarded it. A host behind NAT therefore advertised only its private addresses, and DCUtR had no public address to punch to unless the application configured one. Ordinary dials now leave from the listener's socket, as go-libp2p does with reuseport, so the observed address is the listen socket's public mapping. A dial to one of the host's own listener ports still gets a fresh socket.
+- **Normal operation logged at WARNING and SEVERE.** Each `newStream` logged every phase at WARNING, and the swarm, Yamux stream resets, multistream negotiation, the circuit relay client and AutoRelay logged routine traces at WARNING. A peer that does not support a protocol, or a stream the remote closes during negotiation, logged at SEVERE with a stack trace, although the caller already gets the exception. These are now FINE, so an application can run at WARNING and see only problems. A relay reservation is logged at INFO.
+
+### Added
+
+- **`UDXTransport.dialFromEphemeralSocket`** dials from a fresh ephemeral socket instead of the listener's. The swarm uses it for a direct dial that is not coordinated with the peer, such as the one DCUtR tries before it punches: unanswered packets from the listen socket could leave an entry at the peer's NAT that makes the NAT remap the peer's punch. `Transport.dial` and `UDXTransport.dial` are unchanged.
+
 ## [4.0.1] - 2026-10-04
 
 ### Fixed

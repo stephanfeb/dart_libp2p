@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/transport/listener.dart';
 import 'package:dart_libp2p/p2p/transport/transport.dart';
+import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart'; // Added import
@@ -234,24 +235,24 @@ class Swarm implements Network {
 
   @override
   Future<P2PStream> newStream(Context context, PeerId peerId) async {
-    _logger.warning('Swarm.newStream: Entered for peer ${peerId.toString()}. Context HashCode: ${context.hashCode}');
+    _logger.fine('Swarm.newStream: Entered for peer ${peerId.toString()}. Context HashCode: ${context.hashCode}');
     // Check if we're closed
     if (_isClosed) {
-      _logger.warning('Swarm.newStream: Swarm is closed for peer ${peerId.toString()}. Throwing exception.');
+      _logger.fine('Swarm.newStream: Swarm is closed for peer ${peerId.toString()}. Throwing exception.');
       throw Exception('Swarm is closed');
     }
-    _logger.warning('Swarm.newStream: Swarm is open for peer ${peerId.toString()}.');
+    _logger.fine('Swarm.newStream: Swarm is open for peer ${peerId.toString()}.');
 
     // Get or create a connection to the peer
-    _logger.warning('Swarm.newStream: Calling dialPeer(context, ${peerId.toString()}).');
+    _logger.fine('Swarm.newStream: Calling dialPeer(context, ${peerId.toString()}).');
     final Conn conn; // Type is Conn, but runtime type should be SwarmConn
     try {
       conn = await dialPeer(context, peerId);
     } catch (e, st) {
-      _logger.severe('Swarm.newStream: Error from dialPeer for ${peerId.toString()}: $e\n$st');
+      _logger.fine('Swarm.newStream: Error from dialPeer for ${peerId.toString()}: $e\n$st');
       rethrow;
     }
-    _logger.warning('Swarm.newStream: Successfully dialed peer ${peerId.toString()}. Conn runtimeType: ${conn.runtimeType}, Conn ID: ${conn.id}, Conn local: ${conn.localPeer}, Conn remote: ${conn.remotePeer}');
+    _logger.fine('Swarm.newStream: Successfully dialed peer ${peerId.toString()}. Conn runtimeType: ${conn.runtimeType}, Conn ID: ${conn.id}, Conn local: ${conn.localPeer}, Conn remote: ${conn.remotePeer}');
 
     if (conn is! SwarmConn) {
         _logger.severe('Swarm.newStream: conn from dialPeer is NOT SwarmConn. Actual type: ${conn.runtimeType}. Peer: ${peerId.toString()}');
@@ -259,17 +260,17 @@ class Swarm implements Network {
     }
 
     // Create a new stream - let the underlying connection manage stream IDs
-    _logger.warning('Swarm.newStream: About to call (conn as SwarmConn).newStream() for peer ${peerId.toString()} on SwarmConn ${conn.id}.');
+    _logger.fine('Swarm.newStream: About to call (conn as SwarmConn).newStream() for peer ${peerId.toString()} on SwarmConn ${conn.id}.');
     
     final P2PStream stream;
     try {
       stream = await conn.newStream(context);
     } catch (e, st) {
-      _logger.severe('Swarm.newStream: Error from (conn as SwarmConn).newStream() for peer ${peerId.toString()}: $e\n$st');
+      _logger.fine('Swarm.newStream: Error from (conn as SwarmConn).newStream() for peer ${peerId.toString()}: $e\n$st');
       rethrow;
     }
     
-    _logger.warning('Swarm.newStream: Successfully called (conn as SwarmConn).newStream() for peer ${peerId.toString()}. Returned Stream ID: ${stream.id()}, Stream protocol: ${stream.protocol}');
+    _logger.fine('Swarm.newStream: Successfully called (conn as SwarmConn).newStream() for peer ${peerId.toString()}. Returned Stream ID: ${stream.id()}, Stream protocol: ${stream.protocol}');
     // Note: Protocol negotiation (multistreamMuxer.selectOneOf) happens in BasicHost.newStream *after* this Swarm.newStream returns.
     // So, a log for "Protocol negotiation complete" belongs in BasicHost.newStream.
 
@@ -333,7 +334,7 @@ class Swarm implements Network {
         await _peerstore.addrBook.addAddrs(_localPeer, [actualListenAddr], AddressTTL.permanentAddrTTL);
         _logger.fine('[Swarm listen] Added concrete listen address to peerstore: $actualListenAddr for peer ${_localPeer.toString()}');
       } else {
-        _logger.warning('[Swarm listen] Skipping addition of unspecified listen address to peerstore: $actualListenAddr for peer ${_localPeer.toString()}. This should be resolved to concrete addresses by the host.');
+        _logger.fine('[Swarm listen] Skipping addition of unspecified listen address to peerstore: $actualListenAddr for peer ${_localPeer.toString()}. This should be resolved to concrete addresses by the host.');
       }
 
       // Notify listeners
@@ -553,7 +554,7 @@ class Swarm implements Network {
       try {
         await _host?.mux.handle(swarmStream);
       } catch (e, s) {
-        _logger.warning('Error handling incoming stream from ${conn.remotePeer} with multistream muxer: $e\n$s');
+        _logger.fine('Error handling incoming stream from ${conn.remotePeer} with multistream muxer: $e\n$s');
         await swarmStream.reset(); // Reset the SwarmStream, which closes scope
       } finally {
         // Clear the deadline so protocol handlers are not constrained.
@@ -822,7 +823,7 @@ class Swarm implements Network {
         // select the newest direct connection; otherwise fall back to the newest relay connection.
         final directConns = healthyConns.where((c) => !c.remoteMultiaddr.hasProtocol('p2p-circuit')).toList();
         final bestConn = directConns.isNotEmpty ? directConns.last : healthyConns.last;
-        _logger.warning('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning best connection ID: ${bestConn.id} (isDirect: ${!bestConn.remoteMultiaddr.hasProtocol('p2p-circuit')})');
+        _logger.fine('Swarm.dialPeer: Found healthy connection for peer ${peerId.toString()}. Returning best connection ID: ${bestConn.id} (isDirect: ${!bestConn.remoteMultiaddr.hasProtocol('p2p-circuit')})');
         return bestConn;
       } else if (healthyConns.isNotEmpty && forceFreshDial) {
         _logger.fine('Swarm.dialPeer: forceFreshDial set for ${peerId.toString()} — dialing fresh addresses instead of reusing the existing connection.');
@@ -1052,11 +1053,17 @@ class Swarm implements Network {
 
     // Dial the address. A simultaneous connect is a DCUtR punch, which
     // hole-punch-capable transports (e.g. UDX) dial from the socket whose NAT
-    // mapping was advertised to the peer. A plain forceDirectDial is not.
-    final transportConn = await transport.dial(
-      dialAddr,
-      simultaneousConnect: context.getSimultaneousConnect().$1,
-    );
+    // mapping was advertised to the peer. A plain forceDirectDial is not
+    // coordinated with the peer, so UDX must not send it from that socket:
+    // its unanswered packets would make the peer's NAT remap the punch.
+    final simultaneousConnect = context.getSimultaneousConnect().$1;
+    final uncoordinatedDirect = context.getForceDirectDial().$1 && !simultaneousConnect;
+    final transportConn = transport is UDXTransport && uncoordinatedDirect
+        ? await transport.dialFromEphemeralSocket(dialAddr)
+        : await transport.dial(
+            dialAddr,
+            simultaneousConnect: simultaneousConnect,
+          );
     
     // Upgrade the connection
     final upgradedConn = await _upgrader.upgradeOutbound(

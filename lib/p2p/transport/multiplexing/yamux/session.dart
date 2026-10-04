@@ -356,7 +356,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       if (frame.flags & YamuxFlags.rst != 0) {
         // RST: reset the stream
         final stream = _streams[frame.streamId];
-        _log.warning('$_logPrefix [STREAM-RESET-DIAG] Received RST frame for StreamID=${frame.streamId}, type=${frame.type}. Stream exists: ${stream != null}');
+        _log.fine('$_logPrefix [STREAM-RESET-DIAG] Received RST frame for StreamID=${frame.streamId}, type=${frame.type}. Stream exists: ${stream != null}');
         if (stream != null) {
           await stream.handleFrame(frame);
         }
@@ -840,7 +840,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     _pendingStreams.clear();
 
     final activeStreams = List<YamuxStream>.from(_streams.values);
-    _log.warning('$_logPrefix [STREAM-RESET-DIAG] _cleanupWithoutFrames: Force-resetting ${activeStreams.length} active streams (session teardown)');
+    _log.fine('$_logPrefix [STREAM-RESET-DIAG] _cleanupWithoutFrames: Force-resetting ${activeStreams.length} active streams (session teardown)');
     _streams.clear();
     for (final stream in activeStreams) {
       try {

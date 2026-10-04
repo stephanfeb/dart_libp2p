@@ -78,9 +78,28 @@ class UDXTransport implements Transport {
     // The UDX instance is ready after construction.
   }
 
+  /// Dials [addr]. The dial leaves from an active listener's socket, so the
+  /// peer observes this host at its listen port (see [_performDial]).
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {
-    _logger.fine('[UDXTransport.dial] Attempting to dial $addr with timeout: ${timeout ?? config.dialTimeout}, simultaneousConnect: $simultaneousConnect');
+  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) =>
+      _dial(addr, timeout: timeout, simultaneousConnect: simultaneousConnect, reuseListenSocket: true);
+
+  /// Dials [addr] from a fresh ephemeral socket instead of the listener's.
+  ///
+  /// The swarm uses this for a direct dial that is not coordinated with the
+  /// peer, such as the one DCUtR tries before it punches: unanswered packets
+  /// from the listen socket could leave an entry at the peer's NAT that makes
+  /// the NAT remap the peer's punch.
+  Future<TransportConn> dialFromEphemeralSocket(MultiAddr addr, {Duration? timeout}) =>
+      _dial(addr, timeout: timeout, simultaneousConnect: false, reuseListenSocket: false);
+
+  Future<TransportConn> _dial(
+    MultiAddr addr, {
+    Duration? timeout,
+    required bool simultaneousConnect,
+    required bool reuseListenSocket,
+  }) async {
+    _logger.fine('[UDXTransport.dial] Attempting to dial $addr with timeout: ${timeout ?? config.dialTimeout}, simultaneousConnect: $simultaneousConnect, reuseListenSocket: $reuseListenSocket');
     final host = addr.valueForProtocol('ip4') ?? addr.valueForProtocol('ip6');
     final port = int.parse(addr.valueForProtocol('udp') ?? '0');
 
@@ -92,7 +111,7 @@ class UDXTransport implements Transport {
 
     // Use UDX exception handler with retry logic for the entire dial operation
     return await UDXExceptionHandler.handleUDXOperation(
-      () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect),
+      () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect, reuseListenSocket),
       'UDXTransport.dial($addr)',
       retryConfig: UDXRetryConfig.regular,
     );
@@ -105,6 +124,7 @@ class UDXTransport implements Transport {
     int port,
     Duration effectiveTimeout,
     bool simultaneousConnect,
+    bool reuseListenSocket,
   ) async {
     RawDatagramSocket? rawSocket;
     UDXMultiplexer? multiplexer;
@@ -116,26 +136,33 @@ class UDXTransport implements Transport {
     bool ownsMultiplexer = false;
 
     try {
-      // DCUtR's simultaneous-connect requires the punch dial to originate
-      // from the SAME local socket whose external NAT mapping was already
-      // advertised in the CONNECT message — a fresh ephemeral dial socket
-      // gets a different, unadvertised mapping and the punch times out. When
-      // a listener is active for the target's address family AND this dial
-      // is itself a simultaneous-connect attempt, reuse the listener's
-      // multiplexer instead of binding a new socket (dart_udx routes by CID,
-      // so one physical socket safely hosts both the listener's inbound
-      // sessions and this outbound dial). Gating on simultaneousConnect
-      // keeps ordinary dials — including a transport dialing its own
-      // active listener, as in-process tests do — on their own fresh
-      // socket, where they belong.
+      // Dial from the listener's socket when a listener is active for the
+      // target's address family, as go-libp2p does with reuseport (dart_udx
+      // routes by CID, so one physical socket safely hosts both the
+      // listener's inbound sessions and this outbound dial). Two things
+      // depend on it:
+      //  - A peer behind NAT learns its public address from what the peers
+      //    it dials observe. Only the listen socket's NAT mapping is worth
+      //    advertising; an ephemeral dial socket's mapping is discarded by
+      //    the observed address manager, so a host that dialed only from
+      //    ephemeral sockets never learned a public address.
+      //  - DCUtR's simultaneous-connect must originate from the socket whose
+      //    external mapping was advertised in the CONNECT message; a fresh
+      //    socket gets a different mapping and the punch times out.
+      // A dial to one of our own listener ports (a transport dialing its own
+      // listener, as in-process tests do) keeps its own fresh socket, and so
+      // does [dialFromEphemeralSocket].
       final isIPv6 = UDX.getAddressFamily(host) == 6;
       final familyListeners = _listenerMultiplexers[isIPv6];
-      final reused = simultaneousConnect && familyListeners != null && familyListeners.isNotEmpty
+      final dialsOwnPort = familyListeners?.any((m) => m.socket.port == port) ?? false;
+      final reused = familyListeners != null &&
+              familyListeners.isNotEmpty &&
+              (simultaneousConnect || (reuseListenSocket && !dialsOwnPort))
           ? familyListeners.last
           : null;
 
       if (reused != null) {
-        _logger.fine('[UDXTransport._performDial] Reusing active listener multiplexer (${reused.socket.address.address}:${reused.socket.port}) for dial to $host:$port — required for DCUtR simultaneous-connect.');
+        _logger.fine('[UDXTransport._performDial] Reusing active listener multiplexer (${reused.socket.address.address}:${reused.socket.port}) for dial to $host:$port (simultaneousConnect: $simultaneousConnect).');
         multiplexer = reused;
         ownsMultiplexer = false;
       } else {

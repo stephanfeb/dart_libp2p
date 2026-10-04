@@ -86,7 +86,7 @@ class CircuitV2Client implements Transport {
   Future<void> start() async {
     // Register a handler for the STOP protocol. This is how we receive incoming connections.
     host.setStreamHandler(CircuitV2Protocol.protoIDv2Stop, _handleStreamV2);
-    _log.warning('🎯 [CircuitV2Client.start] Handler registered for ${CircuitV2Protocol.protoIDv2Stop}');
+    _log.fine('🎯 [CircuitV2Client.start] Handler registered for ${CircuitV2Protocol.protoIDv2Stop}');
     _log.fine('CircuitV2Client started, listening for ${CircuitV2Protocol.protoIDv2Stop}');
   }
 
@@ -100,7 +100,7 @@ class CircuitV2Client implements Transport {
   // Handles incoming streams for the STOP protocol (from relay to destination)
   // Signature updated to match StreamHandler typedef: Future<void> Function(P2PStream stream, PeerId remotePeer)
   Future<void> _handleStreamV2(P2PStream stream, PeerId remoteRelayPeerId) async {
-    _log.warning('🎯 [CircuitV2Client._handleStreamV2] ENTERED! Received incoming STOP stream from relay ${remoteRelayPeerId.toString()} for stream ${stream.id()}');
+    _log.fine('🎯 [CircuitV2Client._handleStreamV2] ENTERED! Received incoming STOP stream from relay ${remoteRelayPeerId.toString()} for stream ${stream.id()}');
     
     try {
       // Read the STOP message directly from the P2PStream without any adapters

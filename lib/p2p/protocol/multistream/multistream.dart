@@ -171,7 +171,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         final h = await _findHandler(tok);
         if (h == null) {
           // No handler found, send "na" (not available)
-          _log.warning('[multistreamMuxer - negotiate] No handler for "$tok". Sending "na".');
+          _log.fine('[multistreamMuxer - negotiate] No handler for "$tok". Sending "na".');
           await _writeDelimited(stream, utf8.encode('na'));
           _log.fine('[multistreamMuxer - negotiate] Sent "na" for "$tok". Continuing loop.');
           continue;
@@ -187,7 +187,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         return (tok, h.handle);
       }
     } catch (e) {
-      _log.severe('[multistreamMuxer - negotiate for ${protocolID}] Error during negotiation: $e');
+      _log.fine('[multistreamMuxer - negotiate for ${protocolID}] Error during negotiation: $e');
       await stream.reset();
       rethrow;
     }
@@ -214,7 +214,7 @@ class MultistreamMuxer implements ProtocolSwitch {
 
     // Ensure the stream is valid before proceeding
     if (stream.isClosed) {
-        _log.warning('[multistreamMuxer - handle] Stream for protocol $proto was closed during or immediately after negotiation. Aborting handler call.');
+        _log.fine('[multistreamMuxer - handle] Stream for protocol $proto was closed during or immediately after negotiation. Aborting handler call.');
         return;
     }
 
@@ -384,7 +384,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         return await _performSingleReadDelimited(stream);
       } on TimeoutException catch (e) {
         retryCount++;
-        _log.warning('[multistream] Read timeout (attempt $retryCount/${maxRetries + 1}): ${e.message}');
+        _log.fine('[multistream] Read timeout (attempt $retryCount/${maxRetries + 1}): ${e.message}');
         
         if (retryCount > maxRetries) {
           _log.severe('[multistream] Max retries exceeded for read operation');
@@ -393,7 +393,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         
         // Check if stream is still viable for retry
         if (stream.isClosed) {
-          _log.warning('[multistream] Stream closed during retry, aborting');
+          _log.fine('[multistream] Stream closed during retry, aborting');
           throw FormatException('Stream closed during retry attempts');
         }
         
@@ -473,7 +473,7 @@ class MultistreamMuxer implements ProtocolSwitch {
 
       // Need more data
       if (stream.isClosed) {
-        _log.warning('[multistream] Stream closed during read operation');
+        _log.fine('[multistream] Stream closed during read operation');
         throw FormatException('Stream closed during read operation');
       }
 
@@ -511,7 +511,7 @@ class MultistreamMuxer implements ProtocolSwitch {
     try {
       return await operation();
     } on YamuxException catch (e) {
-      _log.warning('[multistream] Yamux exception during $operationName: ${e.message}');
+      _log.fine('[multistream] Yamux exception during $operationName: ${e.message}');
       
       // Handle different types of Yamux exceptions
       if (e is YamuxStreamStateException) {
@@ -528,7 +528,7 @@ class MultistreamMuxer implements ProtocolSwitch {
         throw FormatException('Stream protocol error: ${e.message}');
       }
     } on StateError catch (e) {
-      _log.warning('[multistream] StateError during $operationName: ${e.message}');
+      _log.fine('[multistream] StateError during $operationName: ${e.message}');
       
       // Check if this is a Yamux stream state error
       if (e.message.contains('reset') || e.message.contains('closed')) {
@@ -539,11 +539,11 @@ class MultistreamMuxer implements ProtocolSwitch {
       // Generic state error
       rethrow;
     } on TimeoutException catch (e) {
-      _log.warning('[multistream] Timeout during $operationName: ${e.message}');
+      _log.fine('[multistream] Timeout during $operationName: ${e.message}');
       await YamuxExceptionUtils.safeStreamReset(stream, context: operationName);
       rethrow;
     } on FormatException catch (e) {
-      _log.warning('[multistream] Format error during $operationName: ${e.message}');
+      _log.fine('[multistream] Format error during $operationName: ${e.message}');
       await YamuxExceptionUtils.safeStreamReset(stream, context: operationName);
       rethrow;
     } catch (e, stackTrace) {

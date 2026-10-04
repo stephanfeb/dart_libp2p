@@ -493,9 +493,9 @@ class BasicHost implements Host {
           .stream
           .listen((event) async {
         if (event is EvtAutoRelayAddrsUpdated) {
-          _log.warning('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
+          _log.fine('[BasicHost] Received AutoRelay address update: ${event.advertisableAddrs.length} addresses');
           for (var addr in event.advertisableAddrs) {
-            _log.warning('[BasicHost]   updated addr: $addr');
+            _log.fine('[BasicHost]   updated addr: $addr');
           }
           _autoRelayAddrs = List.from(event.advertisableAddrs);
           
@@ -776,7 +776,7 @@ class BasicHost implements Host {
 
   void _newStreamHandler(P2PStream stream) async {
     final startTime = DateTime.now();
-    _log.warning('[_newStreamHandler] 🎯 ENTERED for stream ${stream.id()} from ${stream.conn.remotePeer}');
+    _log.fine('[_newStreamHandler] 🎯 ENTERED for stream ${stream.id()} from ${stream.conn.remotePeer}');
 
     // Set negotiation timeout if configured
     if (_negtimeout > Duration.zero) {
@@ -785,9 +785,9 @@ class BasicHost implements Host {
 
     try {
       // Negotiate protocol
-      _log.warning('[_newStreamHandler] 🔄 Starting protocol negotiation for stream ${stream.id()}');
+      _log.fine('[_newStreamHandler] 🔄 Starting protocol negotiation for stream ${stream.id()}');
       final (protocol, handler) = await _mux.negotiate(stream); // Use MultistreamMuxer.negotiate
-      _log.warning('[_newStreamHandler] ✅ Protocol negotiated: $protocol for stream ${stream.id()}');
+      _log.fine('[_newStreamHandler] ✅ Protocol negotiated: $protocol for stream ${stream.id()}');
 
       // Clear deadline after negotiation
       if (_negtimeout > Duration.zero) {
@@ -801,12 +801,12 @@ class BasicHost implements Host {
       _log.fine('Negotiated protocol: $protocol (took ${elapsed.inMilliseconds}ms)');
 
       // Handle the stream using the handler returned by negotiate
-      _log.warning('[_newStreamHandler] 🚀 Invoking handler for protocol: $protocol, stream ${stream.id()}');
+      _log.fine('[_newStreamHandler] 🚀 Invoking handler for protocol: $protocol, stream ${stream.id()}');
       handler(protocol, stream);
-      _log.warning('[_newStreamHandler] ✅ Handler invoked for protocol: $protocol, stream ${stream.id()}');
+      _log.fine('[_newStreamHandler] ✅ Handler invoked for protocol: $protocol, stream ${stream.id()}');
     } catch (e) {
       final elapsed = DateTime.now().difference(startTime);
-      _log.severe('[_newStreamHandler] ❌ Protocol negotiation failed for incoming stream ${stream.id()}: $e (took ${elapsed.inMilliseconds}ms)');
+      _log.fine('[_newStreamHandler] ❌ Protocol negotiation failed for incoming stream ${stream.id()}: $e (took ${elapsed.inMilliseconds}ms)');
       stream.reset();
     }
   }
@@ -963,13 +963,13 @@ class BasicHost implements Host {
     // 4. Add circuit relay addresses from AutoRelay
     // These are addresses where we can be reached via a relay server
     if (_autoRelay != null && _autoRelayAddrs.isNotEmpty) {
-      _log.warning('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
+      _log.fine('[BasicHost allAddrs] Adding ${_autoRelayAddrs.length} circuit relay addresses from AutoRelay');
       for (var addr in _autoRelayAddrs) {
-        _log.warning('[BasicHost allAddrs]   circuit addr: $addr');
+        _log.fine('[BasicHost allAddrs]   circuit addr: $addr');
       }
       finalAddrs.addAll(_autoRelayAddrs);
     } else if (_autoRelay != null) {
-      _log.warning('[BasicHost allAddrs] AutoRelay active but _autoRelayAddrs is EMPTY');
+      _log.fine('[BasicHost allAddrs] AutoRelay active but _autoRelayAddrs is EMPTY');
     }
     
     // If after all this, finalAddrs is empty, but we had original listen addresses,
@@ -1253,7 +1253,7 @@ class BasicHost implements Host {
   @override
   Future<P2PStream> newStream(PeerId p, List<ProtocolID> pids, Context context) async {
     final startTime = DateTime.now();
-    _log.warning('🎯 [newStream] ENTERED for peer ${p.toBase58()}, protocols: $pids');
+    _log.fine('🎯 [newStream] ENTERED for peer ${p.toBase58()}, protocols: $pids');
 
     
     // Set up a timeout context if needed
@@ -1264,20 +1264,20 @@ class BasicHost implements Host {
     // Phase 1: Connection
 
     final connectStartTime = DateTime.now();
-    _log.warning('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
+    _log.fine('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
     try {
       await connect(AddrInfo(p, []), context: context);
     } on IdentifyTimeoutException catch (e) {
       final totalTime = DateTime.now().difference(startTime);
-      _log.warning('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
+      _log.fine('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
       rethrow;
     } on IdentifyException catch (e) {
       final totalTime = DateTime.now().difference(startTime);
-      _log.severe('❌ [newStream Phase 1] Connection to ${p.toBase58()} failed due to identify error after ${totalTime.inMilliseconds}ms: $e');
+      _log.fine('❌ [newStream Phase 1] Connection to ${p.toBase58()} failed due to identify error after ${totalTime.inMilliseconds}ms: $e');
       rethrow;
     }
-    _log.warning('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
+    _log.fine('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
     final connectTime = DateTime.now().difference(connectStartTime);
 
@@ -1285,10 +1285,10 @@ class BasicHost implements Host {
     // Phase 2: Stream Creation
 
     final streamCreateStartTime = DateTime.now();
-    _log.warning('🎯 [newStream Phase 2] Creating stream to peer ${p.toBase58()}...');
+    _log.fine('🎯 [newStream Phase 2] Creating stream to peer ${p.toBase58()}...');
     
     final stream = await _network.newStream(context, p);
-    _log.warning('✅ [newStream Phase 2] Stream ${stream.id()} created to peer ${p.toBase58()}');
+    _log.fine('✅ [newStream Phase 2] Stream ${stream.id()} created to peer ${p.toBase58()}');
     
     final streamCreateTime = DateTime.now().difference(streamCreateStartTime);
 
@@ -1303,33 +1303,33 @@ class BasicHost implements Host {
 
     final identifyStartTime = DateTime.now();
 
-    _log.warning('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
+    _log.fine('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
 
     try {
       await _idService.identifyWait(stream.conn);
     } on IdentifyTimeoutException catch (e) {
       final totalTime = DateTime.now().difference(startTime);
-      _log.warning('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
+      _log.fine('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
       await stream.reset();
 
       // CRITICAL: Remove the stale connection to prevent persistent failure loops.
       // The identify timeout indicates the connection is dead - keeping it would
       // cause repeated 30-second timeouts on subsequent operations.
       try {
-        _log.warning('🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}');
+        _log.fine('🗑️ [newStream Phase 3] Removing stale connection to ${p.toBase58()}');
         await _network.closePeer(p);
       } catch (closeError) {
-        _log.warning('⚠️ [newStream Phase 3] Error closing stale connection: $closeError');
+        _log.fine('⚠️ [newStream Phase 3] Error closing stale connection: $closeError');
       }
 
       rethrow;
     } on IdentifyException catch (e) {
       final totalTime = DateTime.now().difference(startTime);
-      _log.severe('❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e');
+      _log.fine('❌ [newStream Phase 3] Identify for ${p.toBase58()} failed after ${totalTime.inMilliseconds}ms: $e');
       await stream.reset();
       rethrow;
     }
-    _log.warning('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
+    _log.fine('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
 
     final identifyTime = DateTime.now().difference(identifyStartTime);
 
@@ -1351,10 +1351,10 @@ class BasicHost implements Host {
       // DEBUG: Add detailed protocol negotiation tracking
 
       final selectStartTime = DateTime.now();
-      _log.warning('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
+      _log.fine('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
       
       final selectedProtocol = await _mux.selectOneOf(stream, pids);
-      _log.warning('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
+      _log.fine('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
       
       final selectTime = DateTime.now().difference(selectStartTime);
 
@@ -1368,7 +1368,7 @@ class BasicHost implements Host {
       }
 
       if (selectedProtocol == null) {
-        _log.severe('🤝 [NEWSTREAM-PHASE-4] No protocol selected from: $pids');
+        _log.fine('🤝 [NEWSTREAM-PHASE-4] No protocol selected from: $pids');
         stream.reset();
         throw Exception('Failed to negotiate any of the requested protocols: $pids with peer $p');
       }
@@ -1376,7 +1376,7 @@ class BasicHost implements Host {
       // Phase 5: Protocol Setup
 
       final setupStartTime = DateTime.now();
-      _log.warning('🎯 [newStream Phase 5] Setting up protocol $selectedProtocol on stream ${stream.id()}...');
+      _log.fine('🎯 [newStream Phase 5] Setting up protocol $selectedProtocol on stream ${stream.id()}...');
       
       // DEBUG: Add protocol assignment tracking
 
@@ -1397,8 +1397,8 @@ class BasicHost implements Host {
       final negotiationTime = DateTime.now().difference(negotiationStartTime);
       final totalTime = DateTime.now().difference(startTime);
       
-      _log.warning('✅ [newStream Phase 5] Protocol setup complete for stream ${stream.id()}');
-      _log.warning('✅ [newStream] COMPLETE - Returning stream ${stream.id()} with protocol $selectedProtocol');
+      _log.fine('✅ [newStream Phase 5] Protocol setup complete for stream ${stream.id()}');
+      _log.fine('✅ [newStream] COMPLETE - Returning stream ${stream.id()} with protocol $selectedProtocol');
 
 
 
@@ -1411,13 +1411,13 @@ class BasicHost implements Host {
     } catch (e, stackTrace) {
       final negotiationTime = DateTime.now().difference(negotiationStartTime);
       final totalTime = DateTime.now().difference(startTime);
-      _log.severe('❌ [NEWSTREAM-ERROR] Stream creation failed after ${totalTime.inMilliseconds}ms (negotiation: ${negotiationTime.inMilliseconds}ms): $e\n$stackTrace');
+      _log.fine('❌ [NEWSTREAM-ERROR] Stream creation failed after ${totalTime.inMilliseconds}ms (negotiation: ${negotiationTime.inMilliseconds}ms): $e\n$stackTrace');
       
       try {
         stream.reset();
 
       } catch (resetError) {
-        _log.warning('⚠️ [NEWSTREAM-ERROR] Error during stream reset: $resetError');
+        _log.fine('⚠️ [NEWSTREAM-ERROR] Error during stream reset: $resetError');
       }
       
       // No need to check for UnimplementedError specifically anymore
