@@ -1202,17 +1202,27 @@ class BasicHost implements Host {
     }
   }
 
+  /// Adapts a [StreamHandler] to the muxer's [HandlerFunc].
+  ///
+  /// The muxer does not await handlers, so a handler that fails, for example
+  /// by writing to a stream the peer closed, would raise an unhandled async
+  /// error. Its error is logged and its stream reset instead, as a failed
+  /// handler in go-libp2p affects only its own stream.
+  HandlerFunc _handlerFunc(StreamHandler handler) {
+    return (ProtocolID protocol, P2PStream stream) {
+      final remotePeer = stream.conn.remotePeer;
+      Future.sync(() => handler(stream, remotePeer)).catchError((Object e, StackTrace st) {
+        _log.warning('Stream handler for $protocol from $remotePeer failed: $e\n$st');
+        if (!stream.isClosed) {
+          stream.reset().catchError((_) {});
+        }
+      });
+    };
+  }
+
   @override
   void setStreamHandler(ProtocolID pid, StreamHandler handler) {
-    // Convert StreamHandler to HandlerFunc
-    final handlerFunc = (ProtocolID protocol, P2PStream stream) {
-      // Extract remotePeer from the stream's connection
-      final remotePeer = stream.conn.remotePeer;
-      // Call the handler with both stream and remotePeer
-      handler(stream, remotePeer);
-    };
-
-    _mux.addHandler(pid, handlerFunc);
+    _mux.addHandler(pid, _handlerFunc(handler));
 
     // Emit protocol updated event
     if (_evtLocalProtocolsUpdated != null) {
@@ -1222,18 +1232,7 @@ class BasicHost implements Host {
 
   @override
   void setStreamHandlerMatch(ProtocolID pid, bool Function(ProtocolID) match, StreamHandler handler) {
-    // Convert StreamHandler to HandlerFunc
-    // final handlerFunc = (ProtocolID protocol, P2PStream stream) {
-    //   handler(stream);
-    // };
-    final handlerFunc = (ProtocolID protocol, P2PStream stream) {
-      // Extract remotePeer from the stream's connection
-      final remotePeer = stream.conn.remotePeer;
-      // Call the handler with both stream and remotePeer
-      handler(stream, remotePeer);
-    };
-
-    _mux.addHandlerWithFunc(pid, match, handlerFunc);
+    _mux.addHandlerWithFunc(pid, match, _handlerFunc(handler));
 
     // Emit protocol updated event
     if (_evtLocalProtocolsUpdated != null) {

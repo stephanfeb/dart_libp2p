@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream handler that failed raised an unhandled error** — the protocol muxer calls handlers without awaiting them, and `setStreamHandler` dropped the handler's future, so any error after its first `await` escaped as an unhandled async error, which a test or a Flutter error zone reports as a crash. Identify push hit this when a host closed while a push was in flight. The error is now logged and the handler's stream reset; other streams and the host carry on, as in go-libp2p.
+
 ## [4.0.0] - 2026-10-04
 
 DCUtR hole punching interoperates with go-libp2p over UDX, and ECDSA keys, identify and AutoNAT v2 now behave as in go-libp2p.
