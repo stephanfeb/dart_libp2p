@@ -11,7 +11,7 @@ A comprehensive Dart implementation of the [libp2p](https://libp2p.io/) networki
 - **Multiple Transports**: TCP and custom UDX (UDP-based) transport support
 - **Security**: Noise protocol for encrypted and authenticated connections
 - **Stream Multiplexing**: Yamux for efficient multi-stream communication
-- **Peer Discovery**: mDNS and routing-based peer discovery mechanisms
+- **Peer Discovery**: mDNS on the local network; for discovery over the internet, use the [Kademlia DHT](https://pub.dev/packages/dart_libp2p_kad_dht)
 - **Protocol Support**: Built-in support for Ping, Identify, and other core libp2p protocols
 - **Resource Management**: Built-in protection against resource exhaustion
 - **Event System**: Comprehensive event bus for monitoring network activity
@@ -23,7 +23,7 @@ Add `dart_libp2p` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  dart_libp2p: ^4.1.1
+  dart_libp2p: ^4.1.2
 ```
 
 Then run:
@@ -40,21 +40,18 @@ Here's a simple example of creating two libp2p nodes and connecting them:
 import 'package:dart_libp2p/dart_libp2p.dart';
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
-import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart' as p2p_conn_manager;
-import 'package:dart_udx/dart_udx.dart';
 
 Future<Host> createHost({String? listen}) async {
   final keyPair = await crypto_ed25519.generateEd25519KeyPair();
-  final udx = UDX();
   final connMgr = p2p_conn_manager.ConnectionManager();
 
   final options = <p2p_config.Option>[
     p2p_config.Libp2p.identity(keyPair),
     p2p_config.Libp2p.connManager(connMgr),
-    p2p_config.Libp2p.transport(UDXTransport(connManager: connMgr, udxInstance: udx)),
+    p2p_config.Libp2p.transport(UDXTransport(connManager: connMgr)),
     p2p_config.Libp2p.security(await NoiseSecurity.create(keyPair)),
     if (listen != null) p2p_config.Libp2p.listenAddrs([MultiAddr(listen)]),
   ];
@@ -78,6 +75,9 @@ void main() async {
   await host2.close();
 }
 ```
+
+The program exits when both hosts are closed. Yamux is the default stream
+multiplexer, so the example does not configure one.
 
 ## 🏗️ Architecture
 
@@ -162,20 +162,23 @@ Check out the [examples](./example/) directory for working examples:
 
 ### Featured Example: mDNS Chat
 
-The `chat_mdns` example demonstrates **mDNS service discovery** using the `mdns_dart` package:
-- ✅ **Real mDNS service advertisement** (not fake lookup calls)  
-- ✅ **Actual network-level discovery** (broadcasts to 224.0.0.251:5353)  
-- ✅ **Zero-configuration networking** (no fallback mechanisms needed)  
-- ✅ **Cross-subnet support** (works beyond localhost)  
+The `chat_mdns` example finds chat peers with mDNS, through the `mdns_dart` package:
+- **Service advertisement and discovery** on the multicast group 224.0.0.251, port 5353
+- **No configuration**: instances on the same network find each other
+- **Local network only**: mDNS does not cross routers, so peers must be on the same subnet
 
-Run multiple instances to see real peer discovery in action:
+Run several instances to see peer discovery:
 ```bash
 # Terminal 1
 dart run example/chat_mdns/main.dart
 
-# Terminal 2  
+# Terminal 2
 dart run example/chat_mdns/main.dart
 ```
+
+> **macOS:** the system's mDNS responder holds UDP port 5353, and `mdns_dart`
+> cannot bind it, so instances on a Mac do not find each other. Run the
+> example on Linux, or in containers on one Docker network.
 
 ## 🧪 Testing
 
@@ -184,6 +187,11 @@ Run the test suite:
 ```bash
 dart test
 ```
+
+Some integration tests need more than Dart: the hole-punching tests in
+`test/integration/holepunch_network` run a Docker network with NAT routers,
+and the Go interop tests are described below. Without those tools, those
+tests fail.
 
 A fresh clone builds against the published packages. To develop against a
 local [dart-udx](https://github.com/stephanfeb/dart-udx) checkout, create a
@@ -203,7 +211,8 @@ depend on this package.
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our contributing guidelines and code of conduct.
+Contributions are welcome. Open an issue or a pull request on
+[GitHub](https://github.com/stephanfeb/dart_libp2p).
 
 ## 📄 License
 

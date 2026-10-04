@@ -40,7 +40,12 @@ class AmbientAutoNATv2 {
   late final Emitter _emitter;
   
   // Background processing
-  Future<void>? _scheduledProbe;
+  /// The next scheduled probe. A [Timer], not a [Future.delayed], so that
+  /// [close] can cancel it: a pending timer keeps the Dart process alive.
+  Timer? _probeTimer;
+
+  /// The probe that is running, if any; [close] waits for it.
+  Future<void>? _runningProbe;
   Subscription? _busSubscription;
   StreamSubscription? _eventSubscription;
   bool _closed = false;
@@ -131,21 +136,22 @@ class AmbientAutoNATv2 {
     _log.fine('Scheduling probe in ${nextProbeAfter.inSeconds}s '
               '(force: $forceProbe, status: $_currentStatus, confidence: $_confidence)');
     
-    // Schedule probe using Future.delayed for better error handling
-    _scheduledProbe = Future.delayed(nextProbeAfter).then((_) async {
+    _probeTimer?.cancel();
+    _probeTimer = Timer(nextProbeAfter, () {
       // Check if this probe is still valid (not superseded by a newer schedule)
       if (_closed || probeGeneration != _probeGeneration) {
         _log.fine('Probe generation $probeGeneration cancelled (current: $_probeGeneration)');
         return;
       }
-      
-      try {
-        await _executeProbe();
-      } catch (e) {
-        _log.warning('Error executing probe: $e');
-        // Treat errors as unknown observations
-        _handleProbeError(e);
-      }
+      _runningProbe = () async {
+        try {
+          await _executeProbe();
+        } catch (e) {
+          _log.warning('Error executing probe: $e');
+          // Treat errors as unknown observations
+          _handleProbeError(e);
+        }
+      }();
     });
   }
   
@@ -323,10 +329,13 @@ class AmbientAutoNATv2 {
     // Increment generation to cancel any pending probes
     _probeGeneration++;
     
-    // Wait for any in-flight probe to complete (with timeout)
-    if (_scheduledProbe != null) {
+    _probeTimer?.cancel();
+    _probeTimer = null;
+
+    // Wait for a probe that is already running to complete (with timeout)
+    if (_runningProbe != null) {
       try {
-        await _scheduledProbe!.timeout(const Duration(seconds: 5));
+        await _runningProbe!.timeout(const Duration(seconds: 5));
       } catch (e) {
         _log.fine('Timeout waiting for scheduled probe to complete: $e');
       }

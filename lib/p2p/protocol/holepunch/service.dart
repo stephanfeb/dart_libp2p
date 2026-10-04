@@ -54,6 +54,9 @@ class HolePunchServiceImpl implements HolePunchService {
   final _ctx = Completer<void>();
   final _ctxCancel = Completer<void>();
 
+  /// Logs the listen addresses every 10 s; cancelled in [close].
+  Timer? _addressMonitor;
+
   /// The host this service is running on
   final Host _host;
 
@@ -147,7 +150,8 @@ class HolePunchServiceImpl implements HolePunchService {
   void _startAddressMonitoring() {
     // This is a simple monitoring approach - in a production implementation,
     // you might want to listen to specific events from the identify service
-    Timer.periodic(Duration(seconds: 10), (timer) {
+    _addressMonitor?.cancel();
+    _addressMonitor = Timer.periodic(Duration(seconds: 10), (timer) {
       if (_ctxCancel.isCompleted) {
         timer.cancel();
         return;
@@ -171,6 +175,10 @@ class HolePunchServiceImpl implements HolePunchService {
   @override
   Future<void> close() async {
     _ctxCancel.complete();
+    // Cancel now, not on the next tick: a live periodic timer keeps the Dart
+    // process alive.
+    _addressMonitor?.cancel();
+    _addressMonitor = null;
 
     await _holePuncherMutex.synchronized(() {
       if (_holePuncher != null) {

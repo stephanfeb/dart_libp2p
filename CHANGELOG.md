@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-10-05
+
+### Fixed
+
+- **A program that closed its hosts did not exit.** `Host.close()` left timers running, and a live timer keeps the Dart process alive. The README Quick Start printed "Connected successfully!" and then never ended. These timers now stop when the host closes:
+  - the resource manager's garbage collector, for the host and for the AutoNAT dial-back host (the swarm that `Libp2p.new_` builds now closes the resource manager it was given; a `Swarm` that you construct yourself keeps it open unless you pass `closeResourceManager: true`);
+  - the swarm's 30 s probe of relayed connections;
+  - the hole punch service's address monitor;
+  - the next AutoNAT v2 probe, which was a `Future.delayed` and could not be cancelled (`close()` also no longer waits up to 5 s for a probe that has not started);
+  - the connection manager's 1 s status check for each connection.
+
+### Documentation
+
+- README: the Quick Start no longer imports `dart_udx`, which the install section does not list, or an unused import. The mDNS section no longer says that discovery crosses subnets (mDNS stays on the local network), and it says that the example cannot bind port 5353 on macOS. "Routing-based peer discovery" is replaced by a pointer to the Kademlia DHT package. The Testing section says which tests need Docker or Go, and the Contributing section no longer points to files that do not exist.
+
 ## [4.1.1] - 2026-10-04
 
 ### Fixed

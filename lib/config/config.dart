@@ -195,6 +195,8 @@ class Config {
       upgrader: upgrader,
       config: this, // Pass the Config instance itself
       transports: transports, // From this.transports
+      // The resource manager was created for this swarm alone.
+      closeResourceManager: true,
     );
 
     return swarm;

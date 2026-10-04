@@ -102,6 +102,15 @@ class Swarm implements Network {
   /// Whether the swarm is closed
   bool _isClosed = false;
 
+  /// Probes relayed connections every 30 s; cancelled in [close], because a
+  /// live periodic timer keeps the Dart process from exiting.
+  Timer? _relayProbeTimer;
+
+  /// Whether [close] also closes the resource manager. [Config] sets it for
+  /// the resource manager it creates for this swarm; a resource manager that
+  /// the caller passes in may be shared, so it stays open by default.
+  final bool closeResourceManager;
+
   /// Lock for closed state
   final Lock _closedLock = Lock();
 
@@ -121,6 +130,7 @@ class Swarm implements Network {
     required BasicUpgrader upgrader, // Added upgrader
     required Config config, // Added config
     List<Transport>? transports,
+    this.closeResourceManager = false,
   }) : 
     _host = host, // Initialize Host
     _localPeer = localPeer,
@@ -146,7 +156,8 @@ class Swarm implements Network {
     await _closedLock.synchronized(() async {
       if (_isClosed) return;
       _isClosed = true;
-
+      _relayProbeTimer?.cancel();
+      _relayProbeTimer = null;
 
       // Close all listeners
       final listenersToClose = List<Listener>.from(_listeners); // Create a copy
@@ -219,6 +230,10 @@ class Swarm implements Network {
           await transport.dispose();
         }
       });
+
+      if (closeResourceManager) {
+        await _resourceManager.close();
+      }
     });
   }
 
@@ -1468,7 +1483,8 @@ class Swarm implements Network {
   
   /// Periodically probes relayed connections to detect failures early
   void _startRelayedConnectionProbing() {
-    Timer.periodic(Duration(seconds: 30), (_) async {
+    _relayProbeTimer?.cancel();
+    _relayProbeTimer = Timer.periodic(Duration(seconds: 30), (_) async {
       if (_isClosed) return;
       
       await _connLock.synchronized(() async {

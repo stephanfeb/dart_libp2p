@@ -15,6 +15,11 @@ class ConnectionManager implements ConnManager {
   final _lastActivity = <TransportConn, DateTime>{};
   final _connectionTimeouts = <TransportConn, Timer>{};
 
+  /// The 1 s status checks, one per connection. They are cancelled when the
+  /// connection is cleaned up: a live periodic timer keeps the Dart process
+  /// alive.
+  final _monitors = <TransportConn, Timer>{};
+
   // Data structures for ConnManager interface
   final _tagInfo = <PeerId, TagInfo>{};
   final _protections = <PeerId, Set<String>>{};
@@ -189,7 +194,8 @@ class ConnectionManager implements ConnManager {
   /// Monitors a connection for changes and manages its lifecycle
   void _monitorConnection(TransportConn connection) {
     // Monitor connection status
-    Timer.periodic(const Duration(seconds: 1), (timer) {
+    _monitors[connection]?.cancel();
+    _monitors[connection] = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!_connections.containsKey(connection)) {
         timer.cancel();
         return;
@@ -211,6 +217,7 @@ class ConnectionManager implements ConnManager {
 
   /// Cleans up resources associated with a connection
   void _cleanupConnection(TransportConn connection) {
+    _monitors.remove(connection)?.cancel();
     _connectionTimeouts[connection]?.cancel();
     _connectionTimeouts.remove(connection);
     _lastActivity.remove(connection);
@@ -232,6 +239,10 @@ class ConnectionManager implements ConnManager {
       timer.cancel();
     }
     _connectionTimeouts.clear();
+    for (final timer in _monitors.values) {
+      timer.cancel();
+    }
+    _monitors.clear();
   }
 
   // ConnManager interface implementation
