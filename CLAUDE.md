@@ -166,7 +166,7 @@ void main() {
 # Issue Tracking
 
 This project uses **bd (beads)** for issue tracking.
-Run `bd prime` for workflow context, or install hooks (`bd hooks install`) for auto-injection.
+Run `bd prime` for workflow context (the Claude Code SessionStart hook runs it). Do not install git hooks (`bd hooks install`): this setup has none.
 
 **Quick reference:**
 - `bd ready` - Find unblocked work
