@@ -75,7 +75,11 @@ class Ed25519PublicKey implements PublicKey {
   }
 }
 
-/// Implementation of Ed25519 private key
+/// Implementation of Ed25519 private key.
+///
+/// The key keeps its 32-byte seed, from which the signing key is derived.
+/// [marshal] writes the seed followed by the public key (64 bytes), the
+/// format that go-libp2p writes and reads.
 class Ed25519PrivateKey implements PrivateKey {
   final crypto.SimpleKeyPair _keyPair;
   late final Ed25519PublicKey _publicKey;
@@ -84,73 +88,64 @@ class Ed25519PrivateKey implements PrivateKey {
   /// Private constructor that requires a public key
   Ed25519PrivateKey._(this._keyPair, this._publicKey, [this._privateKeyBytes]);
 
-  /// Factory constructor that initializes the public key
+  /// Creates a private key from a `cryptography` key pair.
+  ///
+  /// The seed is read from [keyPair] when [privateKeyBytes] is not given.
   static Future<Ed25519PrivateKey> create(crypto.SimpleKeyPair keyPair, [Uint8List? privateKeyBytes]) async {
-    final algorithm = crypto.Ed25519();
     final publicKeyObj = await keyPair.extractPublicKey();
     final publicKey = Ed25519PublicKey(publicKeyObj);
-    return Ed25519PrivateKey._(keyPair, publicKey, privateKeyBytes);
+    final seed = privateKeyBytes ?? Uint8List.fromList(await keyPair.extractPrivateKeyBytes());
+    return Ed25519PrivateKey._(keyPair, publicKey, seed);
   }
 
-  /// Creates an Ed25519PrivateKey with a public key
+  /// Creates an Ed25519PrivateKey with a public key.
+  ///
+  /// Without [_privateKeyBytes] (the 32-byte seed) the key can sign, but
+  /// [raw] and [marshal] throw. Prefer [create].
   Ed25519PrivateKey.withPublicKey(this._keyPair, this._publicKey, [this._privateKeyBytes]);
 
-  /// Creates an Ed25519PrivateKey from raw bytes
+  /// Creates an Ed25519PrivateKey from raw bytes: the 32-byte seed, the seed
+  /// followed by the public key (64 bytes, as go-libp2p's `Raw()` returns
+  /// it), or go-libp2p's legacy 96-byte form, which repeats the public key.
+  ///
+  /// Throws a [FormatException] when the public key in [bytes] does not
+  /// belong to the seed.
   static Future<Ed25519PrivateKey> fromRawBytes(Uint8List bytes) async {
-    if (bytes.length != 32 && bytes.length != 64) {
-      throw FormatException('Ed25519 private key must be 32 or 64 bytes');
+    if (bytes.length != 32 && bytes.length != 64 && bytes.length != 96) {
+      throw FormatException('Ed25519 private key must be 32, 64 or 96 bytes, got ${bytes.length}');
     }
 
-    final algorithm = crypto.Ed25519();
+    final seed = Uint8List.fromList(bytes.sublist(0, 32));
+    final keyPair = await crypto.Ed25519().newKeyPairFromSeed(seed);
+    final key = await create(keyPair, seed);
 
-    if (bytes.length == 64) {
-      // The format is 32 bytes private key followed by 32 bytes public key
-      // Since we can't verify the private key (cryptography package limitation),
-      // we'll just use the public key part and generate a new keypair
-      final publicKeyBytes = bytes.sublist(32);
-
-      // Create a new keypair
-      final keyPair = await algorithm.newKeyPair();
-
-      // Create the public key from the bytes in the marshaled data
-      final publicKey = Ed25519PublicKey(
-        crypto.SimplePublicKey(publicKeyBytes, type: crypto.KeyPairType.ed25519)
-      );
-
-      return Ed25519PrivateKey.withPublicKey(keyPair, publicKey);
-    } else {
-      // Just 32 bytes - we'll treat this as a seed for a new keypair
-      final keyPair = await algorithm.newKeyPairFromSeed(bytes);
-      final publicKeyObj = await keyPair.extractPublicKey();
-
-      return Ed25519PrivateKey.withPublicKey(
-        keyPair, 
-        Ed25519PublicKey(publicKeyObj as crypto.SimplePublicKey),
-        bytes
-      );
+    if (bytes.length > 32) {
+      final storedPublicKey = bytes.sublist(32, 64);
+      if (!_bytesEqual(storedPublicKey, key.publicKey.raw)) {
+        final zeroSeed = seed.every((b) => b == 0);
+        throw FormatException(zeroSeed
+            ? 'Ed25519 private key has an all-zero seed: it was written by '
+                'Ed25519PrivateKey.marshal() before dart_libp2p 4.1.3, which '
+                'did not save the private key. The key cannot be recovered.'
+            : 'Ed25519 private key: the public key does not match the seed');
+      }
+      if (bytes.length == 96 && !_bytesEqual(bytes.sublist(64), storedPublicKey)) {
+        throw FormatException('Ed25519 private key: the two public keys in the 96-byte form differ');
+      }
     }
+    return key;
   }
 
-  /// Creates an Ed25519PrivateKey from its protobuf bytes
+  /// Creates an Ed25519PrivateKey from its protobuf bytes, as [marshal] and
+  /// go-libp2p's `crypto.MarshalPrivateKey` write them.
   static Future<PrivateKey> unmarshal(Uint8List bytes) async {
-
     final pbKey = pb.PrivateKey.fromBuffer(bytes);
 
     if (pbKey.type != pb.KeyType.Ed25519) {
       throw FormatException('Not an Ed25519 private key');
     }
 
-    final kp = await generateEd25519KeyPairFromSeed(Uint8List.fromList(pbKey.data));
-
-    return await Ed25519PrivateKey.create(kp as crypto.SimpleKeyPair);
-
-  }
-
-  /// Initialize the public key
-  Future<void> _initPublicKey() async {
-    if (!_publicKeyInitialized()) {
-      _publicKey = await _extractPublicKey();
-    }
+    return fromRawBytes(Uint8List.fromList(pbKey.data));
   }
 
   bool _publicKeyInitialized() {
@@ -163,38 +158,32 @@ class Ed25519PrivateKey implements PrivateKey {
     }
   }
 
-  /// Extracts the public key from this private key
-  Future<Ed25519PublicKey> _extractPublicKey() async {
-    final algorithm = crypto.Ed25519();
-    final publicKeyObj = await _keyPair.extractPublicKey();
-    return Ed25519PublicKey(publicKeyObj as crypto.SimplePublicKey);
-  }
-
   @override
   pb.KeyType get type => pb.KeyType.Ed25519;
 
+  /// The 32-byte seed. (go-libp2p's `Raw()` returns the seed followed by
+  /// the public key; [fromRawBytes] accepts both.)
   @override
   Uint8List get raw {
     if (_privateKeyBytes != null) {
       return Uint8List.fromList(_privateKeyBytes!);
     }
-
-    // If we don't have the private key bytes, we need to extract them
-    // This is a limitation of the cryptography package
-    throw UnimplementedError(
-      'Cannot get raw bytes of private key. The cryptography package does not '
-      'provide access to the private key bytes after key generation.'
+    throw StateError(
+      'This Ed25519PrivateKey was built with withPublicKey() and no seed, so '
+      'its private key bytes are unknown. Use Ed25519PrivateKey.create().'
     );
   }
 
+  /// The protobuf form: type Ed25519 and data = seed || public key
+  /// (64 bytes), as go-libp2p writes it.
   @override
   Uint8List marshal() {
     final publicKeyBytes = publicKey.raw;
+    final seed = raw;
 
-    // Create a dummy private key (32 zeros) followed by the real public key
-    final combined = Uint8List(32 + publicKeyBytes.length);
-    // Leave the first 32 bytes as zeros (dummy private key)
-    combined.setRange(32, combined.length, publicKeyBytes);
+    final combined = Uint8List(seed.length + publicKeyBytes.length);
+    combined.setRange(0, seed.length, seed);
+    combined.setRange(seed.length, combined.length, publicKeyBytes);
 
     final pbKey = pb.PrivateKey(
       type: type,
@@ -242,24 +231,18 @@ class Ed25519PrivateKey implements PrivateKey {
   static Future<KeyPair> generateKeyPairFromSeed(Uint8List seed) async {
     final algorithm = crypto.Ed25519();
     final keyPair = await algorithm.newKeyPairFromSeed(seed);
-    final publicKeyObj = await keyPair.extractPublicKey();
+    final privateKey = await Ed25519PrivateKey.create(keyPair, Uint8List.fromList(seed));
 
-    final publicKey = Ed25519PublicKey(publicKeyObj);
-    final privateKey = await Ed25519PrivateKey.create(keyPair);
-
-    return KeyPair(publicKey, privateKey);
+    return KeyPair(privateKey.publicKey, privateKey);
   }
 
   /// Generate a new Ed25519 key pair
   static Future<KeyPair> generateKeyPair() async {
     final algorithm = crypto.Ed25519();
     final keyPair = await algorithm.newKeyPair();
-    final publicKeyObj = await keyPair.extractPublicKey();
-
-    final publicKey = Ed25519PublicKey(publicKeyObj);
     final privateKey = await Ed25519PrivateKey.create(keyPair);
 
-    return KeyPair(publicKey, privateKey);
+    return KeyPair(privateKey.publicKey, privateKey);
   }
 }
 

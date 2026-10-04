@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.3] - 2026-10-05
+
+### Fixed
+
+- **A saved Ed25519 identity could not be loaded again.** `Ed25519PrivateKey.marshal()` wrote 32 zero bytes where the private key belongs, followed by the public key, so the private key was lost. `Ed25519PrivateKey.unmarshal()` threw for every input, including keys from go-libp2p. `marshal()` now writes the seed followed by the public key (64 bytes), byte for byte what go-libp2p's `crypto.MarshalPrivateKey` writes, and `unmarshal()` reads it and go-libp2p's keys. The tests check both against go-libp2p v0.49.
+- **`Ed25519PrivateKey.fromRawBytes()` with 64 bytes returned a different key.** It made a new random key pair and attached the given public key, so the result signed with a key that did not match its public key. It now derives the key from the seed and throws a `FormatException` if the public key in the bytes does not belong to it. It also accepts go-libp2p's legacy 96-byte form.
+- **`Ed25519PrivateKey.raw` threw for generated keys.** Every key now keeps its 32-byte seed, which `raw` returns. (go-libp2p's `Raw()` returns the seed followed by the public key; `fromRawBytes()` accepts both.)
+
+A key that an earlier version marshalled cannot be recovered: its private key was never written. `unmarshal()` rejects it with a `FormatException` that says so. Generate a new identity, or keep the seed (`raw`) as the internet chat demo does.
+
 ## [4.1.2] - 2026-10-05
 
 ### Fixed
