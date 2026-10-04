@@ -34,3 +34,10 @@ sf_storage/
 
 # Local dependency overrides (see README)
 pubspec_overrides.yaml
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*

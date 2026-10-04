@@ -1,4 +1,7 @@
 {
-  "database": "beads.db",
-  "jsonl_export": "beads.jsonl"
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "dart_libp2p",
+  "project_id": "f9159890-3966-448b-9ae8-2c4e5a79a62f"
 }
