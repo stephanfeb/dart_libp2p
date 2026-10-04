@@ -258,7 +258,15 @@ class BasicHost implements Host {
     required Config config,
   }) async {
     final host = BasicHost._(network: network, config: config);
-    
+
+    // A swarm hands incoming streams to its host. Without one it drops them,
+    // so a peer's identify request goes unanswered and its connect() waits
+    // for the identify timeout. Libp2p.new_ links the two; do it here too
+    // for a host built by hand.
+    if (network is Swarm && network.host == null) {
+      network.setHost(host);
+    }
+
     // Update local IP addresses with proper async handling
     await host._updateLocalIpAddr();
     

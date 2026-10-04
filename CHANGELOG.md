@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.4] - 2026-10-05
+
+The test suite passes again, apart from the hole-punching tests that need a Docker NAT network. Fixing the 34 failures found these library bugs:
+
+### Fixed
+
+- **A UDX dial could leave from a socket that cannot reach the target.** Since 4.1.0, a dial reuses a listener's socket. It took any listener of the address family, so with a listener bound to `127.0.0.1` a dial to another host failed with `Can't assign requested address`. A listener bound to loopback is now used only for loopback targets; a listener on all interfaces is preferred.
+- **The resource manager counted one stream or connection several times.** Changes passed up through each parent scope in turn, so the system scope counted a stream once per path to it (through the peer, the transient and the protocol scope). With the default limits this made "resource limit exceeded" errors come early. Each scope above a resource now counts it once, as in go-libp2p, and `setPeer`, `setProtocol` and `setService` move a resource only between the scopes that change.
+- **A closed stream stayed in its connection's stream list** until the connection closed, so a long-lived connection kept every stream it had used. `SwarmStream.close()` removes the stream again; `SwarmConn.close()` no longer holds its lock while it closes the streams, which was why that removal had been taken out.
+- **A host built by hand did not answer identify.** A `Swarm` hands incoming streams to its host, and only `Libp2p.new_` linked the two. `BasicHost.create` now links them if the swarm has no host, so a peer's `connect()` no longer waits for the identify timeout.
+- **Multistream wrapped its own errors.** `MessageTooLargeException` and `IncorrectVersionException` reached callers as a generic `FormatException` and were logged at SEVERE. Both now extend `FormatException` and arrive with their own type; code that catches `FormatException` still catches them. A write to a closed stream now fails like a read does, with a `FormatException`.
+- **An error on the relay service's reachability events was raised as an uncaught error.** `RelayManager` now logs it and keeps listening.
+- `pingStream` logged every ping at WARNING; it logs at FINE.
+
+### Tests
+
+Out-of-date tests were brought up to the current behaviour: the 15 s and 30 s dial timeouts, the 2-byte Noise frame length, Noise keys that exist only after the handshake, circuit addresses that end with the host's own peer ID, AutoRelay advertising addresses after a reachability change, and the identify-timeout test's handler order. Mock streams whose `close()` never completed, and expectations that were not awaited, were fixed. The ping test now uses two real hosts.
+
 ## [4.1.3] - 2026-10-05
 
 ### Fixed

@@ -138,7 +138,11 @@ void main() {
       serverHost = await BasicHost.create(network: serverSwarm, config: serverP2PConfig);
       serverSwarm.setHost(serverHost);
 
-      // Set up a non-responsive identify handler
+      await serverSwarm.listen(serverP2PConfig.listenAddrs);
+      await serverHost.start();
+
+      // Set up a non-responsive identify handler. After start(): start()
+      // registers the real identify handler, which would replace this one.
       // This simulates a peer that accepts the identify stream but never responds
       print('Setting up non-responsive identify handler on server...');
       serverHost.setStreamHandler(id, (core_network_stream.P2PStream stream, PeerId peerId) async {
@@ -148,8 +152,6 @@ void main() {
         print('Server timeout delay complete (should not reach here in test)');
       });
 
-      await serverSwarm.listen(serverP2PConfig.listenAddrs);
-      await serverHost.start();
 
       expect(serverHost.addrs.isNotEmpty, isTrue);
       serverListenAddr = serverHost.addrs.firstWhere((addr) => addr.hasProtocol(multiaddr_protocol.Protocols.udx.name));

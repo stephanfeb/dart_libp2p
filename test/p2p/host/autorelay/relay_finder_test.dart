@@ -26,6 +26,8 @@ void main() {
     late MockNetwork mockNetwork;
     late MockUpgrader mockUpgrader;
     late AutoRelayConfig config;
+    // This host's own peer ID; a circuit address ends with it.
+    final selfPeerId = PeerId.fromString('12D3KooWQK1wnefoLrcVHbbnf5tLzbopUd3K3bFAoJpA7YJgL5pV');
 
     setUp(() {
       mockHost = MockHost();
@@ -47,6 +49,7 @@ void main() {
       when(mockPeerstore.addrBook).thenReturn(mockAddrBook);
       when(mockHost.eventBus).thenReturn(mockEventBus);
       when(mockHost.network).thenReturn(mockNetwork);
+      when(mockHost.id).thenReturn(selfPeerId);
     });
 
     group('Circuit Address Construction', () {
@@ -91,14 +94,11 @@ void main() {
         // Act - Get relay addresses
         final circuitAddrs = await relayFinder.getRelayAddrs(currentHostAddrs);
         
-        // Verify the mock was called
-        verify(mockAddrBook.addrs(relayPeerId)).called(greaterThanOrEqualTo(1));
-        
         // Assert - Should contain circuit addresses
         expect(circuitAddrs, isNotEmpty, reason: 'Should return at least private addresses or circuit addresses');
         
         // Verify circuit addresses have correct format
-        // Expected: /ip4/10.10.3.10/tcp/4001/p2p/<relay-id>/p2p-circuit
+        // Expected: /ip4/1.2.3.4/tcp/4001/p2p/<relay-id>/p2p-circuit/p2p/<own-id>
         final circuitAddrsWithRelayId = circuitAddrs.where((addr) {
           final addrStr = addr.toString();
           return addrStr.contains('/p2p/${relayPeerId.toBase58()}') && 
@@ -117,9 +117,8 @@ void main() {
         expect(firstCircuitAddr, contains('/ip4/'));
         expect(firstCircuitAddr, contains('/tcp/4001'));
         expect(firstCircuitAddr, contains('/p2p/${relayPeerId.toBase58()}'));
-        // Accept both with and without trailing slash
-        expect(firstCircuitAddr.endsWith('/p2p-circuit') || firstCircuitAddr.endsWith('/p2p-circuit/'), isTrue,
-          reason: 'Address should end with /p2p-circuit (with or without trailing slash)');
+        // The circuit address ends with this host's own peer ID
+        expect(firstCircuitAddr, endsWith('/p2p-circuit/p2p/${selfPeerId.toBase58()}'));
       });
 
       test('should construct valid circuit address format', () {

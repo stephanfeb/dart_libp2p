@@ -216,7 +216,7 @@ void main() {
       expect(caughtException, isNotNull);
       expect(caughtException!.duration, equals(const Duration(seconds: 30)));
       expect(caughtException.message, contains('Multistream read operation timed out'));
-    });
+    }, timeout: const Timeout(Duration(seconds: 45))); // the read timeout is 30 s, the default test timeout too
 
     test('demonstrates timer exception handling problem', () async {
       // This test shows why the current Timer-based approach is problematic
@@ -264,7 +264,7 @@ void main() {
       final hangingStream = HangingMockStream(shouldHangForever: true);
       
       // Test server-side timeout during negotiate()
-      expect(
+      await expectLater(
         () async => await muxer.negotiate(hangingStream),
         throwsA(isA<TimeoutException>()),
       );
@@ -280,14 +280,14 @@ void main() {
       final hangingStream = HangingMockStream(shouldHangForever: true);
       
       final stopwatch = Stopwatch()..start();
-      
-      expect(
+
+      await expectLater(
         () async => await muxer.selectOneOf(hangingStream, ['/test/protocol']),
         throwsA(isA<TimeoutException>()),
       );
-      
+
       stopwatch.stop();
-      
+
       // With 2 retries, we expect roughly: 2s + 2s + 2s = 6s total
       // Plus retry delays: 100ms + 200ms = 300ms
       // Total should be around 6.3 seconds (with some tolerance)

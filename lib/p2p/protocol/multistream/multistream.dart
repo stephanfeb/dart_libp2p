@@ -21,20 +21,22 @@ import '../../network/swarm/swarm_stream.dart'; // For SwarmStream.incoming
 
 final _log = Logger('multistream'); // Added logger instance
 
-/// ErrTooLarge is an error to signal that an incoming message was too large
-class MessageTooLargeException implements Exception {
-  final String message;
-  const MessageTooLargeException([this.message = 'Incoming message was too large']);
+/// ErrTooLarge is an error to signal that an incoming message was too large.
+///
+/// A [FormatException], so negotiation rethrows it as it is, and code that
+/// catches [FormatException] still catches it.
+class MessageTooLargeException extends FormatException {
+  const MessageTooLargeException([String message = 'Incoming message was too large']) : super(message);
   
   @override
   String toString() => 'MessageTooLargeException: $message';
 }
 
 /// IncorrectVersionException is an error reported when the muxer protocol negotiation
-/// fails because of a ProtocolID mismatch.
-class IncorrectVersionException implements Exception {
-  final String message;
-  const IncorrectVersionException([this.message = 'Client connected with incorrect version']);
+/// fails because of a ProtocolID mismatch. A [FormatException], like
+/// [MessageTooLargeException].
+class IncorrectVersionException extends FormatException {
+  const IncorrectVersionException([String message = 'Client connected with incorrect version']) : super(message);
   
   @override
   String toString() => 'IncorrectVersionException: $message';
@@ -353,6 +355,12 @@ class MultistreamMuxer implements ProtocolSwitch {
   
   /// Writes a delimited message to the stream
   Future<void> _writeDelimited(P2PStream<dynamic> stream, List<int> message) async {
+    // The same check as a read makes, so a closed stream fails negotiation
+    // with a FormatException in both directions.
+    if (stream.isClosed) {
+      throw FormatException('Cannot write to closed stream');
+    }
+
     // Encode the length as a varint
     final lengthBytes = MultiAddrCodec.encodeVarint(message.length + 1);
     

@@ -116,12 +116,18 @@ void main() {
       ];
       
       final scored = ranker.rank(addresses, capability);
-      
-      // Direct connection should have 5s timeout
-      expect(scored[0].timeout, Duration(seconds: 5));
-      
-      // Relay connection should have 10s timeout
-      expect(scored[1].timeout, Duration(seconds: 10));
+
+      // The defaults: 15 s for a direct address, 30 s for a relay address.
+      expect(scored[0].timeout, Duration(seconds: 15));
+      expect(scored[1].timeout, Duration(seconds: 30));
+
+      // The swarm passes Config.dialTimeout and Config.relayDialTimeout in.
+      final configured = CapabilityAwarePriorityRanker(
+        directTimeout: Duration(seconds: 3),
+        relayTimeout: Duration(seconds: 7),
+      ).rank(addresses, capability);
+      expect(configured[0].timeout, Duration(seconds: 3));
+      expect(configured[1].timeout, Duration(seconds: 7));
     });
   });
 }

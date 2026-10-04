@@ -14,7 +14,9 @@ import 'package:dart_libp2p/core/crypto/keys.dart';
 /// Mock stream that can simulate timeout scenarios
 class TimeoutMockStream implements P2PStream<Uint8List> {
   final String _id = 'timeout-mock-stream';
-  final StreamController<Uint8List> _controller = StreamController<Uint8List>();
+  // Broadcast: closing a single-subscription controller that nobody listens
+  // to never completes, which made reset() hang.
+  final StreamController<Uint8List> _controller = StreamController<Uint8List>.broadcast();
   bool _isClosed = false;
   String _protocol = '';
   final Duration _readDelay;
@@ -134,11 +136,11 @@ void main() {
       // Attempt to read from the stream - should timeout quickly
       final stopwatch = Stopwatch()..start();
       
-      expect(
+      await expectLater(
         () async => await muxer.selectOneOf(stream, ['/test/protocol']),
         throwsA(isA<TimeoutException>()),
       );
-      
+
       stopwatch.stop();
       
       // Should timeout within the configured time (5 seconds + some buffer)
@@ -183,7 +185,7 @@ void main() {
       await stream.close();
       
       // Attempt to use the closed stream
-      expect(
+      await expectLater(
         () async => await muxer.selectOneOf(stream, ['/test/protocol']),
         throwsA(isA<FormatException>()),
       );

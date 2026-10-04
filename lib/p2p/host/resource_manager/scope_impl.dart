@@ -15,6 +15,34 @@ void _logWarn(String message) {
 class _Resources {
   final Limit limit;
 
+  /// Adds all of [st] at once, or nothing if any limit would be exceeded.
+  Exception? reserveStat(ScopeStat st) {
+    final memErr = checkMemory(st.memory, ReservationPriority.always);
+    if (memErr != null) return memErr;
+    final sIn = streamsInbound + st.numStreamsInbound;
+    final sOut = streamsOutbound + st.numStreamsOutbound;
+    final cIn = connsInbound + st.numConnsInbound;
+    final cOut = connsOutbound + st.numConnsOutbound;
+    final f = fds + st.numFD;
+    if ((st.numStreamsInbound > 0 && sIn > limit.getStreamLimit(Direction.inbound)) ||
+        (st.numStreamsOutbound > 0 && sOut > limit.getStreamLimit(Direction.outbound)) ||
+        (st.numStreamsInbound + st.numStreamsOutbound > 0 && sIn + sOut > limit.streamTotalLimit) ||
+        (st.numConnsInbound > 0 && cIn > limit.getConnLimit(Direction.inbound)) ||
+        (st.numConnsOutbound > 0 && cOut > limit.getConnLimit(Direction.outbound)) ||
+        (st.numConnsInbound + st.numConnsOutbound > 0 && cIn + cOut > limit.connTotalLimit) ||
+        (st.numFD > 0 && f > limit.fdLimit)) {
+      return network_errors.ResourceLimitExceededException();
+    }
+    memory += st.memory;
+    streamsInbound = sIn;
+    streamsOutbound = sOut;
+    connsInbound = cIn;
+    connsOutbound = cOut;
+    fds = f;
+    return null;
+  }
+
+
   int connsInbound = 0;
   int connsOutbound = 0;
   int streamsInbound = 0;
@@ -239,6 +267,70 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
     return Exception(_wrapErrorMsg(err.toString()));
   }
 
+  /// The scopes directly above this one: the owner of a span, or the edges.
+  List<ResourceScopeImpl> get _parents => _owner != null ? [_owner!] : edges;
+
+  /// Every scope above this one, each once. A resource counted here is also
+  /// counted once in each of them, as go-libp2p counts it in each of a
+  /// scope's constraints. (Walking the edges recursively instead counted a
+  /// stream in the system scope once per path: through the peer, the
+  /// transient and the protocol scope.)
+  List<ResourceScopeImpl> get _ancestors => _closure(_parents);
+
+  static List<ResourceScopeImpl> _closure(List<ResourceScopeImpl> start) {
+    final result = <ResourceScopeImpl>[];
+    final seen = <ResourceScopeImpl>{};
+    void visit(List<ResourceScopeImpl> scopes) {
+      for (final scope in scopes) {
+        if (seen.add(scope)) {
+          result.add(scope);
+          visit(scope._parents);
+        }
+      }
+    }
+    visit(start);
+    return result;
+  }
+
+  /// Moves this scope under [newEdges]. Its current resources are counted in
+  /// the ancestors it gains and released from the ones it loses; an ancestor
+  /// it keeps (the system scope, usually) keeps counting them once. This is
+  /// how go-libp2p's SetPeer and SetProtocol juggle resources. Throws, and
+  /// changes nothing, if a gained ancestor's limit would be exceeded.
+  void reparent(List<ResourceScopeImpl> newEdges) {
+    if (_owner != null) {
+      throw StateError('$name: a span cannot be reparented');
+    }
+    final oldAncestors = _ancestors.toSet();
+    final newAncestors = _closure(newEdges);
+    final gained = newAncestors.where((a) => !oldAncestors.contains(a)).toList();
+    final lost = oldAncestors.where((a) => !newAncestors.contains(a)).toList();
+    final st = stat;
+
+    final reserved = <ResourceScopeImpl>[];
+    for (final scope in gained) {
+      final err = scope._isDone ? network_errors.ResourceScopeClosedException() : scope._resources.reserveStat(st);
+      if (err != null) {
+        for (final r in reserved) {
+          r._releaseResourcesForChild(st);
+        }
+        throw _wrapError(err);
+      }
+      reserved.add(scope);
+    }
+    for (final scope in lost) {
+      scope._releaseResourcesForChild(st);
+    }
+
+    for (final e in edges) {
+      if (!newEdges.contains(e)) e.decRef();
+    }
+    for (final e in newEdges) {
+      if (!edges.contains(e)) e.incRef();
+    }
+    edges = List.of(newEdges);
+  }
+
   @override
   Future<void> reserveMemory(int size, int priority) async {
     if (_isDone) {
@@ -266,25 +358,16 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   Future<void> _reserveMemoryForAncestors(int size, int priority) async {
-    if (_owner != null) {
-      return _owner!.reserveMemory(size, priority);
-    }
-
-    List<ResourceScopeImpl> reservedEdges = [];
-    try {
-      for (var edge in edges) { // Use public field
-        // This is a simplified call. Go's ReserveMemoryForChild is not async
-        // and returns ScopeStat + error. We're calling the public async API.
-        // This might need adjustment if we create internal synchronous reservation paths.
-        await edge.reserveMemory(
-            size, priority); // Assuming this is how child notifies parent
-        reservedEdges.add(edge);
+    final reserved = <ResourceScopeImpl>[];
+    for (final scope in _ancestors) {
+      final err = scope._reserveMemoryForChild(size, priority);
+      if (err != null) {
+        for (final r in reserved) {
+          r._releaseMemoryForChild(size);
+        }
+        throw scope._wrapError(err);
       }
-    } catch (e) {
-      for (var edge in reservedEdges) {
-        edge.releaseMemory(size); // Rollback on failed edges
-      }
-      rethrow;
+      reserved.add(scope);
     }
   }
 
@@ -299,12 +382,8 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _releaseMemoryForAncestors(int size) {
-    if (_owner != null) {
-      _owner!.releaseMemory(size);
-      return;
-    }
-    for (var edge in edges) { // Use public field
-      edge.releaseMemory(size);
+    for (final scope in _ancestors) {
+      scope._releaseMemoryForChild(size);
     }
   }
 
@@ -345,16 +424,14 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
     }
 
     final currentStat = stat;
-    if (_owner != null) {
-      // This is a span scope
-      _owner!._releaseResourcesForChild(currentStat);
-      _owner!.decRef(); // Decrement owner's ref count as span is done
-    } else {
-      // This is a DAG scope
-      for (var edge in edges) { // Use public field
-        edge._releaseResourcesForChild(currentStat);
-        edge.decRef();
-      }
+    // Release this scope's resources from every ancestor, each once, then
+    // drop the references held on the direct parents (the owner of a span,
+    // or the edges).
+    for (final scope in _ancestors) {
+      scope._releaseResourcesForChild(currentStat);
+    }
+    for (final parent in _parents) {
+      parent.decRef();
     }
 
     // Clear local resources
@@ -375,13 +452,12 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
     if (_isDone) return;
     _resources.releaseMemory(childStat.memory);
     
+    // Only this scope: the caller releases from every ancestor itself.
     for (int i = 0; i < childStat.numStreamsInbound; i++) {
-      _resources.removeStream(Direction.inbound, name); // Pass owner id (name)
-      _removeStreamForAncestors(Direction.inbound); // Propagate release upwards
+      _resources.removeStream(Direction.inbound, name);
     }
     for (int i = 0; i < childStat.numStreamsOutbound; i++) {
-      _resources.removeStream(Direction.outbound, name); // Pass owner id (name)
-      _removeStreamForAncestors(Direction.outbound); // Propagate release upwards
+      _resources.removeStream(Direction.outbound, name);
     }
     // Assuming childStat.numFD is the number of connections that used FDs
     // And that conns are released one by one with their direction and fd usage.
@@ -457,23 +533,16 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _addStreamForAncestors(Direction dir) {
-    if (_owner != null) {
-      _owner!.addStream(dir); // Call public void method on owner
-      return;
-    }
-    
-    List<ResourceScopeImpl> successfulEdges = [];
-    try {
-      for (var edge in edges) { // Use public field
-        edge.addStream(dir); // Call public void method on edge
-        successfulEdges.add(edge);
+    final added = <ResourceScopeImpl>[];
+    for (final scope in _ancestors) {
+      final err = scope._addStreamForChild(dir);
+      if (err != null) {
+        for (final a in added) {
+          a._removeStreamForChild(dir);
+        }
+        throw scope._wrapError(err);
       }
-    } catch (e) {
-      // Rollback from successfully reserved edges if a subsequent one fails
-      for (var successfulEdge in successfulEdges.reversed) { // Rollback in reverse order of success
-        successfulEdge.removeStream(dir); // Use public removeStream for rollback
-      }
-      rethrow; // Rethrow the original error
+      added.add(scope);
     }
   }
   
@@ -492,12 +561,8 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _removeStreamForAncestors(Direction dir) {
-    if (_owner != null) {
-      _owner!.removeStream(dir); // Call public method
-      return;
-    }
-    for (var edge in edges) { 
-      edge.removeStream(dir); // Call public method
+    for (final scope in _ancestors) {
+      scope._removeStreamForChild(dir);
     }
   }
 
@@ -538,21 +603,16 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _addConnForAncestors(Direction dir, bool usefd) {
-    if (_owner != null) {
-      _owner!.addConn(dir, usefd); // Call public void method
-      return;
-    }
-    List<ResourceScopeImpl> successfulEdges = [];
-    try {
-      for (var edge in edges) {
-        edge.addConn(dir, usefd); // Call public void method
-        successfulEdges.add(edge);
+    final added = <ResourceScopeImpl>[];
+    for (final scope in _ancestors) {
+      final err = scope._addConnForChild(dir, usefd);
+      if (err != null) {
+        for (final a in added) {
+          a._removeConnForChild(dir, usefd);
+        }
+        throw scope._wrapError(err);
       }
-    } catch (e) {
-      for (var successfulEdge in successfulEdges.reversed) { // Rollback in reverse
-        successfulEdge.removeConn(dir, usefd); // Rollback with public method
-      }
-      rethrow;
+      added.add(scope);
     }
   }
 
@@ -568,12 +628,8 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   }
 
   void _removeConnForAncestors(Direction dir, bool usefd) {
-    if (_owner != null) {
-      _owner!.removeConn(dir, usefd); // Call public method
-      return;
-    }
-    for (var edge in edges) {
-      edge.removeConn(dir, usefd); // Call public method
+    for (final scope in _ancestors) {
+      scope._removeConnForChild(dir, usefd);
     }
   }
   

@@ -144,8 +144,8 @@ class PingService {
 
 /// Initiates a ping to the specified peer
 Stream<PingResult> pingStream(Host host, PeerId peerId) async* {
-  _logger.warning('PingService.pingStream: Entered for peer ${peerId.toString()}');
-  _logger.warning('PingService.pingStream: Calling host.newStream for peer ${peerId.toString()} with protocol ${PingConstants.protocolId}');
+  _logger.fine('PingService.pingStream: Entered for peer ${peerId.toString()}');
+  _logger.fine('PingService.pingStream: Calling host.newStream for peer ${peerId.toString()} with protocol ${PingConstants.protocolId}');
   final stream = await host.newStream(
     peerId,
     [PingConstants.protocolId],
@@ -153,7 +153,7 @@ Stream<PingResult> pingStream(Host host, PeerId peerId) async* {
   );
 
   try {
-    _logger.warning('PingService.pingStream: Returned from host.newStream for peer ${peerId.toString()}. Stream ID (if successful): ${stream.id}');
+    _logger.fine('PingService.pingStream: Returned from host.newStream for peer ${peerId.toString()}. Stream ID (if successful): ${stream.id}');
     stream.scope().setService(PingConstants.serviceName);
 
     final random = Random.secure();

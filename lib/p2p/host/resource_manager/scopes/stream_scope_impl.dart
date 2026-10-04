@@ -87,80 +87,19 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
       throw StateError('$name: Transient scope not found in initial edges for juggling.');
     }
 
-    // 3. Resource Juggling
-    network_errors.ResourceLimitExceededException? reservationError;
-    // bool reservedInProto = false; // Removed: Direct reservation on protocolScope is removed.
-    bool reservedInPeerProto = false;
-
+    // 3. Move the stream from the transient scope under its peer-protocol
+    // scope. reparent() counts it in the scopes it gains (the protocol and
+    // peer-protocol scopes) and releases it from the transient scope; the
+    // peer and system scopes keep counting it once.
     try {
-      // Reserve in PeerProtoScope (this will also reserve in its parent ProtocolScope and SystemScope)
-      try {
-        newPeerProtoScope.addStream(direction);
-        reservedInPeerProto = true;
-      } on network_errors.ResourceLimitExceededException catch (e) {
-       _logger.severe('Failed to add stream - $direction - $e') ;
-        reservationError = e;
-      } 
-      // Other exceptions will propagate up and be caught by the outer try-catch
-
-      if (reservationError == null) {
-        // Reservation successful, release from original TransientScope
-        // No need to check for errors here as removeStream is void and shouldn't fail in a way that needs rollback here
-        (transientScope as TransientScopeImpl).removeStream(direction);
-
-        // Update internal state
-        _protocolScopeImpl = newProtocolScope; // Still useful to store this reference
-        _peerProtoScope = newPeerProtoScope;
-        
-        // New edges for the stream scope: its peer and the specific peer-protocol scope.
-        // Resource accounting will flow up from peerProtoScope to protocolScope and systemScope.
-        
-        // Manage ref counts for edge changes
-        List<ResourceScopeImpl> oldEdges = List.from(this.edges);
-        List<ResourceScopeImpl> newEdges = [_peerScopeImpl, newPeerProtoScope];
-
-        for (var oldEdge in oldEdges) {
-          if (!newEdges.contains(oldEdge)) {
-            oldEdge.decRef();
-          }
-        }
-        for (var newEdge in newEdges) {
-          if (!oldEdges.contains(newEdge)) {
-            newEdge.incRef();
-          }
-        }
-        this.edges = newEdges;
-        
-        _logger.fine('$name: Successfully set protocol to $protocol. Resources transferred, edges updated.');
-      }
+      reparent([_peerScopeImpl, newPeerProtoScope]);
     } on network_errors.ResourceLimitExceededException catch (e) {
-      reservationError = e;
-    } catch (e) { // Catch other exceptions during reservation attempts
-      _logger.severe('$name: Unexpected error during setProtocol resource juggling: $e');
-      // Ensure reservationError is set if it's a limit issue, otherwise rethrow or handle.
-      if (e is Exception && reservationError == null) { // Avoid overwriting a specific limit error
-         // Wrap it or handle as a generic failure
-        throw Exception('$name: Failed to set protocol due to an unexpected error: $e');
-      }
-      // If it was a limit error, reservationError should already be set.
-      // If it's another type of error that wasn't caught by the specific `else { throw err; }`
-      // it will be caught here. If reservationError is still null, it means it's not a limit error.
-      if (reservationError == null && e is! network_errors.ResourceLimitExceededException) {
-          throw e; // Rethrow if not a limit error and not already handled
-      }
+      _logger.fine('$name: Failed to reserve resources for protocol $protocol: $e.');
+      rethrow;
     }
-
-
-    if (reservationError != null) {
-      // Rollback successful reservations
-      if (reservedInPeerProto) {
-        // This will also trigger release from its parents (protocolScope, systemScope)
-        newPeerProtoScope.removeStream(direction);
-      }
-      // No direct reservation on newProtocolScope, so no direct rollback needed for it.
-      _logger.fine('$name: Failed to reserve resources for protocol $protocol: $reservationError.');
-      throw reservationError;
-    }
+    _protocolScopeImpl = newProtocolScope;
+    _peerProtoScope = newPeerProtoScope;
+    _logger.fine('$name: Successfully set protocol to $protocol. Resources transferred, edges updated.');
   }
 
   @override
@@ -185,75 +124,18 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
       systemScope
     );
 
-    // 2. Resource Juggling (Reserve in new scopes, no release from prior scopes like transient)
-    // Streams are typically additive to service scopes on top of protocol scopes.
-    network_errors.ResourceLimitExceededException? reservationError;
-    bool reservedInSvc = false;
-    bool reservedInPeerSvc = false;
-
+    // 2. Add the stream to the service and peer-service scopes. Nothing is
+    // released: a stream counts against its service on top of its protocol.
+    // reparent() counts it once in each scope it gains.
     try {
-      try {
-        newServiceScope.addStream(direction);
-        reservedInSvc = true;
-      } on network_errors.ResourceLimitExceededException catch (e) {
-        _logger.severe('Failed to add stream to new service scope - $direction - $e') ;
-        reservationError = e;
-      }
-      // Other exceptions will propagate up
-
-      if (reservationError == null) {
-        try {
-          newPeerSvcScope.addStream(direction);
-          reservedInPeerSvc = true;
-        } on network_errors.ResourceLimitExceededException catch (e) {
-          _logger.severe('Failed to add stream to new peer service scope - $direction - $e') ;
-          reservationError = e;
-        }
-        // Other exceptions will propagate up
-      }
-
-      if (reservationError == null) {
-        _serviceScopeImpl = newServiceScope;
-        _peerSvcScope = newPeerSvcScope;
-        // Update edges: Stream is now primarily parented by its peer, its peer-protocol scope, and its peer-service scope.
-        // Propagation to global protocol, global service, and system scopes will occur from these.
-        List<ResourceScopeImpl> oldEdges = List.from(this.edges);
-        List<ResourceScopeImpl> newEdges = [
-          _peerScopeImpl,
-          _peerProtoScope!, // Known to be non-null from check above
-          newPeerSvcScope
-        ];
-
-        for (var oldEdge in oldEdges) {
-          if (!newEdges.contains(oldEdge)) {
-            oldEdge.decRef();
-          }
-        }
-        for (var newEdge in newEdges) {
-          if (!oldEdges.contains(newEdge)) {
-            newEdge.incRef();
-          }
-        }
-        this.edges = newEdges;
-        
-        _logger.fine('$name: Successfully set service to $serviceName. Edges updated.');
-      }
+      reparent([_peerScopeImpl, _peerProtoScope!, newPeerSvcScope]);
     } on network_errors.ResourceLimitExceededException catch (e) {
-      _logger.severe('Resource limits exceeded - $e') ;
-      reservationError = e;
-    } catch (e) {
-       _logger.severe('$name: Unexpected error during setService resource juggling: $e');
-       if (e is Exception && reservationError == null) {
-        throw Exception('$name: Failed to set service due to an unexpected error: $e');
-      }
+      _logger.fine('$name: Failed to reserve resources for service $serviceName: $e.');
+      rethrow;
     }
-
-    if (reservationError != null) {
-      if (reservedInPeerSvc) newPeerSvcScope.removeStream(direction);
-      if (reservedInSvc) newServiceScope.removeStream(direction);
-      _logger.fine('$name: Failed to reserve resources for service $serviceName: $reservationError.');
-      throw reservationError;
-    }
+    _serviceScopeImpl = newServiceScope;
+    _peerSvcScope = newPeerSvcScope;
+    _logger.fine('$name: Successfully set service to $serviceName. Edges updated.');
   }
 
   // Inherits done() from ResourceScopeImpl.

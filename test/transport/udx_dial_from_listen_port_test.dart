@@ -55,8 +55,8 @@ void main() {
 
   // Nodes on a fixed port all listen on the same port number. A dial to
   // such a peer is not a dial to our own listener, so it must also leave
-  // from the listen socket. a listens on 127.0.0.1:P and b on this machine's
-  // LAN address with the same port P.
+  // from the listen socket. a listens on this machine's LAN address with
+  // port P, and b on 127.0.0.1 with the same port P.
   test('a dial to a peer on the same port number leaves from the listener port', () async {
     final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
     final lan = interfaces.expand((i) => i.addresses).where((a) => !a.isLoopback).firstOrNull;
@@ -68,18 +68,46 @@ void main() {
     final port = probe.port;
     probe.close();
 
-    final a = await _host('/ip4/127.0.0.1/udp/$port/udx');
-    final b = await _host('/ip4/${lan.address}/udp/$port/udx');
+    final a = await _host('/ip4/${lan.address}/udp/$port/udx');
+    final b = await _host('/ip4/127.0.0.1/udp/$port/udx');
     addTearDown(() async {
       await a.close();
       await b.close();
     });
 
-    await a.connect(AddrInfo(b.id, [MultiAddr('/ip4/${lan.address}/udp/$port/udx')]));
+    await a.connect(AddrInfo(b.id, [MultiAddr('/ip4/127.0.0.1/udp/$port/udx')]));
 
     final bConns = b.network.connsToPeer(a.id);
     expect(bConns, isNotEmpty);
     expect(_udpPort(bConns.first.remoteMultiaddr), port);
+  });
+
+  // A socket bound to loopback cannot send to another host, so a dial there
+  // must not leave from a loopback listener.
+  group('listenerSocketFor', () {
+    final loop4 = InternetAddress('127.0.0.1');
+    final any4 = InternetAddress('0.0.0.0');
+    final lan4 = InternetAddress('192.168.1.5');
+    InternetAddress id(InternetAddress a) => a;
+
+    test('prefers a listener on all interfaces', () {
+      expect(listenerSocketFor([loop4, any4, lan4], id, '203.0.113.7'), any4);
+      expect(listenerSocketFor([loop4, any4], id, '127.0.0.1'), any4);
+    });
+
+    test('never dials another host from a loopback listener', () {
+      expect(listenerSocketFor([loop4], id, '10.255.255.1'), isNull);
+      expect(listenerSocketFor([loop4, lan4], id, '10.255.255.1'), lan4);
+    });
+
+    test('dials loopback from a loopback or a specific listener', () {
+      expect(listenerSocketFor([loop4], id, '127.0.0.1'), loop4);
+      expect(listenerSocketFor([lan4], id, '127.0.0.1'), lan4);
+    });
+
+    test('no listener, no reuse', () {
+      expect(listenerSocketFor(<InternetAddress>[], id, '127.0.0.1'), isNull);
+    });
   });
 
   // Only a dial to one of our own listeners keeps a fresh socket. A peer on

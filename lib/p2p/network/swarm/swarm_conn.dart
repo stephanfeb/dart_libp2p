@@ -175,13 +175,19 @@ class SwarmConn implements Conn {
     // Dispose of health monitoring
     _healthMonitor.dispose();
 
-    // Close all streams
-    await _streamsLock.synchronized(() async {
-      for (final stream in _streams.values) {
-        await stream.close(); // This will also call done() on stream's scope
-      }
+    // Take the streams out under the lock, then close them without it: a
+    // closing stream removes itself through removeStream(), which takes
+    // _streamsLock, and that lock is not reentrant.
+    final streams = await _streamsLock.synchronized(() {
+      final open = _streams.values.toList();
       _streams.clear();
+      return open;
+    });
+    for (final stream in streams) {
+      await stream.close(); // This will also call done() on stream's scope
+    }
 
+    await _streamsLock.synchronized(() async {
       if (_isClosed) return;
       _isClosed = true;
 

@@ -42,6 +42,7 @@ void main() {
         resourceManager: resourceManager,
         connManager: connManager,
         hostEventBus: eventBus,
+        enablePing: true, // createLibp2pNode leaves ping off by default
       );
       host1 = node1.host;
       peerId1 = node1.peerId;
@@ -51,6 +52,7 @@ void main() {
         resourceManager: resourceManager,
         connManager: connManager,
         hostEventBus: eventBus,
+        enablePing: true, // createLibp2pNode leaves ping off by default
       );
       host2 = node2.host;
       peerId2 = node2.peerId;

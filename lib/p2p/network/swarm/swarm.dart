@@ -1219,6 +1219,9 @@ class Swarm implements Network {
     _host = host;
   }
 
+  /// The host that incoming streams are handed to, once [setHost] ran.
+  Host? get host => _host;
+
   void removeListenAddress(MultiAddr addr) {
     _listenAddrs.remove(addr);
 

@@ -226,12 +226,12 @@ void main() {
       final ranker = CapabilityAwarePriorityRanker();
       final scored = ranker.rank(addresses, capability);
       
-      // Direct connection: 5s
-      expect(scored[0].timeout, Duration(seconds: 5));
-      
-      // Relay connections: 10s
-      expect(scored[1].timeout, Duration(seconds: 10));
-      expect(scored[2].timeout, Duration(seconds: 10));
+      // Direct connection: the 15 s default
+      expect(scored[0].timeout, Duration(seconds: 15));
+
+      // Relay connections: the 30 s default
+      expect(scored[1].timeout, Duration(seconds: 30));
+      expect(scored[2].timeout, Duration(seconds: 30));
     });
   });
 }

@@ -152,16 +152,18 @@ class UDXTransport implements Transport {
       // A dial to one of our own listeners (a transport dialing itself, as
       // in-process tests do) keeps its own fresh socket, and so does
       // [dialFromEphemeralSocket]. A remote peer that listens on the same
-      // port number as we do is not one of our listeners.
+      // port number as we do is not one of our listeners. Only a listener
+      // whose socket can reach the target is used: a socket bound to
+      // loopback cannot send to another host (the send fails with
+      // EADDRNOTAVAIL).
       final isIPv6 = UDX.getAddressFamily(host) == 6;
       final familyListeners = _listenerMultiplexers[isIPv6];
       final dialsOwnListener = familyListeners?.any(
               (m) => isOwnListenAddress(m.socket.address, m.socket.port, host, port)) ??
           false;
       final reused = familyListeners != null &&
-              familyListeners.isNotEmpty &&
               (simultaneousConnect || (reuseListenSocket && !dialsOwnListener))
-          ? familyListeners.last
+          ? listenerSocketFor(familyListeners, (m) => m.socket.address, host)
           : null;
 
       if (reused != null) {
@@ -1022,4 +1024,28 @@ bool _sameBytes(List<int> a, List<int> b) {
     if (a[i] != b[i]) return false;
   }
   return true;
+}
+
+/// Whether a socket bound to [local] can send to [host]. A socket bound to
+/// a loopback address can send only to loopback; a socket bound to all
+/// interfaces or to another address can send anywhere, loopback included.
+@visibleForTesting
+bool canSendFrom(InternetAddress local, String host) {
+  if (!local.isLoopback) return true;
+  final target = InternetAddress.tryParse(host);
+  return target != null && target.isLoopback;
+}
+
+/// Picks the listener to dial [host] from: one bound to all interfaces if
+/// there is one, otherwise the most recent one whose address can send to
+/// [host], otherwise none.
+@visibleForTesting
+T? listenerSocketFor<T>(List<T> listeners, InternetAddress Function(T) addressOf, String host) {
+  T? specific;
+  for (final l in listeners.reversed) {
+    final local = addressOf(l);
+    if (_isUnspecified(local)) return l;
+    if (specific == null && canSendFrom(local, host)) specific = l;
+  }
+  return specific;
 }

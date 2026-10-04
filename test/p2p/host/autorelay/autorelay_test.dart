@@ -57,6 +57,27 @@ void main() {
           .thenAnswer((_) => Stream.empty().asBroadcastStream());
     });
 
+    // AutoRelay advertises addresses when reachability changes or its relays
+    // change, not when it starts. This starts it and reports [reachability].
+    Future<List<MultiAddr>> emittedAfter(Reachability reachability, List<MultiAddr> hostAddrs) async {
+      final reachabilityEvents = StreamController<EvtLocalReachabilityChanged>.broadcast();
+      addTearDown(reachabilityEvents.close);
+      final reachabilitySub = MockSubscription();
+      when(reachabilitySub.stream).thenAnswer((_) => reachabilityEvents.stream);
+      when(mockEventBus.subscribe(EvtLocalReachabilityChanged)).thenReturn(reachabilitySub);
+      when(mockNetwork.interfaceListenAddresses).thenAnswer((_) async => hostAddrs);
+
+      final autoRelay = AutoRelay(mockHost, mockUpgrader, userConfig: config);
+      await autoRelay.start();
+      reachabilityEvents.add(EvtLocalReachabilityChanged(reachability: reachability));
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      verify(mockEventBus.emitter(EvtAutoRelayAddrsUpdated)).called(greaterThan(0));
+      final emitted = verify(mockEmitter.emit(captureAny)).captured;
+      expect(emitted.last, isA<EvtAutoRelayAddrsUpdated>());
+      return (emitted.last as EvtAutoRelayAddrsUpdated).advertisableAddrs;
+    }
+
     group('Initialization', () {
       test('should create AutoRelay instance', () {
         // Act
@@ -77,66 +98,23 @@ void main() {
     });
 
     group('Address Advertisement', () {
-      test('should emit address update events when started', () async {
-        // Arrange
-        final autoRelay = AutoRelay(mockHost, mockUpgrader, userConfig: config);
-        
-        final interfaceAddrs = [
-          MultiAddr('/ip4/192.168.1.100/tcp/4001'),
-        ];
-        
-        when(mockNetwork.interfaceListenAddresses)
-            .thenAnswer((_) async => interfaceAddrs);
-
-        // Act
-        await autoRelay.start();
-        
-        // Give some time for async operations
-        await Future.delayed(Duration(milliseconds: 100));
-
-        // Assert - Verify address update event was emitted
-        verify(mockEventBus.emitter(EvtAutoRelayAddrsUpdated)).called(greaterThan(0));
-        verify(mockEmitter.emit(any)).called(greaterThan(0));
+      test('emits advertisable addresses after a reachability event', () async {
+        final addrs = await emittedAfter(Reachability.private, [MultiAddr('/ip4/192.168.1.100/tcp/4001')]);
+        expect(addrs, isNotEmpty);
       });
 
-      test('should include relay addresses when reachability is private', () async {
-        // Arrange
-        final autoRelay = AutoRelay(mockHost, mockUpgrader, userConfig: config);
-        
-        // Mock private reachability
-        final privateAddrs = [
-          MultiAddr('/ip4/192.168.1.100/tcp/4001'),
-        ];
-        
-        when(mockNetwork.interfaceListenAddresses)
-            .thenAnswer((_) async => privateAddrs);
-
-        // Act
-        await autoRelay.start();
-        await Future.delayed(Duration(milliseconds: 100));
-
-        // Assert - When private, should request relay addresses from RelayFinder
-        // This would be verified through emitted events containing circuit addresses
-        verify(mockEventBus.emitter(EvtAutoRelayAddrsUpdated)).called(greaterThan(0));
+      test('advertises relay-finder addresses when reachability is private', () async {
+        // With no reservation yet, the relay finder's addresses are the
+        // host's private ones; circuit addresses join once a relay reserves.
+        final privateAddr = MultiAddr('/ip4/192.168.1.100/tcp/4001');
+        final addrs = await emittedAfter(Reachability.private, [privateAddr]);
+        expect(addrs.map((a) => a.toString()), contains(privateAddr.toString()));
       });
 
-      test('should use direct addresses when reachability is public', () async {
-        // Arrange
-        final autoRelay = AutoRelay(mockHost, mockUpgrader, userConfig: config);
-        
-        final publicAddrs = [
-          MultiAddr('/ip4/203.0.113.1/tcp/4001'),  // public IP
-        ];
-        
-        when(mockNetwork.interfaceListenAddresses)
-            .thenAnswer((_) async => publicAddrs);
-
-        // Act
-        await autoRelay.start();
-        await Future.delayed(Duration(milliseconds: 100));
-
-        // Assert - Should emit addresses
-        verify(mockEventBus.emitter(EvtAutoRelayAddrsUpdated)).called(greaterThan(0));
+      test('advertises the direct addresses when reachability is public', () async {
+        final publicAddrs = [MultiAddr('/ip4/203.0.113.1/tcp/4001')];
+        final addrs = await emittedAfter(Reachability.public, publicAddrs);
+        expect(addrs.map((a) => a.toString()), equals(publicAddrs.map((a) => a.toString())));
       });
     });
 
@@ -332,20 +310,8 @@ void main() {
       });
 
       test('should emit address updated events', () async {
-        // Arrange
-        final autoRelay = AutoRelay(mockHost, mockUpgrader, userConfig: config);
-        
-        when(mockNetwork.interfaceListenAddresses)
-            .thenAnswer((_) async => [MultiAddr('/ip4/192.168.1.100/tcp/4001')]);
-
-        // Act
-        await autoRelay.start();
-        await Future.delayed(Duration(milliseconds: 100));
-
-        // Assert
-        verify(mockEventBus.emitter(EvtAutoRelayAddrsUpdated)).called(greaterThan(0));
-        verify(mockEmitter.emit(argThat(isA<EvtAutoRelayAddrsUpdated>())))
-            .called(greaterThan(0));
+        final addrs = await emittedAfter(Reachability.public, [MultiAddr('/ip4/203.0.113.1/tcp/4001')]);
+        expect(addrs, hasLength(1));
       });
     });
 
@@ -361,12 +327,10 @@ void main() {
         expect(() async => await autoRelay.start(), returnsNormally);
       });
 
-      test('should handle null config gracefully', () {
-        // Act
-        final autoRelay = AutoRelay(mockHost, mockUpgrader);
-
-        // Assert - Should use default config
-        expect(autoRelay.config, isNotNull);
+      test('refuses a config with no relays and no peer source', () {
+        // Without static relays or a peer source AutoRelay has nothing to
+        // reserve with, so the default config is rejected (as in go-libp2p).
+        expect(() => AutoRelay(mockHost, mockUpgrader), throwsStateError);
       });
     });
   });

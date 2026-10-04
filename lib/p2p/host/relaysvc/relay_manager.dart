@@ -89,10 +89,9 @@ class RelayManager {
         }
       },
       onError: (e, StackTrace s) {
-        _log.severe('Error in reachability listener.', e, s);
-        if (!_isClosed && _backgroundCompleter != null && !_backgroundCompleter!.isCompleted) {
-          _backgroundCompleter!.completeError(e, s);
-        }
+        // Log and keep listening. Completing _backgroundCompleter with the
+        // error raised it as an uncaught error, because nothing awaits it.
+        _log.warning('Error in reachability listener.', e, s);
       }
     );
     _log.fine('Subscribed to reachability events.');

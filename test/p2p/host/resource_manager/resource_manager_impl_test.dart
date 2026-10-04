@@ -76,6 +76,29 @@ void main() {
       expect(resourceManager, isNotNull);
     });
 
+    // Each scope above a stream or connection counts it once, however many
+    // paths lead there, as in go-libp2p.
+    test('the system scope counts a connection and a stream once', () async {
+      final system = resourceManager.systemScope;
+
+      final conn = await resourceManager.openConnection(Direction.outbound, false, testMultiAddr);
+      expect(system.stat.numConnsOutbound, 1);
+      await conn.setPeer(peerA);
+      expect(system.stat.numConnsOutbound, 1);
+
+      final stream = await resourceManager.openStream(peerA, Direction.outbound);
+      expect(system.stat.numStreamsOutbound, 1);
+      await stream.setProtocol('/test/1.0.0');
+      expect(system.stat.numStreamsOutbound, 1);
+      await stream.setService('test-service');
+      expect(system.stat.numStreamsOutbound, 1);
+
+      stream.done();
+      expect(system.stat.numStreamsOutbound, 0);
+      conn.done();
+      expect(system.stat.numConnsOutbound, 0);
+    });
+
     test('openConnection and release basic functionality', () async {
       // Initially, no connection scope for peerA
       // We can't directly check internal maps, but we can test behavior
@@ -177,14 +200,11 @@ void main() {
           connLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, memory: 1024), // For ConnectionScopeImpl's own limit
           streamLimits: BaseLimit(streams: 1, streamsInbound: 1, streamsOutbound: 1, memory: 1024), // For StreamScopeImpl's own limit
           peerLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, streams: 1, streamsInbound: 1, streamsOutbound: 1, memory: 1024), // For PeerScopeImpl
-          // System and Transient scopes need to accommodate resources from their children.
-          // Current logic might count a single stream multiple times against system/transient:
-          // 1. Via StreamScope -> PeerScope -> SystemScope
-          // 2. Via StreamScope -> TransientScope -> SystemScope
-          // 3. Via StreamScope -> ProtocolScope -> SystemScope (after setProtocol)
-          // So, set to 3 to pass tests, acknowledging this overcounting needs a proper fix.
-          systemLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, streams: 3, streamsInbound: 3, streamsOutbound: 3, memory: 3072),
-          transientLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, streams: 3, streamsInbound: 3, streamsOutbound: 3, memory: 3072),
+          // A stream reaches the system scope through the peer, the transient
+          // and (after setProtocol) the protocol scope, but counts there once,
+          // so the system scope needs room for one stream only.
+          systemLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, streams: 1, streamsInbound: 1, streamsOutbound: 1, memory: 1024),
+          transientLimits: BaseLimit(conns: 1, connsInbound: 1, connsOutbound: 1, streams: 1, streamsInbound: 1, streamsOutbound: 1, memory: 1024),
           protocolLimits: BaseLimit(streams: 1, streamsInbound: 1, streamsOutbound: 1, memory: 1024) // For ProtocolScopeImpl's own limit
         );
         limitedResourceManager = ResourceManagerImpl(limiter: testLimiter);

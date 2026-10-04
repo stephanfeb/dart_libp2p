@@ -300,14 +300,10 @@ void main() {
       final staticKey = await algorithm.newKeyPair();
       final pattern = await NoiseXXPattern.create(true, staticKey);
 
-      // Reset the keys to null to simulate uninitialized state
-      pattern.sendKey; // This should succeed
-      pattern.recvKey; // This should succeed
-
-      // Verify that the keys are temporary and not the final handshake keys
-      final sendKey1 = await pattern.sendKey.extractBytes();
-      final sendKey2 = await pattern.sendKey.extractBytes();
-      expect(sendKey1, equals(sendKey2), reason: 'Keys should be stable before handshake');
+      // The transport keys come from Split() at the end of the handshake
+      // (Noise spec section 5.2), so they do not exist before it.
+      expect(() => pattern.sendKey, throwsStateError);
+      expect(() => pattern.recvKey, throwsStateError);
 
       // Complete handshake
       final message1 = await pattern.writeMessage(Uint8List(0));
@@ -318,9 +314,8 @@ void main() {
       final message3 = await pattern.writeMessage(Uint8List(0));
       await responder.readMessage(message3);
 
-      // Verify that the keys have changed
-      final sendKey3 = await pattern.sendKey.extractBytes();
-      expect(sendKey1, isNot(equals(sendKey3)), reason: 'Keys should change after handshake');
+      // After the handshake, the keys exist and match across the two sides
+      expect(await pattern.sendKey.extractBytes(), equals(await responder.recvKey.extractBytes()));
     });
 
     test('fails if remote static key is accessed before handshake completion', () {
@@ -675,11 +670,13 @@ void main() {
     });
 
     test('minimal hmac test', () async {
-      // Complete handshake to get to a known chain key state
+      // The transport keys exist once the handshake is complete.
       final message1 = await initiator.writeMessage(Uint8List(0));
       await responder.readMessage(message1);
-      
-      // Verify both sides have same chain key
+      await initiator.readMessage(await responder.writeMessage(Uint8List(0)));
+      await responder.readMessage(await initiator.writeMessage(Uint8List(0)));
+
+      // The initiator's send key is the responder's receive key
       final hmac = Hmac.sha256();
       final k1_init = await hmac.calculateMac([0x01], secretKey: initiator.sendKey);
       final k1_resp = await hmac.calculateMac([0x01], secretKey: responder.recvKey);
@@ -695,14 +692,20 @@ void main() {
       // <- e, ee, s, es
       final message2 = await responder.writeMessage(Uint8List(0));
       await initiator.readMessage(message2);
-      
-      // At this point both sides should have performed the same DH operations
-      // and should have the same chain key
+
+      // Mid-handshake, both sides have the same chain key, but no transport
+      // keys yet: those come from Split() after the last message.
+      expect(initiator.debugChainKey, equals(responder.debugChainKey));
+      expect(() => initiator.sendKey, throwsStateError);
+
+      // -> s, se
+      await responder.readMessage(await initiator.writeMessage(Uint8List(0)));
+
       final hmac = Hmac.sha256();
       final k1_init = await hmac.calculateMac([0x01], secretKey: initiator.sendKey);
       final k1_resp = await hmac.calculateMac([0x01], secretKey: responder.recvKey);
       expect(k1_init.bytes, equals(k1_resp.bytes),
-          reason: 'Chain key should be identical after ee+es');
+          reason: 'Both sides derive the same keys from the same chain key');
     });
 
     test('minimal dh test', () async {
@@ -1615,6 +1618,9 @@ void main() {
       // Record initial states
       final initiatorInitialHash = initiator.debugHandshakeHash;
       final responderInitialHash = responder.debugHandshakeHash;
+      // ck and h start equal, but mixing in the prologue changes h only, so
+      // the chain key is compared with the initial chain key.
+      final initiatorInitialChainKey = initiator.debugChainKey;
       expect(initiatorInitialHash, equals(responderInitialHash), 
         reason: 'Initial handshake hashes should match');
 
@@ -1645,7 +1651,7 @@ void main() {
       // Verify chain keys match and haven't changed
       expect(initiator.debugChainKey, equals(responder.debugChainKey),
         reason: 'Chain keys should match');
-      expect(initiator.debugChainKey, equals(initiatorInitialHash),
+      expect(initiator.debugChainKey, equals(initiatorInitialChainKey),
         reason: 'Chain key should not change after first message');
     });
 
