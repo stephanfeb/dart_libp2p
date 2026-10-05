@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.8] - 2026-10-05
+
+### Fixed
+
+- **A hole punch sent and dialed private addresses.** When a peer had no public address, both sides of a DCUtR hole punch fell back to their private listen addresses (for example, `10.0.2.15` inside an Android emulator). A peer on another network cannot reach these addresses, so each such hole punch held a dial for the full timeout and then failed. As in go-libp2p, a hole punch now uses public addresses only. A peer with no public address does not start a hole punch and refuses a request for one, and private addresses that the other peer sends are not dialed. Peers on the same network do not need a hole punch: they connect over their direct addresses.
+- **A hole-punch dial waited 15 s, not 5 s.** The 5-s hole-punch `dialTimeout` was not used, so each attempt waited for the normal dial timeout. The swarm now applies `Context.withDialPeerTimeout` when it is shorter than the configured dial timeout, and the hole punch sets it to 5 s, as in go-libp2p.
+- **A failed hole punch was logged as an error.** A hole punch often fails behind NAT, and the relayed connection stays in use. The swarm and `BasicHost` logged each failure at SEVERE with a stack trace. Failed direct dials (`forceDirectDial`) are now logged at FINE. Other dial failures are logged as before.
+- Concurrent dials join one dial only when they have the same `simultaneousConnect` option too, so a hole-punch dial does not join an uncoordinated direct dial.
+
 ## [4.1.7] - 2026-10-05
 
 ### Fixed

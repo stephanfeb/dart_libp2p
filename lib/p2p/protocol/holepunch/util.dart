@@ -34,6 +34,15 @@ List<MultiAddr> removeRelayAddrs(List<MultiAddr> addrs) {
   return addrs.where((addr) => !isRelayAddress(addr)).toList();
 }
 
+/// Keeps the addresses a peer on another network can dial: no relay
+/// addresses, and no private or loopback addresses. As in go-libp2p, a hole
+/// punch uses public addresses only. A private address is reachable only on
+/// its own network, where the peers do not need a hole punch, and a dial to
+/// it from another network waits for the full dial timeout.
+List<MultiAddr> holePunchAddrs(List<MultiAddr> addrs) {
+  return addrs.where((addr) => !isRelayAddress(addr) && addr.isPublic()).toList();
+}
+
 /// Checks if a multiaddr is a relay address
 bool isRelayAddress(MultiAddr addr) {
   return addr.hasProtocol('p2p-circuit');

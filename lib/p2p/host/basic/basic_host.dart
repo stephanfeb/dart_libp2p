@@ -1156,7 +1156,12 @@ class BasicHost implements Host {
     } catch (e, stackTrace) {
       final dialTime = DateTime.now().difference(dialStartTime);
       final totalTime = DateTime.now().difference(startTime);
-      _log.severe('❌ [CONNECT-ERROR] Connection failed after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e\n$stackTrace');
+      // A failed hole punch or punch pre-dial is normal behind many NATs.
+      if (ctx.getForceDirectDial().$1) {
+        _log.fine('[CONNECT-ERROR] Direct connection failed after ${totalTime.inMilliseconds}ms: $e');
+      } else {
+        _log.severe('❌ [CONNECT-ERROR] Connection failed after ${totalTime.inMilliseconds}ms (dial: ${dialTime.inMilliseconds}ms): $e\n$stackTrace');
+      }
       rethrow;
     }
   }
@@ -1205,7 +1210,11 @@ class BasicHost implements Host {
       rethrow;
     } catch (e, stackTrace) {
       final totalTime = DateTime.now().difference(startTime);
-      _log.severe('❌ [DIAL-PEER-ERROR] Failed to dial ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
+      if (context.getForceDirectDial().$1) {
+        _log.fine('[DIAL-PEER-ERROR] Direct dial to ${p.toString()} failed after ${totalTime.inMilliseconds}ms: $e');
+      } else {
+        _log.severe('❌ [DIAL-PEER-ERROR] Failed to dial ${p.toString()} after ${totalTime.inMilliseconds}ms: $e\n$stackTrace');
+      }
       throw Exception('Failed to dial: $e');
     }
   }

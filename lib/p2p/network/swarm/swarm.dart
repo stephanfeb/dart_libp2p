@@ -725,9 +725,10 @@ class Swarm implements Network {
     // Concurrent dials to one peer give one dial. Two separate dials made
     // two connections, and the dial that lost could close what the other
     // dial was still using. A dial with other options (forceDirectDial,
-    // forceFreshDial) does not join a dial without them.
+    // forceFreshDial, simultaneousConnect) does not join a dial without them.
     final key = '${peerId.toString()}'
-        '|${context.getForceDirectDial().$1}|${context.getForceFreshDial().$1}';
+        '|${context.getForceDirectDial().$1}|${context.getForceFreshDial().$1}'
+        '|${context.getSimultaneousConnect().$1}';
     final active = _activeDials[key];
     if (active != null) {
       _logger.fine('Swarm.dialPeer: joining the dial in progress to $peerId');
@@ -958,9 +959,11 @@ class Swarm implements Network {
     _logger.fine('Swarm.dialPeer: After circuit dedup: ${dialableAddrs.length} addresses');
 
     // 5. Rank by priority, with preference for relay if peer connected via relay
+    // A caller can shorten the dial with Context.withDialPeerTimeout, as a
+    // hole punch does (5 s, as in go-libp2p).
     final ranker = CapabilityAwarePriorityRanker(
-      directTimeout: _config.dialTimeout,
-      relayTimeout: _config.relayDialTimeout,
+      directTimeout: _shorter(_config.dialTimeout, context.getDialPeerTimeout()),
+      relayTimeout: _shorter(_config.relayDialTimeout, context.getDialPeerTimeout()),
     );
     var scoredAddrs = ranker.rank(dialableAddrs, capability);
     
@@ -1055,7 +1058,12 @@ class Swarm implements Network {
       return swarmConn;
       
     } catch (e) {
-      _logger.severe('Swarm.dialPeer: All parallel dial attempts failed for $peerId: $e');
+      // A failed hole punch or punch pre-dial is normal behind many NATs.
+      if (context.getForceDirectDial().$1) {
+        _logger.fine('Swarm.dialPeer: All direct dial attempts failed for $peerId: $e');
+      } else {
+        _logger.severe('Swarm.dialPeer: All parallel dial attempts failed for $peerId: $e');
+      }
       throw Exception('All dial attempts failed: $e');
     }
   }
@@ -1097,10 +1105,14 @@ class Swarm implements Network {
     // its unanswered packets would make the peer's NAT remap the punch.
     final simultaneousConnect = context.getSimultaneousConnect().$1;
     final uncoordinatedDirect = context.getForceDirectDial().$1 && !simultaneousConnect;
+    // Only a timeout shorter than the transport's own is passed down.
+    final dialPeerTimeout = context.getDialPeerTimeout();
+    final timeout = dialPeerTimeout < _config.dialTimeout ? dialPeerTimeout : null;
     final transportConn = transport is UDXTransport && uncoordinatedDirect
-        ? await transport.dialFromEphemeralSocket(dialAddr)
+        ? await transport.dialFromEphemeralSocket(dialAddr, timeout: timeout)
         : await transport.dial(
             dialAddr,
+            timeout: timeout,
             simultaneousConnect: simultaneousConnect,
           );
     
@@ -1641,4 +1653,7 @@ class Swarm implements Network {
       _logger.fine('Swarm._cleanupStaleConnections: All $totalConnections connections are healthy');
     }
   }
+
+  static Duration _shorter(Duration a, Duration b) => a < b ? a : b;
 }
+

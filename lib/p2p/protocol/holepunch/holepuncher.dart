@@ -144,7 +144,9 @@ class HolePuncher {
         // coordinated with the peer, so it must not go out from the socket
         // the punch will use. Its unanswered packets would leave a NAT entry
         // for that port pair at the peer's NAT and get our punch remapped.
-        final dialCtx = Context().withForceDirectDial('hole-punching');
+        final dialCtx = Context()
+            .withForceDirectDial('hole-punching')
+            .withDialPeerTimeout(dialTimeout);
 
         final tstart = DateTime.now();
         try {
@@ -213,6 +215,11 @@ class HolePuncher {
 
   /// Initiates a hole punch with a remote peer
   Future<HolePunchResult> _initiateHolePunch(PeerId peerId) async {
+    // Without a public address the peer has nothing to dial; do not ask it.
+    if (holePunchAddrs(_listenAddrs()).isEmpty) {
+      throw Exception('No public address to send; hole punch not started');
+    }
+
     // Create a context with the appropriate options
     final combinedCtx = Context()
         .withValue('allowLimitedConn', 'hole-punch')
@@ -244,18 +251,13 @@ class HolePuncher {
       str.setDeadline(DateTime.now().add(streamTimeout));
 
       // Send a CONNECT and start RTT measurement
-      var obsAddrs = removeRelayAddrs(_listenAddrs());
+      var obsAddrs = holePunchAddrs(_listenAddrs());
       if (_filter != null) {
         obsAddrs = _filter.filterLocal(str.conn.remotePeer, obsAddrs);
       }
 
       if (obsAddrs.isEmpty) {
-        _log.warning('No public addresses available for hole punch initiation, but proceeding anyway. Peer: ${str.conn.remotePeer}');
-        // Don't abort - use all available addresses and let the peer decide
-        obsAddrs = _listenAddrs();
-        if (obsAddrs.isEmpty) {
-          throw Exception('No addresses available for hole punch initiation');
-        }
+        throw Exception('No public address to send; hole punch not started');
       }
 
       final start = DateTime.now();
@@ -280,7 +282,7 @@ class HolePuncher {
         throw Exception('Expected CONNECT message, got ${response.type}');
       }
 
-      var addrs = removeRelayAddrs(addrsFromBytes(response.obsAddrs));
+      var addrs = holePunchAddrs(addrsFromBytes(response.obsAddrs));
       if (_filter != null) {
         addrs = _filter.filterRemote(str.conn.remotePeer, addrs);
       }
@@ -305,7 +307,8 @@ class HolePuncher {
   Future<void> _holePunchConnect(PeerInfo pi, bool isClient) async {
     final combinedCtx = Context()
         .withSimultaneousConnect(isClient, 'hole-punching')
-        .withForceDirectDial('hole-punching');
+        .withForceDirectDial('hole-punching')
+        .withDialPeerTimeout(dialTimeout);
 
     try {
       // Convert PeerInfo to AddrInfo

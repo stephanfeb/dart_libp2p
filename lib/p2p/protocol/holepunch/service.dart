@@ -202,19 +202,14 @@ class HolePunchServiceImpl implements HolePunchService {
       throw Exception('Received hole punch stream: ${str.conn.remoteMultiaddr}');
     }
 
-    var ownAddrs = _listenAddrs();
+    var ownAddrs = holePunchAddrs(_listenAddrs());
     if (_filter != null) {
       ownAddrs = _filter.filterLocal(str.conn.remotePeer, ownAddrs);
     }
 
-    // If we can't tell the peer where to dial us, try to use any available addresses
+    // Without a public address the peer has nothing to dial, as in go-libp2p.
     if (ownAddrs.isEmpty) {
-      _log.warning('No public addresses available for incoming hole punch, trying all available addresses. Peer: ${str.conn.remotePeer}');
-      // Try to use any addresses we have - the peer can decide if they're reachable
-      ownAddrs = _host.addrs.where((addr) => !isRelayAddress(addr)).toList();
-      if (ownAddrs.isEmpty) {
-        throw Exception('No addresses available for hole punch response');
-      }
+      throw Exception('Rejecting hole punch request: no public address');
     }
 
     await str.scope().reserveMemory(maxMsgSize, ReservationPriority.always);
@@ -233,14 +228,14 @@ class HolePunchServiceImpl implements HolePunchService {
         throw Exception('Expected CONNECT message from initiator but got ${msg.type}');
       }
 
-      var obsDial = removeRelayAddrs(addrsFromBytes(msg.obsAddrs));
+      var obsDial = holePunchAddrs(addrsFromBytes(msg.obsAddrs));
       if (_filter != null) {
         obsDial = _filter.filterRemote(str.conn.remotePeer, obsDial);
       }
 
       _log.fine('Received hole punch request from ${str.conn.remotePeer} with addresses: $obsDial');
       if (obsDial.isEmpty) {
-        throw Exception('Expected CONNECT message to contain at least one address');
+        throw Exception('Expected CONNECT message to contain at least one public address');
       }
 
       // Write CONNECT message
@@ -331,7 +326,8 @@ class HolePunchServiceImpl implements HolePunchService {
   Future<void> _holePunchConnect(PeerInfo pi, bool isClient) async {
     final holePunchCtx = Context()
         .withSimultaneousConnect(isClient, 'hole-punching')
-        .withForceDirectDial('hole-punching');
+        .withForceDirectDial('hole-punching')
+        .withDialPeerTimeout(dialTimeout);
 
     try {
       final addrInfo = AddrInfo(pi.peerId, pi.addrs.toList());
