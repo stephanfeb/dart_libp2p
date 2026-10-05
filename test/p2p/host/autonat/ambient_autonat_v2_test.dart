@@ -349,6 +349,59 @@ void main() {
       
       await ambient.close();
     });
+
+    // A host behind NAT has only a relay address in public. Probing it says
+    // nothing about the host, and the relay is often the only AutoNAT
+    // server, which refuses to check addresses through itself. Before
+    // 4.1.7 such a probe failed and was retried at retryInterval, forever.
+    group('with only a relay address', () {
+      const relayAddr = '/ip4/1.2.3.4/udp/4001/udx'
+          '/p2p/12D3KooWJfrcqqdoAcKUjAB6dGkC9KHCsTG5WKHZH8hk1wLs67it/p2p-circuit';
+
+      setUp(() {
+        when(mockHost.addrs).thenReturn([MultiAddr(relayAddr)]);
+      });
+
+      test('does not probe, emits unknown once and does not retry', () async {
+        final ambient = await AmbientAutoNATv2.create(mockHost, mockAutoNATv2, config: config);
+
+        // Boot delay (100 ms) plus two retry intervals (1 s).
+        await Future.delayed(const Duration(milliseconds: 2500));
+
+        verifyNever(mockAutoNATv2.getReachability(any));
+        expect(ambient.status, Reachability.unknown);
+        verify(mockEmitter.emit(argThat(predicate((event) =>
+                event is EvtLocalReachabilityChanged &&
+                event.reachability == Reachability.unknown))))
+            .called(1);
+        // No retry was scheduled: the host was asked for its addresses once.
+        verify(mockHost.addrs).called(1);
+
+        await ambient.close();
+      });
+
+      test('probes again when a direct public address appears', () async {
+        final result = _MockResult()..reachability = Reachability.public;
+        when(mockAutoNATv2.getReachability(any)).thenAnswer((_) async => result);
+
+        final ambient = await AmbientAutoNATv2.create(mockHost, mockAutoNATv2, config: config);
+        await Future.delayed(const Duration(milliseconds: 200));
+        verifyNever(mockAutoNATv2.getReachability(any));
+
+        when(mockHost.addrs).thenReturn([
+          MultiAddr(relayAddr),
+          MultiAddr('/ip4/5.6.7.8/udp/4001/udx'),
+        ]);
+        eventStreamController.add(EvtLocalAddressesUpdated(diffs: false, current: []));
+        await Future.delayed(const Duration(milliseconds: 1300));
+
+        final requests = verify(mockAutoNATv2.getReachability(captureAny)).captured.first as List<Request>;
+        expect(requests.map((r) => r.addr.toString()), ['/ip4/5.6.7.8/udp/4001/udx']);
+        expect(ambient.status, Reachability.public);
+
+        await ambient.close();
+      });
+    });
   });
 }
 

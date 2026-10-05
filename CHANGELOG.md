@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.7] - 2026-10-05
+
+### Fixed
+
+- **AutoNAT v2 probed a relay address and retried forever.** A host behind NAT often has only one public address: its relay address. The ambient AutoNAT v2 client sent that address to the AutoNAT server. When the relay was also the only AutoNAT server, the client removed the address again and the probe failed with `No valid addresses to check`. The client then tried again at `retryInterval`, with no end, and logged two warnings each time. A relay address tells nothing about the reachability of the host, so the client now probes only direct addresses, as in go-libp2p. This also applies to addresses from `addressFunc`. When no address is left to probe, the client records the reachability as unknown and waits for the next address change or AutoNAT server. It does not try again on a timer.
+
 ## [4.1.6] - 2026-10-05
 
 ### Fixed

@@ -147,7 +147,8 @@ class AmbientAutoNATv2 {
         try {
           await _executeProbe();
         } catch (e) {
-          _log.warning('Error executing probe: $e');
+          // _handleProbeError logs it at WARNING.
+          _log.fine('Error executing probe: $e');
           // Treat errors as unknown observations
           _handleProbeError(e);
         }
@@ -193,8 +194,11 @@ class AmbientAutoNATv2 {
     final addrs = _getAddressesToProbe();
 
     if (addrs.isEmpty) {
-      _log.fine('No addresses to probe');
-      _scheduleNextProbe(false);
+      // Nothing to check: for example, a host behind NAT whose only public
+      // address is a relay address. A retry gives the same result, so wait
+      // for the next address change or AutoNAT server instead.
+      _log.fine('No addresses to probe; waiting for an address change');
+      _recordObservation(Reachability.unknown);
       return;
     }
 
@@ -213,12 +217,17 @@ class AmbientAutoNATv2 {
   }
   
   List<MultiAddr> _getAddressesToProbe() {
+    // A relay address is reachable through its relay whatever this host's
+    // NAT does, so it says nothing about this host's reachability. As in
+    // go-libp2p, only direct addresses are checked.
+    bool isDirect(MultiAddr addr) => !addr.hasProtocol('p2p-circuit');
+
     if (_config.addressFunc != null) {
-      return _config.addressFunc!();
+      return _config.addressFunc!().where(isDirect).toList();
     }
     
     // Use host addresses, filtering for public addresses
-    var addrs = _host.addrs.where((addr) => addr.isPublic());
+    var addrs = _host.addrs.where((addr) => addr.isPublic() && isDirect(addr));
     
     // If ipv4Only is set, filter out IPv6 addresses.
     // This ensures relay reservations are created even if device has public IPv6,
