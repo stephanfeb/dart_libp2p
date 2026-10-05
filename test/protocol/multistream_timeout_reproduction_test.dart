@@ -270,10 +270,13 @@ void main() {
       );
     });
 
-    test('timeout with retry configuration', () async {
+    // A timed-out read is not retried, even when maxRetries is set: the
+    // abandoned read still waits on the stream, and a retry would compete
+    // with it for the same bytes.
+    test('a read timeout fails at once, whatever maxRetries is', () async {
       final config = const MultistreamConfig(
         readTimeout: Duration(seconds: 2),
-        maxRetries: 2, // Should retry twice before final timeout
+        maxRetries: 2,
         retryDelay: Duration(milliseconds: 100),
       );
       final muxer = MultistreamMuxer(config: config);
@@ -288,11 +291,9 @@ void main() {
 
       stopwatch.stop();
 
-      // With 2 retries, we expect roughly: 2s + 2s + 2s = 6s total
-      // Plus retry delays: 100ms + 200ms = 300ms
-      // Total should be around 6.3 seconds (with some tolerance)
-      expect(stopwatch.elapsed.inSeconds, greaterThanOrEqualTo(5));
-      expect(stopwatch.elapsed.inSeconds, lessThanOrEqualTo(8));
+      // One read timeout (2 s), not three.
+      expect(stopwatch.elapsed.inSeconds, greaterThanOrEqualTo(2));
+      expect(stopwatch.elapsed.inSeconds, lessThan(4));
     });
 
     test('stream cleanup after timeout', () async {

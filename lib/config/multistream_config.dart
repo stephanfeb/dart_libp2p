@@ -19,7 +19,9 @@ class MultistreamConfig {
   /// Timeout for individual read operations
   final Duration readTimeout;
   
-  /// Maximum number of retry attempts for transient failures
+  /// Not used. Multistream reads are no longer retried after a timeout
+  /// (since 4.1.5): the timed-out read still waits on the stream, and a
+  /// retry would compete with it. Kept so that existing code compiles.
   final int maxRetries;
   
   /// Whether to use progressive timeout strategy
@@ -34,7 +36,8 @@ class MultistreamConfig {
   /// Multiplier for timeout duration in progressive strategy
   final double timeoutMultiplier;
   
-  /// Delay between retry attempts
+  /// Not used, as [maxRetries] is not used. Kept so that existing code
+  /// compiles.
   final Duration retryDelay;
   
   /// Whether to enable detailed logging for timeout operations

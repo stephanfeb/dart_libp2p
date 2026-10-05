@@ -248,6 +248,15 @@ class UDXP2PStreamAdapter implements MuxedStream, P2PStream<Uint8List> {
     _isClosed = true;
     _isWriteClosed = true; // Mark write side as closed on full close
 
+    // A read that waits for data gets EOF. read() has no timeout of its own,
+    // so without this a reader such as yamux's read loop waits forever on a
+    // closed stream, and the connection above stays open until a write fails.
+    final pendingRead = _pendingReadCompleter;
+    _pendingReadCompleter = null;
+    if (pendingRead != null && !pendingRead.isCompleted) {
+      pendingRead.complete(Uint8List(0));
+    }
+
     _logger.fine('[UDXP2PStreamAdapter ${id()}] Cancelling UDXStream subscriptions.');
     await _udxStreamDataSubscription?.cancel();
     _udxStreamDataSubscription = null;

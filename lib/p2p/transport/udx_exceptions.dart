@@ -102,6 +102,9 @@ class UDXRetryConfig {
     enableJitter: true,
   );
   
+  /// No retry: the operation runs once.
+  static const UDXRetryConfig none = UDXRetryConfig(maxRetries: 0);
+
   /// Default retry config for regular nodes
   static const UDXRetryConfig regular = UDXRetryConfig(
     maxRetries: 3,

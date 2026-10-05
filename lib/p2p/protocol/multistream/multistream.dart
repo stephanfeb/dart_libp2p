@@ -85,7 +85,8 @@ class MultistreamMuxer implements ProtocolSwitch {
   /// Timeout for read operations (from config)
   Duration get readTimeout => config.readTimeout;
   
-  /// Maximum number of retry attempts for transient failures (from config)
+  /// The configured retry count. Not used: reads are not retried (see
+  /// [MultistreamConfig.maxRetries]).
   int get maxRetries => config.maxRetries;
   
   /// Helper function to create a full text match function
@@ -383,40 +384,21 @@ class MultistreamMuxer implements ProtocolSwitch {
     );
   }
 
-  /// Internal implementation of read delimited with timeout and retry logic
+  /// Internal implementation of read delimited with a timeout.
+  ///
+  /// A timed-out read is not retried. The abandoned read keeps waiting on the
+  /// stream, so a second read would compete with it for the same bytes, and a
+  /// message that was partly read would be split between the two. As in
+  /// go-libp2p, a timeout fails the negotiation.
   Future<Uint8List> _performReadDelimited(P2PStream<dynamic> stream) async {
-    int retryCount = 0;
-    
-    while (retryCount <= maxRetries) {
-      try {
-        return await _performSingleReadDelimited(stream);
-      } on TimeoutException catch (e) {
-        retryCount++;
-        _log.fine('[multistream] Read timeout (attempt $retryCount/${maxRetries + 1}): ${e.message}');
-        
-        if (retryCount > maxRetries) {
-          _log.severe('[multistream] Max retries exceeded for read operation');
-          rethrow;
-        }
-        
-        // Check if stream is still viable for retry
-        if (stream.isClosed) {
-          _log.fine('[multistream] Stream closed during retry, aborting');
-          throw FormatException('Stream closed during retry attempts');
-        }
-        
-        // Brief delay before retry to allow stream to recover
-        await Future.delayed(config.retryDelay * retryCount);
-        if (config.enableTimeoutLogging) {
-
-        }
-      }
+    try {
+      return await _performSingleReadDelimited(stream);
+    } on TimeoutException catch (e) {
+      _log.fine('[multistream] Read timed out: ${e.message}');
+      rethrow;
     }
-    
-    // Should never reach here due to rethrow above, but for safety
-    throw TimeoutException('Read operation failed after $maxRetries retries', readTimeout);
   }
-  
+
   /// Performs a single read delimited operation with timeout
   Future<Uint8List> _performSingleReadDelimited(P2PStream<dynamic> stream) async {
     // Validate stream state before starting

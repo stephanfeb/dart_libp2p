@@ -65,6 +65,10 @@ class UDXTransport implements Transport {
   @visibleForTesting
   ConnManager get connectionManager => _connManager;
 
+  /// The open sessions this transport dialed.
+  @visibleForTesting
+  Iterable<UDXSessionConn> get dialerSessions => _activeDialerConns;
+
   UDXTransport({
     TransportConfig? config,
     required ConnManager connManager,
@@ -109,11 +113,14 @@ class UDXTransport implements Transport {
 
     final effectiveTimeout = timeout ?? config.dialTimeout;
 
-    // Use UDX exception handler with retry logic for the entire dial operation
+    // One attempt, limited by the dial timeout. The swarm decides whether to
+    // try again or to use another address. Retrying here made one
+    // unreachable address hold a dial for minutes: each attempt waited out
+    // the full handshake timeout.
     return await UDXExceptionHandler.handleUDXOperation(
       () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect, reuseListenSocket),
       'UDXTransport.dial($addr)',
-      retryConfig: UDXRetryConfig.regular,
+      retryConfig: UDXRetryConfig.none,
     );
   }
 
@@ -211,6 +218,13 @@ class UDXTransport implements Transport {
 
       // Create initial stream to trigger handshake with timeout and exception handling
       _logger.fine('[UDXTransport._performDial] Creating outgoing UDXStream to $host:$port (localId: $localInitialStreamId, remoteId: $remoteInitialStreamId)');
+      // The stream creation and the handshake share one deadline, and each
+      // runs once: a retry would wait again on the same handshake.
+      final deadline = DateTime.now().add(effectiveTimeout);
+      Duration remaining() {
+        final left = deadline.difference(DateTime.now());
+        return left.isNegative ? Duration.zero : left;
+      }
       initialStream = await UDXExceptionHandler.handleUDXOperation(
         () => UDXExceptionUtils.withTimeout(
           UDXStream.createOutgoing(
@@ -221,10 +235,11 @@ class UDXTransport implements Transport {
             host,
             port,
           ),
-          effectiveTimeout,
+          remaining(),
           'UDXStream.createOutgoing($host:$port)',
         ),
         'UDXStream.createOutgoing($host:$port)',
+        retryConfig: UDXRetryConfig.none,
       );
       _logger.fine('[UDXTransport._performDial] Outgoing UDXStream created: ${initialStream!.id}');
 
@@ -236,10 +251,11 @@ class UDXTransport implements Transport {
         await UDXExceptionHandler.handleUDXOperation(
           () => UDXExceptionUtils.withTimeout(
             udpSocket!.handshakeComplete,
-            effectiveTimeout,
+            remaining(),
             'UDPSocket.handshakeComplete($host:$port)',
           ),
           'UDPSocket.handshakeComplete($host:$port)',
+          retryConfig: UDXRetryConfig.none,
         );
         final handshakeDuration = DateTime.now().difference(handshakeStart);
         _logger.fine('[UDXTransport._performDial] Handshake completed for $host:$port, duration: ${handshakeDuration.inMilliseconds}ms');
@@ -459,6 +475,10 @@ class UDXSessionConn implements MuxedConn, TransportConn {
 
   late final UDXP2PStreamAdapter initialP2PStream;
 
+  /// The dart_udx socket that carries this session.
+  @visibleForTesting
+  UDPSocket get udpSocket => _udpSocket;
+
   UDXSessionConn({
     required UDPSocket udpSocket,
     required UDXStream initialStream,
@@ -521,17 +541,22 @@ class UDXSessionConn implements MuxedConn, TransportConn {
         
         closeWithError(classifiedException, stackTrace);
       });
-
-      // Phase 1.2: UDX Socket Health Monitoring - UDPSocket close monitoring
-      _udpSocket.on('close').listen((event) {
-        final timeSinceOpen = DateTime.now().difference(_openedAt);
-        _logger.warning('[UDXSessionConn $id] UDP_SOCKET_CLOSED: reason=${event.data}, activeStreams=${_activeStreams.length}, time_since_open: ${timeSinceOpen.inMilliseconds}ms');
-      });
     } else {
       _nextOwnStreamId = 1; 
       _nextExpectedRemoteStreamId = 2; 
       _logger.fine('[UDXSessionConn $id] Listener stream IDs initialized: nextOwn=$_nextOwnStreamId, nextExpectedRemote=$_nextExpectedRemoteStreamId');
     }
+
+    // When the UDP socket closes (idle timeout, a close from dart_udx, or our
+    // own close below), the session cannot carry data any more. Close it, so
+    // its streams return EOF and the layers above drop the connection at once
+    // instead of when their next write fails.
+    _udpSocket.on('close').listen((event) {
+      if (_isClosed || _isClosing) return;
+      final timeSinceOpen = DateTime.now().difference(_openedAt);
+      _logger.warning('[UDXSessionConn $id] UDP_SOCKET_CLOSED: reason=${event.data}, activeStreams=${_activeStreams.length}, time_since_open: ${timeSinceOpen.inMilliseconds}ms. Closing session.');
+      close();
+    });
 
     _logger.fine('[UDXSessionConn $id] Subscribing to initialStream closeEvents.');
     _initialStreamCloseSubscription = _initialStream.closeEvents.listen(

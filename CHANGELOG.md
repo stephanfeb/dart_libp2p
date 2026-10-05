@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.5] - 2026-10-05
+
+### Fixed
+
+- **A dead UDX connection stayed in the swarm for about 30 s.** When a UDX session closed under the connection (for example, when its UDP socket closed), a read that waited for data was not stopped. Yamux's read loop waited forever, and the swarm kept the connection until a write or a keepalive ping failed. In that time, new streams to the peer failed with `Session is closing or closed`, and messages that the peer pushed were lost. A closed stream now ends a waiting read with EOF, and a session closes when its UDP socket closes. The swarm now drops the connection at once, and the next stream to the peer dials again.
+- **One unreachable UDX address held a dial for minutes.** The handshake was tried 4 times in each of 4 dial attempts, and each try waited for the full dial timeout. The stream setup and the handshake now run once and share one dial timeout. The swarm decides whether to try again or to use another address.
+- **A multistream read was tried again after a timeout.** The read that timed out continued to wait on the stream. The next try then competed with it for the same bytes, and a message that was partly read could be split between the two. A read timeout now fails the negotiation, as in go-libp2p. `MultistreamConfig.maxRetries` and `retryDelay` are no longer used; they stay so that existing code compiles.
+
 ## [4.1.4] - 2026-10-05
 
 The test suite passes again, apart from the hole-punching tests that need a Docker NAT network. Fixing the 34 failures found these library bugs:
