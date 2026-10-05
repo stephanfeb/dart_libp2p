@@ -24,6 +24,15 @@ iptables -t filter -N SYMM_FORWARD 2>/dev/null || iptables -t filter -F SYMM_FOR
 # Don't change default policies to avoid breaking Docker networking
 iptables -P FORWARD ACCEPT  # Keep Docker networking working
 
+# Like a home router, drop unsolicited packets addressed to the router
+# itself on its WAN side. This matters for hole punching: a packet that is
+# accepted here creates a conntrack entry for its address pair, and the NAT
+# then gives an outgoing punch for the same pair a different port. A dropped
+# packet leaves no entry. (A dial that lost to a relay address sends such
+# packets to the peer's listen port, for its whole dial timeout.)
+iptables -A INPUT -i ${EXTERNAL_IF} -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -i ${EXTERNAL_IF} -j DROP
+
 # Enable forwarding between interfaces for established connections
 # Use -I (INSERT) at specific positions to place rules BEFORE Docker's isolation rules
 # Docker adds FORWARD rules that can block inter-network traffic, so we must insert first

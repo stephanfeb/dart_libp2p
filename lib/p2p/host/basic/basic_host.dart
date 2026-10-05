@@ -54,6 +54,7 @@ import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/listener.dart';
 import 'package:dart_libp2p/p2p/transport/transport.dart';
 import 'package:dart_libp2p/p2p/transport/transport_config.dart';
+import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 
 final _log = Logger('basichost');
 
@@ -1631,9 +1632,20 @@ class _BorrowedTransport implements Transport {
   @override
   TransportConfig get config => _inner.config;
 
+  /// A UDX dial-back leaves from a fresh socket, as from go-libp2p's
+  /// separate dialer host. From the listen socket it would pass through a
+  /// NAT mapping that the peer already has open, and so report an address
+  /// as reachable when it is not. Its unanswered packets also changed the
+  /// NAT state for that socket, and a DCUtR hole punch from that socket
+  /// that followed then failed.
   @override
-  Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) =>
-      _inner.dial(addr, timeout: timeout, simultaneousConnect: simultaneousConnect);
+  Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) {
+    final inner = _inner;
+    if (inner is UDXTransport) {
+      return inner.dialFromEphemeralSocket(addr, timeout: timeout);
+    }
+    return inner.dial(addr, timeout: timeout, simultaneousConnect: simultaneousConnect);
+  }
 
   @override
   Future<Listener> listen(MultiAddr addr) => _inner.listen(addr);

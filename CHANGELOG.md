@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.9] - 2026-10-05
+
+### Fixed
+
+- **An AutoNAT v2 dial-back over UDX left from the listen socket.** Since 4.1.1, an ordinary UDX dial to a remote peer leaves from the listen socket, so that the peer observes our listen address. The AutoNAT v2 server's dial-back host borrows the same transport, so its dial-backs also left from the listen socket. A dial-back from there can pass through a NAT mapping that the client already has open, and so report an address as reachable when it is not. Its packets also went to the client's listen port from our punch socket before any hole punch, and a DCUtR hole punch between the two peers that followed then failed. A UDX dial-back now leaves from a fresh socket, as from go-libp2p's separate dialer host.
+
+### Tests
+
+- The hole-punch Docker harness NAT gateways now drop unsolicited packets to the gateway itself on the WAN side, as a home router does. Before, such a packet (for example, from a direct dial that lost to a relay address) made a conntrack entry for its address pair, and the gateway then sent the hole punch for the same pair from another port. With this and the dial-back fix, `run_dcutr_scenario.sh` passes again (3/3).
+
 ## [4.1.8] - 2026-10-05
 
 ### Fixed
