@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.6] - 2026-10-05
+
+### Fixed
+
+- **A UDX connection died 30 s after it opened when two dials to the same peer started at once.** For example, two services that start together each call `connect()`. The two dials shared one UDX socket. The second dial waited on a socket that the first dial had already set up, timed out after 15 s, and its cleanup closed the shared socket. The connection that the first dial made then stopped 30 s after it opened, although the peer did not close it. Two changes fix this:
+  - Concurrent `dialPeer` calls to the same peer now join one dial, as in go-libp2p. A dial with `forceDirectDial` or `forceFreshDial` joins only a dial with the same options.
+  - Each UDX dial is now its own UDX connection (dart_udx 4.1.0, `createSocket(shared: false)`), so closing one dial cannot close another.
+
+### Changed
+
+- Requires `dart_udx` ^4.1.0.
+
 ## [4.1.5] - 2026-10-05
 
 ### Fixed

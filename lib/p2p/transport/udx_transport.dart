@@ -199,9 +199,11 @@ class UDXTransport implements Transport {
         _logger.fine('[UDXTransport._performDial] UDXMultiplexer created');
       }
 
-      // Create UDPSocket through multiplexer with exception handling
+      // Each dial is its own UDX connection. A shared socket also shares its
+      // close: a second dial to the same address that gave up closed the
+      // first dial's connection.
       udpSocket = await UDXExceptionHandler.handleUDXOperation(
-        () async => multiplexer!.createSocket(_udxInstance, host, port),
+        () async => multiplexer!.createSocket(_udxInstance, host, port, shared: false),
         'UDXMultiplexer.createSocket($host:$port)',
       );
       _logger.fine('[UDXTransport._performDial] UDPSocket created through multiplexer');

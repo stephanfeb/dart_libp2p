@@ -99,6 +99,10 @@ class Swarm implements Network {
   /// Track connections being upgraded (to avoid race condition during upgrade)
   final Map<String, Completer<SwarmConn>> _upgradingConnections = {};
 
+  /// Dials in progress, keyed by peer and dial options. A second [dialPeer]
+  /// call for the same key joins the dial in progress, as in go-libp2p.
+  final Map<String, Future<Conn>> _activeDials = {};
+
   /// Whether the swarm is closed
   bool _isClosed = false;
 
@@ -717,7 +721,27 @@ class Swarm implements Network {
   PeerId get localPeer => _localPeer;
 
   @override
-  Future<Conn> dialPeer(Context context, PeerId peerId) async {
+  Future<Conn> dialPeer(Context context, PeerId peerId) {
+    // Concurrent dials to one peer give one dial. Two separate dials made
+    // two connections, and the dial that lost could close what the other
+    // dial was still using. A dial with other options (forceDirectDial,
+    // forceFreshDial) does not join a dial without them.
+    final key = '${peerId.toString()}'
+        '|${context.getForceDirectDial().$1}|${context.getForceFreshDial().$1}';
+    final active = _activeDials[key];
+    if (active != null) {
+      _logger.fine('Swarm.dialPeer: joining the dial in progress to $peerId');
+      return active;
+    }
+    final dial = _dialPeer(context, peerId);
+    _activeDials[key] = dial;
+    dial.whenComplete(() {
+      if (identical(_activeDials[key], dial)) _activeDials.remove(key);
+    }).ignore();
+    return dial;
+  }
+
+  Future<Conn> _dialPeer(Context context, PeerId peerId) async {
     _logger.fine('Swarm.dialPeer: peer=${peerId.toBase58()}, existing_conns=${_connections.length}');
     
     // Check if we're closed
