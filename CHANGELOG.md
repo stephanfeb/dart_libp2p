@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-10-06
+
+### Fixed
+
+- **A hole punch that the peer completed was reported as failed.** Both peers often start a DCUtR hole punch at the same time. When the peer's punch succeeded first, the relayed connection that carried ours could close, and our protocol exchange failed with `Unexpected EOF`. `HolePunchService.directConnect` then threw, although a direct connection to the peer existed. It now checks for a direct connection after a failed attempt, and returns when one exists.
+
+### Tests
+
+- **Hole-punch Docker harness.** The harness passes 8 of 8 runs (4 Dart, 4 go-libp2p); before, 1 in 3 to 1 in 4 runs failed.
+  - The control API is now called from inside each container (`docker exec ... curl`). Through the published host ports, Docker Desktop sometimes never delivered the requests to a peer on two networks, and the run stopped with "peers did not come up" (dart-libp2p-1pg).
+  - With the NAT gateways now dropping unsolicited WAN input (4.1.9), a punch that reaches the other NAT first no longer makes a conntrack entry that changes the other punch's port (dart-libp2p-725).
+  - The integration test's `ContainerOrchestrator.stop()` always removes the containers. Before, a start that failed while waiting for the services left them running, and their fixed names made the next start fail.
+
 ## [4.2.0] - 2026-10-06
 
 ### Added

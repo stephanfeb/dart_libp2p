@@ -45,9 +45,11 @@ class ContainerOrchestrator {
   }
 
   /// Stop and clean up containers
+  ///
+  /// Runs even when [start] did not complete: `compose up` may have started
+  /// the containers before the wait for the services failed, and containers
+  /// left running keep their fixed names, so the next start fails.
   Future<void> stop() async {
-    if (!_isStarted) return;
-
     print('🛑 Stopping container topology...');
     
     try {
@@ -186,42 +188,39 @@ class ContainerOrchestrator {
     String method,
     Map<String, dynamic>? body,
   ) async {
-    // Map container names to their host-mapped ports
-    final portMappings = {
-      'peer-a': 8081,
-      'peer-b': 8082, 
-      'relay-server': 8083,
-    };
-    
-    final port = portMappings[containerName];
-    if (port == null) {
-      throw ContainerException('No port mapping configured for container $containerName');
+    // The request runs inside the container, on its own control port. Through
+    // the published host ports (8081-8083), Docker Desktop sometimes never
+    // delivered the requests to a container on two networks, and startup
+    // failed with the peer "not responding" (dart-libp2p-1pg).
+    final result = await Process.run('docker', [
+      'exec',
+      containerName,
+      'curl',
+      '-s',
+      '-m', '60',
+      '-X', method,
+      '-w', '\n%{http_code}',
+      if (body != null) ...['-H', 'Content-Type: application/json', '-d', jsonEncode(body)],
+      'http://localhost:8080$path',
+    ]);
+    if (result.exitCode != 0) {
+      throw ContainerException(
+        'HTTP $method $path to $containerName failed: curl exit ${result.exitCode} ${result.stderr}',
+      );
     }
-    
-    // Make HTTP request to localhost with mapped port
-    final client = HttpClient();
-    try {
-      final uri = Uri.parse('http://localhost:$port$path');
-      final request = await client.openUrl(method, uri);
-      
-      if (body != null) {
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(body));
-      }
-      
-      final response = await request.close();
-      final responseBody = await utf8.decoder.bind(response).join();
-      
-      if (response.statusCode >= 400) {
-        throw ContainerException(
-          'HTTP $method $path failed with ${response.statusCode}: $responseBody',
-        );
-      }
-      
-      return jsonDecode(responseBody) as Map<String, dynamic>;
-    } finally {
-      client.close();
+
+    final output = (result.stdout as String).trimRight();
+    final split = output.lastIndexOf('\n');
+    final statusCode = int.tryParse(output.substring(split + 1)) ?? 0;
+    final responseBody = split < 0 ? '' : output.substring(0, split);
+
+    if (statusCode >= 400 || statusCode == 0) {
+      throw ContainerException(
+        'HTTP $method $path failed with $statusCode: $responseBody',
+      );
     }
+
+    return jsonDecode(responseBody) as Map<String, dynamic>;
   }
 
   Future<String> _runDockerCompose(List<String> args) async {

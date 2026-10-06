@@ -26,9 +26,23 @@ mkdir -p "$OUT"
 DC="docker compose -p $PROJECT -f $COMPOSE"
 
 json() { python3 -c "import sys,json; d=json.loads(sys.argv[1]); print($1)" "$2"; }
+
+# Calls a peer's control API from inside its container. Through the
+# published host port (8081/8082), Docker Desktop sometimes never delivered
+# the requests to a peer on two networks, and the run failed with "peers did
+# not come up" (dart-libp2p-1pg).
+#   api <container> <timeout-seconds> <method> <path> [json-body]
+api() {
+  local c=$1 t=$2 m=$3 path=$4
+  if [ $# -ge 5 ]; then
+    docker exec "$c" curl -s -m "$t" -X "$m" "localhost:8080$path" -d "$5"
+  else
+    docker exec "$c" curl -s -m "$t" -X "$m" "localhost:8080$path"
+  fi
+}
 status() {
   for _ in $(seq 1 40); do
-    r=$(curl -sf -m 5 "localhost:$1/status") && [ -n "$r" ] && { echo "$r"; return; }
+    r=$(api "$1" 5 GET /status 2>/dev/null) && [[ "$r" == *peer_id* ]] && { echo "$r"; return; }
     sleep 3
   done
 }
@@ -43,7 +57,7 @@ echo "Building and starting containers ($PROJECT)..."
 cleanup
 $DC up -d --build >"$OUT/compose-up.log" 2>&1 || { echo "compose up failed, see $OUT/compose-up.log"; exit 2; }
 
-A=$(status 8081); B=$(status 8082)
+A=$(status peer-a); B=$(status peer-b)
 [ -n "$A" ] && [ -n "$B" ] || { echo "peers did not come up"; exit 2; }
 sleep 10 # let the NAT gateways and relay connections settle
 AID=$(json 'd["peer_id"]' "$A"); BID=$(json 'd["peer_id"]' "$B")
@@ -51,12 +65,12 @@ echo "peer-a $AID"; echo "peer-b $BID"
 
 # Reserve on the relay and introduce each peer to the other with its
 # external address and circuit address.
-RA=$(curl -s -m 30 -XPOST localhost:8081/reserve); RB=$(curl -s -m 30 -XPOST localhost:8082/reserve)
+RA=$(api peer-a 30 POST /reserve); RB=$(api peer-b 30 POST /reserve)
 echo "reserve A: $RA" >"$OUT/reserve.txt"; echo "reserve B: $RB" >>"$OUT/reserve.txt"
 addrs() { python3 -c 'import sys,json; s=json.loads(sys.argv[1]); r=json.loads(sys.argv[2]); print(json.dumps([a for a in s["addresses"] if "p2p-circuit" not in a] + [r["circuit"]]))' "$1" "$2"; }
 AADDRS=$(addrs "$A" "$RA"); BADDRS=$(addrs "$B" "$RB")
-curl -s -XPOST localhost:8081/connect -d "{\"peer_id\":\"$BID\",\"addrs\":$BADDRS}" >/dev/null
-curl -s -XPOST localhost:8082/connect -d "{\"peer_id\":\"$AID\",\"addrs\":$AADDRS}" >/dev/null 2>&1 || true
+api peer-a 30 POST /connect "{\"peer_id\":\"$BID\",\"addrs\":$BADDRS}" >/dev/null
+api peer-b 30 POST /connect "{\"peer_id\":\"$AID\",\"addrs\":$AADDRS}" >/dev/null 2>&1 || true
 
 for g in a b; do
   docker exec -d nat-gateway-$g sh -c "timeout 60 tcpdump -n -i any -w /tmp/dcutr.pcap udp and not port 3478 2>/dev/null"
@@ -65,13 +79,13 @@ sleep 1
 
 # A relayed ping opens the relayed connection. A go-libp2p peer-b starts
 # DCUtR on its own when it accepts it; for Dart peers, A starts it.
-echo "ping over relay: $(curl -s -m 20 -XPOST localhost:8081/ping -d "{\"peer_id\":\"$BID\"}" | cut -c1-120)"
+echo "ping over relay: $(api peer-a 20 POST /ping "{\"peer_id\":\"$BID\"}" | cut -c1-120)"
 if [ "$PROJECT" = "holepunch" ]; then
-  echo "holepunch: $(curl -s -m 45 -XPOST localhost:8081/holepunch -d "{\"peer_id\":\"$BID\"}" | cut -c1-200)"
+  echo "holepunch: $(api peer-a 45 POST /holepunch "{\"peer_id\":\"$BID\"}" | cut -c1-200)"
 fi
 sleep 25
 
-CONNS=$(curl -s -m 5 localhost:8081/conns)
+CONNS=$(api peer-a 5 GET /conns)
 echo "$CONNS" >"$OUT/peer-a-conns.json"
 for g in a b; do docker exec nat-gateway-$g sh -c "tcpdump -n -r /tmp/dcutr.pcap 2>/dev/null" >"$OUT/nat-gateway-$g.pcap.txt" 2>/dev/null; done
 

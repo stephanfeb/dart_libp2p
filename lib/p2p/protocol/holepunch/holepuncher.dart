@@ -200,8 +200,20 @@ class HolePuncher {
           _tracer?.endHolePunch(peerId, dt, err);
         }
       } catch (err) {
+        // The peer often starts a hole punch of its own at the same time.
+        // When that one succeeds, the relayed connection that carries ours
+        // can close under it, and ours fails although the goal is reached.
+        if (getDirectConnection(_host, peerId) != null) {
+          _log.fine('Hole punch protocol failed ($err), but a direct connection to $peerId exists now');
+          return;
+        }
         _tracer?.protocolError(peerId, err);
         rethrow;
+      }
+
+      if (getDirectConnection(_host, peerId) != null) {
+        _log.fine('Hole punch attempt failed, but a direct connection to $peerId exists now');
+        return;
       }
 
       if (i == maxRetries) {

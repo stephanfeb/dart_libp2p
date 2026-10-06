@@ -3,6 +3,7 @@ import 'dart:io' show InternetAddress, RawDatagramSocket;
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/multiaddr.dart';
+import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
@@ -21,6 +22,15 @@ import 'holepunch_basic_test.mocks.dart';
 class _EmptyAddrBook implements AddrBook {
   @override
   Future<List<MultiAddr>> addrs(PeerId p) async => [];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A connection that is direct (not relayed), for getDirectConnection.
+class _DirectConn implements Conn {
+  @override
+  MultiAddr get remoteMultiaddr => MultiAddr('/ip4/5.6.7.8/udp/4001/udx');
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -93,6 +103,31 @@ void main() {
       await expectLater(puncher.directConnect(remote), throwsA(anything));
       verify(host.newStream(any, any, any)).called(1);
     });
+  });
+
+  // Both peers often start a hole punch at the same time. When the peer's
+  // punch succeeds first, the relayed connection that carries ours can close,
+  // and our protocol exchange fails although a direct connection now exists.
+  test('a direct connection made meanwhile counts as success', () async {
+    final host = MockHost();
+    final network = MockNetwork();
+    final peerstore = MockPeerstore();
+    final remote = await PeerId.random();
+    when(host.id).thenReturn(await PeerId.random());
+    when(host.network).thenReturn(network);
+    when(host.peerStore).thenReturn(peerstore);
+    when(peerstore.addrBook).thenReturn(_EmptyAddrBook());
+    var punched = false;
+    when(network.connsToPeer(any)).thenAnswer((_) => punched ? [_DirectConn()] : []);
+    when(host.newStream(any, any, any)).thenAnswer((_) async {
+      punched = true; // the peer's punch wins while ours is under way
+      throw Exception('Unexpected EOF while reading byte');
+    });
+
+    final puncher = HolePuncher(host, MockIDService(), () => [MultiAddr('/ip4/9.9.9.9/udp/4001/udx')]);
+
+    await puncher.directConnect(remote);
+    verify(host.newStream(any, any, any)).called(1);
   });
 
   // A hole punch dial waits 5 s, as in go-libp2p, not the 15-s dial timeout.
