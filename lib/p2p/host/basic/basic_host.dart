@@ -367,26 +367,29 @@ class BasicHost implements Host {
       _log.fine('[BasicHost start] Emitted forced reachability event');
     }
 
-    // Initialize AutoNAT v2 service if enabled
-    if (_config.enableAutoNAT) {
+    // Initialize AutoNAT v2 service if enabled. Only the server dials back,
+    // so a host without it needs no dial-back host.
+    final autoNATServer = _config.enableAutoNATv2Server;
+    if (_config.enableAutoNAT && autoNATServer) {
       try {
         _autoNATDialerHost = await _newAutoNATDialerHost();
       } catch (e) {
         _log.warning('AutoNAT disabled: could not create its dial-back host: $e');
       }
     }
-    if (_autoNATDialerHost != null) {
+    if (_config.enableAutoNAT && (_autoNATDialerHost != null || !autoNATServer)) {
       _log.fine('[BasicHost start] Before AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
       
       // First create the underlying AutoNATv2 protocol implementation
       // This starts the AutoNAT v2 SERVER (to provide service to other peers)
       final autoNATv2 = AutoNATv2Impl(
         this,
-        _autoNATDialerHost!,
+        _autoNATDialerHost ?? this, // not used without the server
         options: _config.autoNATv2Options, // Use options from config
+        enableServer: autoNATServer,
       );
       await autoNATv2.start();
-      _log.fine('[BasicHost start] AutoNATv2 server started (providing service to other peers)');
+      _log.fine('[BasicHost start] AutoNATv2 started (server: $autoNATServer)');
       
       // Only wrap with ambient orchestrator if forceReachability is NOT set
       // CRITICAL: Skip ambient probing when forceReachability is set to avoid contradicting the forced status

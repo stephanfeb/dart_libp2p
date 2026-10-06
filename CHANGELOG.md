@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-10-06
+
+### Added
+
+- **The AutoNAT v2 server can be turned off, and the client kept.** `enableAutoNAT` ran both the AutoNAT v2 client (this host checks its own reachability) and the server (this host answers other peers' checks with a dial-back). A host that is usually behind NAT, such as a phone, is a poor server: each check costs it a dial-back, and a dial-back that fails because of the phone's own network (for example, no IPv6) tells the other peer that its address is unreachable. `Libp2p.autoNATv2Server(false)` (or `Config.enableAutoNATv2Server = false`) keeps the client and removes the server, and the host then makes no dial-back host. `AutoNATv2Impl` takes `enableServer`. The default does not change: the server runs, as in go-libp2p.
+
 ## [4.1.9] - 2026-10-05
 
 ### Fixed

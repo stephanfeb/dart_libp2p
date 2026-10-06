@@ -94,6 +94,14 @@ class Config {
   bool enableRelay = false; // Default to false for Relay service
   bool enableAutoRelay = false; // Default to false for AutoRelay service
   bool enableAutoNAT = false; // Default to false for AutoNAT service
+
+  /// Whether the AutoNAT v2 service also answers other peers' reachability
+  /// checks (the server). Only used when [enableAutoNAT] is true. Turn it
+  /// off on a host that is usually behind NAT, such as a phone: each check
+  /// costs a dial-back, and a dial-back that fails because of this host's
+  /// own network reports the other peer's address as unreachable. The host
+  /// still checks its own reachability (the client).
+  bool enableAutoNATv2Server = true;
   bool enableHolePunching = true; // Default to true for Hole Punching service
 
   // AutoNATv2 specific configurations
@@ -374,6 +382,12 @@ extension ConfigOptions on Config {
     enableAutoNAT = enabled;
   }
 
+  /// Configures whether AutoNAT v2 answers other peers' reachability checks.
+  /// See [enableAutoNATv2Server].
+  Future<void> withAutoNATv2Server(bool enabled) async {
+    enableAutoNATv2Server = enabled;
+  }
+
   /// Configures libp2p to enable/disable the Hole Punching service.
   Future<void> withHolePunching(bool enabled) async {
     enableHolePunching = enabled;
@@ -536,6 +550,12 @@ class Libp2p {
 
   static Option autoNAT(bool enabled) {
     return (config) => config.withAutoNAT(enabled);
+  }
+
+  /// Whether AutoNAT v2 answers other peers' reachability checks. See
+  /// [Config.enableAutoNATv2Server].
+  static Option autoNATv2Server(bool enabled) {
+    return (config) => config.withAutoNATv2Server(enabled);
   }
   
   /// Configures the dial timeout for direct connections.

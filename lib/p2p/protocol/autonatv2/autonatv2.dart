@@ -25,6 +25,10 @@ class AutoNATv2Impl implements AutoNATv2 {
   final AutoNATv2Server server;
   final AutoNATv2Client client;
 
+  /// Whether [start] runs the [server]. Without it, this host only checks
+  /// its own reachability and does not answer other peers' checks.
+  final bool serverEnabled;
+
   final _PeersMap _peers = _PeersMap();
   final Subscription? _subscription;
 
@@ -32,8 +36,9 @@ class AutoNATv2Impl implements AutoNATv2 {
   ///
   /// [host] and [dialerHost] should have the same dialing capabilities. In case the host doesn't support
   /// a transport, dial back requests for address for that transport will be ignored.
-  AutoNATv2Impl(Host host, Host dialerHost, {List<AutoNATv2Option>? options})
+  AutoNATv2Impl(Host host, Host dialerHost, {List<AutoNATv2Option>? options, bool enableServer = true})
       : host = host,
+        serverEnabled = enableServer,
         allowPrivateAddrs = _applyOptions(options).allowPrivateAddrs,
         server = AutoNATv2ServerImpl(host, dialerHost, _applyOptions(options)),
         client = AutoNATv2ClientImpl(host),
@@ -66,7 +71,7 @@ class AutoNATv2Impl implements AutoNATv2 {
   @override
   Future<void> start() async {
     client.start();
-    server.start();
+    if (serverEnabled) server.start();
 
     // Process events for peer discovery
     _subscription?.stream.listen((event) {
@@ -83,7 +88,7 @@ class AutoNATv2Impl implements AutoNATv2 {
   @override
   Future<void> close() async {
     await _subscription?.close();
-    server.close();
+    if (serverEnabled) server.close();
     client.close();
   }
 
