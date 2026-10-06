@@ -173,16 +173,35 @@ class ContainerOrchestrator {
         ? Duration(seconds: 20) // Longer timeout for status checks during startup
         : Duration(seconds: 10));
     
+    final response = await _request(containerName, path, method, body, timeout);
+    return response as Map<String, dynamic>;
+  }
+
+  /// Gets a peer's open connections from its `/conns` endpoint, each as
+  /// {peer_id, remote_addr, relayed}.
+  Future<List<Map<String, dynamic>>> getConnections(String containerName) async {
+    final response =
+        await _request(containerName, '/conns', 'GET', null, Duration(seconds: 10));
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  Future<dynamic> _request(
+    String containerName,
+    String path,
+    String method,
+    Map<String, dynamic>? body,
+    Duration timeout,
+  ) async {
     try {
       return await _performHttpRequest(containerName, path, method, body).timeout(timeout);
-    } on TimeoutException catch (e) {
+    } on TimeoutException {
       throw ContainerException(
         'HTTP $method $path to $containerName timed out after ${timeout.inSeconds}s',
       );
     }
   }
 
-  Future<Map<String, dynamic>> _performHttpRequest(
+  Future<dynamic> _performHttpRequest(
     String containerName,
     String path, 
     String method,
@@ -220,7 +239,7 @@ class ContainerOrchestrator {
       );
     }
 
-    return jsonDecode(responseBody) as Map<String, dynamic>;
+    return jsonDecode(responseBody);
   }
 
   Future<String> _runDockerCompose(List<String> args) async {

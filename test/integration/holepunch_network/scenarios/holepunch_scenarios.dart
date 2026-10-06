@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import '../utils/container_orchestrator.dart';
 
 /// Base class for holepunch integration test scenarios
@@ -81,72 +82,90 @@ class ConeToConeSucessScenario extends HolePunchScenario {
     print('✅ ConeToConeSucessScenario setup complete');
   }
 
+  // Steps follow scripts/run_dcutr_scenario.sh. Each peer reserves a slot on
+  // the relay at its public_net address (100.70.3.10), so the relayed
+  // connection and the punch go through the NAT gateways. Status addresses
+  // also have a circuit through the relay's control_net address, which the
+  // peers reach directly, not through their NATs (dart-libp2p-8rm).
   @override
   Future<ScenarioResult> execute() async {
-    // Get peer IDs and addresses
     final peerAStatus = await orchestrator.sendControlRequest('peer-a', '/status');
     final peerBStatus = await orchestrator.sendControlRequest('peer-b', '/status');
-    
     final peerAId = peerAStatus['peer_id'] as String;
     final peerBId = peerBStatus['peer_id'] as String;
-    final peerAAddrs = List<String>.from(peerAStatus['addresses'] as List);
-    final peerBAddrs = List<String>.from(peerBStatus['addresses'] as List);
-
-    print("Address list for Peer A : ${peerAAddrs}");
-    print("Address list for Peer B : ${peerBAddrs}");
-
     print('👥 Peer A ID: $peerAId');
     print('👥 Peer B ID: $peerBId');
-    
-    // Introduce peers to each other via peerstore
-    print('🤝 Introducing peer B to peer A...');
-    await orchestrator.sendControlRequest(
-      'peer-a',
-      '/connect',
-      method: 'POST',
-      body: {'peer_id': peerBId, 'addrs': peerBAddrs},
-    );
-    
-    print('🤝 Introducing peer A to peer B...');
-    await orchestrator.sendControlRequest(
-      'peer-b',
-      '/connect',
-      method: 'POST',
-      body: {'peer_id': peerAId, 'addrs': peerAAddrs},
-    );
-    
-    // Wait for peer introductions to settle
-    await Future.delayed(Duration(seconds: 1));
-    
-    // Initiate holepunch from A to B
-    print('🕳️  Initiating holepunch from A to B...');
-    final holepunchResult = await orchestrator.sendControlRequest(
-      'peer-a',
-      '/holepunch',
-      method: 'POST',
-      body: {'peer_id': peerBId},
-    );
-    
-    print('📡 Holepunch result: $holepunchResult');
-    
-    // Wait for holepunch to complete
-    await Future.delayed(Duration(seconds: 15));
-    
-    // Verify direct connection was established
-    final finalStatusA = await orchestrator.sendControlRequest('peer-a', '/status');
-    final finalStatusB = await orchestrator.sendControlRequest('peer-b', '/status');
-    
-    final connectedPeersA = finalStatusA['connected_peers'] as int;
-    final connectedPeersB = finalStatusB['connected_peers'] as int;
-    
-    if (connectedPeersA > 0 && connectedPeersB > 0) {
-      return ScenarioResult.success(
-        'Direct connection established. A connected to $connectedPeersA peers, B connected to $connectedPeersB peers',
-      );
-    } else {
-      return ScenarioResult.failure(
-        'Direct connection failed. A: $connectedPeersA peers, B: $connectedPeersB peers',
-      );
+
+    print('🎫 Reserving relay slots...');
+    final reserveA = await orchestrator.sendControlRequest('peer-a', '/reserve',
+        method: 'POST', timeout: Duration(seconds: 30));
+    final reserveB = await orchestrator.sendControlRequest('peer-b', '/reserve',
+        method: 'POST', timeout: Duration(seconds: 30));
+
+    List<String> introAddrs(Map<String, dynamic> status, Map<String, dynamic> reserve) => [
+          ...List<String>.from(status['addresses'] as List)
+              .where((a) => !a.contains('p2p-circuit')),
+          reserve['circuit'] as String,
+        ];
+    final peerAAddrs = introAddrs(peerAStatus, reserveA);
+    final peerBAddrs = introAddrs(peerBStatus, reserveB);
+    print('📍 Peer A addresses: $peerAAddrs');
+    print('📍 Peer B addresses: $peerBAddrs');
+
+    print('🤝 Introducing the peers to each other...');
+    await orchestrator.sendControlRequest('peer-a', '/connect',
+        method: 'POST', body: {'peer_id': peerBId, 'addrs': peerBAddrs}, timeout: Duration(seconds: 30));
+    try {
+      await orchestrator.sendControlRequest('peer-b', '/connect',
+          method: 'POST', body: {'peer_id': peerAId, 'addrs': peerAAddrs}, timeout: Duration(seconds: 30));
+    } on ContainerException catch (e) {
+      // Peer A may already be connected through the relay; the addresses are
+      // in peer B's peerstore all the same.
+      print('ℹ️ Introducing peer A to peer B: $e');
+    }
+
+    // A relayed ping opens the relayed connection that DCUtR runs over.
+    final ping = await orchestrator.sendControlRequest('peer-a', '/ping',
+        method: 'POST', body: {'peer_id': peerBId}, timeout: Duration(seconds: 20));
+    print('🏓 Ping over relay: $ping');
+
+    // The /holepunch response is only for information: if peer B completes
+    // the punch first, peer A's attempt can fail and the punch still succeeds.
+    try {
+      final holepunch = await orchestrator.sendControlRequest('peer-a', '/holepunch',
+          method: 'POST', body: {'peer_id': peerBId});
+      print('🕳️ Holepunch result: $holepunch');
+    } on ContainerException catch (e) {
+      print('🕳️ Holepunch request failed: $e');
+    }
+
+    await Future.delayed(Duration(seconds: 25));
+
+    final conns = await orchestrator.getConnections('peer-a');
+    print('🔌 Peer A connections: $conns');
+    final direct = conns
+        .where((c) => c['peer_id'] == peerBId && c['relayed'] != true)
+        .map((c) => c['remote_addr'])
+        .toList();
+    if (direct.isNotEmpty) {
+      return ScenarioResult.success('Direct connection to peer B via ${direct.join(', ')}');
+    }
+    final result = ScenarioResult.failure('No direct connection to peer B (connections: $conns)');
+    await _saveLogs();
+    return result;
+  }
+
+  /// Writes the full container logs to a temporary directory, because the
+  /// scenario prints only the last lines of the peer logs.
+  Future<void> _saveLogs() async {
+    try {
+      final dir = await Directory.systemTemp.createTemp('cone-to-cone-');
+      for (final c in ['peer-a', 'peer-b', 'relay-server', 'nat-gateway-a', 'nat-gateway-b']) {
+        await File('${dir.path}/$c.log').writeAsString(await orchestrator.getLogs(c));
+      }
+      print('📁 Container logs saved to ${dir.path}');
+    } catch (e) {
+      print('⚠️ Failed to save logs: $e');
     }
   }
 

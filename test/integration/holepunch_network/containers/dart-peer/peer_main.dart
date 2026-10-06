@@ -402,8 +402,6 @@ class IntegrationTestPeer {
     }
   }
 
-  /// Reserves a slot on the first configured relay directly and returns our
-  /// full circuit address, without waiting for AutoRelay to find the relay.
   /// Lists every open connection as {peer_id, remote_addr, relayed}, so a
   /// scenario can tell a hole-punched connection from a relayed one.
   Future<void> _handleConnsRequest(HttpRequest request) async {
@@ -419,6 +417,8 @@ class IntegrationTestPeer {
     await request.response.close();
   }
 
+  /// Reserves a slot on the first configured relay directly and returns our
+  /// full circuit address, without waiting for AutoRelay to find the relay.
   Future<void> _handleReserveRequest(HttpRequest request) async {
     try {
       final relayAddr = MultiAddr(Platform.environment['RELAY_SERVERS']!.split(',').first.trim());
