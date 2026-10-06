@@ -8,7 +8,7 @@ import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:test/test.dart';
 
-Future<BasicHost> _host({bool? server}) async {
+Future<BasicHost> _host({bool? autoNAT = true, bool? server}) async {
   final keyPair = await crypto_ed25519.generateEd25519KeyPair();
   final connMgr = ConnectionManager();
   final host = await p2p_config.Libp2p.new_([
@@ -17,7 +17,7 @@ Future<BasicHost> _host({bool? server}) async {
     p2p_config.Libp2p.transport(UDXTransport(connManager: connMgr)),
     p2p_config.Libp2p.security(await NoiseSecurity.create(keyPair)),
     p2p_config.Libp2p.listenAddrs([MultiAddr('/ip4/127.0.0.1/udp/0/udx')]),
-    p2p_config.Libp2p.autoNAT(true),
+    if (autoNAT != null) p2p_config.Libp2p.autoNAT(autoNAT),
     if (server != null) p2p_config.Libp2p.autoNATv2Server(server),
   ]) as BasicHost;
   await host.start();
@@ -44,6 +44,27 @@ void main() {
       // The client still answers dial-backs and the ambient prober runs.
       expect(await host.mux.protocols(), contains(AutoNATv2Protocols.dialBackProtocol));
       expect(host.autoNATService, isNotNull);
+    });
+  });
+
+  // Libp2p.new_ turned AutoNAT on after the options were applied, so
+  // autoNAT(false) had no effect (dart-libp2p-idf).
+  group('AutoNAT option', () {
+    test('is on when no option sets it', () async {
+      final host = await _host(autoNAT: null);
+      addTearDown(host.close);
+
+      expect(host.autoNATService, isNotNull);
+    });
+
+    test('autoNAT(false) turns it off', () async {
+      final host = await _host(autoNAT: false);
+      addTearDown(host.close);
+
+      expect(host.autoNATService, isNull);
+      final protocols = await host.mux.protocols();
+      expect(protocols, isNot(contains(AutoNATv2Protocols.dialProtocol)));
+      expect(protocols, isNot(contains(AutoNATv2Protocols.dialBackProtocol)));
     });
   });
 }

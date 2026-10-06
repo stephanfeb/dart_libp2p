@@ -124,8 +124,9 @@ Future<void> applyDefaults(Config config) async {
   // Default service enable flags
   // config.enablePing is already true by default in Config.
   // config.enableRelay is already false by default.
-  // AutoNAT: Enable by default to automatically detect reachability
-  config.enableAutoNAT = true; // Changed to true by default
+  // AutoNAT: on by default to find reachability, but keep an explicit
+  // Libp2p.autoNAT(false).
+  if (!config.isAutoNATSet) config.enableAutoNAT = true;
   // config.enableHolePunching is already true by default.
   
   // Default AmbientAutoNATv2 configuration

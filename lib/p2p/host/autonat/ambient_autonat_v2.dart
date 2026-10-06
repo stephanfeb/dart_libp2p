@@ -202,10 +202,13 @@ class AmbientAutoNATv2 {
       return;
     }
 
-    // Create requests for each address
+    // A server asks for dial data when the address's IP is not the IP it
+    // sees on the connection, which is the usual case behind NAT. Without
+    // the data the server refuses the check, and the probe never gets a
+    // result. The client sends at most 100 kB. go-libp2p also sends it.
     final requests = addrs.map((addr) => Request(
       addr: addr,
-      sendDialData: false,
+      sendDialData: true,
     )).toList();
 
     _log.fine('Probing ${requests.length} addresses');

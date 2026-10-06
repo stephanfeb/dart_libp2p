@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-10-06
+
+### Fixed
+
+- **AutoNAT v2 probes did not complete behind NAT.** An AutoNAT v2 server asks for dial data when the IP of the address to check is not the IP it sees on the connection. This is the usual case for a host behind NAT. The ambient prober made every request with `sendDialData: false`, so the client refused the request, and the probe failed with `Low priority addr`. The host then never found its reachability. The prober now sends the dial data (at most 100 kB for each check), as go-libp2p does (dart-libp2p-ta4).
+- **`Libp2p.autoNAT(false)` had no effect.** `Libp2p.new_` applied the options and then set `enableAutoNAT = true` in all cases. It now turns AutoNAT on only when no option or assignment set it. A host that sets `autoNAT(false)` now runs no AutoNAT client and no AutoNAT server (dart-libp2p-idf).
+
+### Added
+
+- `Config.isAutoNATSet` tells whether an option or an assignment set `enableAutoNAT`.
+
 ## [4.2.1] - 2026-10-06
 
 ### Fixed

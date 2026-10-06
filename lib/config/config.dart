@@ -93,7 +93,14 @@ class Config {
   bool enablePing = true; // Default to true for Ping service
   bool enableRelay = false; // Default to false for Relay service
   bool enableAutoRelay = false; // Default to false for AutoRelay service
-  bool enableAutoNAT = false; // Default to false for AutoNAT service
+  /// Whether the AutoNAT service runs. A [Config] made directly has it off;
+  /// [Libp2p.new_] turns it on unless an option or an assignment set it.
+  bool get enableAutoNAT => _enableAutoNAT ?? false;
+  set enableAutoNAT(bool enabled) => _enableAutoNAT = enabled;
+  bool? _enableAutoNAT;
+
+  /// Whether an option or an assignment set [enableAutoNAT].
+  bool get isAutoNATSet => _enableAutoNAT != null;
 
   /// Whether the AutoNAT v2 service also answers other peers' reachability
   /// checks (the server). Only used when [enableAutoNAT] is true. Turn it

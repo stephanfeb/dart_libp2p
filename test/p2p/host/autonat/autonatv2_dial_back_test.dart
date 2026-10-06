@@ -29,7 +29,11 @@ class _YamuxProvider extends StreamMuxer {
         );
 }
 
-Future<BasicHost> _newHost({required bool autoNATServer, bool udx = false}) async {
+Future<BasicHost> _newHost({
+  required bool autoNATServer,
+  bool udx = false,
+  List<AutoNATv2Option> serverOptions = const [],
+}) async {
   final keyPair = await crypto_ed25519.generateEd25519KeyPair();
   final connManager = ConnectionManager();
   final config = p2p_config.Config()
@@ -45,7 +49,7 @@ Future<BasicHost> _newHost({required bool autoNATServer, bool udx = false}) asyn
     ..connManager = connManager
     ..enableHolePunching = false
     ..enableAutoNAT = autoNATServer
-    ..autoNATv2Options = [allowPrivateAddrs()]
+    ..autoNATv2Options = [allowPrivateAddrs(), ...serverOptions]
     // Skips the ambient prober; the AutoNAT v2 server still runs.
     ..forceReachability = autoNATServer ? Reachability.public : null;
   final host = await config.newNode() as BasicHost;
@@ -87,6 +91,49 @@ void main() {
       // cleared the client's addresses.
       expect(server.network.connsToPeer(client.id), isNotEmpty);
       expect(await server.peerStore.addrBook.addrs(client.id), contains(clientAddr));
+    });
+  });
+
+  // A server asks for dial data when the address's IP is not the IP of the
+  // connection, the usual case behind NAT. The ambient prober refused it,
+  // so its probes never completed (dart-libp2p-ta4).
+  group('when the server asks for dial data', () {
+    late BasicHost server;
+    late BasicHost client;
+    late AutoNATv2Impl clientAutoNAT;
+    late MultiAddr clientAddr;
+
+    setUp(() async {
+      server = await _newHost(
+        autoNATServer: true,
+        serverOptions: [withDataRequestPolicy((_, __) => true)],
+      );
+      client = await _newHost(autoNATServer: false);
+      clientAutoNAT = AutoNATv2Impl(client, client, options: [allowPrivateAddrs()]);
+      await clientAutoNAT.start();
+      await client.connect(AddrInfo(server.id, server.network.listenAddresses));
+      await Future.delayed(const Duration(milliseconds: 500));
+      clientAddr = client.network.listenAddresses.first;
+    });
+
+    tearDown(() async {
+      await clientAutoNAT.close();
+      await client.close();
+      await server.close();
+    });
+
+    test('a request that sends dial data gets a result', () async {
+      final result =
+          await clientAutoNAT.getReachability([Request(addr: clientAddr, sendDialData: true)]);
+
+      expect(result.reachability, Reachability.public);
+    });
+
+    test('a request that does not send dial data fails', () async {
+      await expectLater(
+        clientAutoNAT.getReachability([Request(addr: clientAddr)]),
+        throwsA(predicate((e) => '$e'.contains('Low priority addr'))),
+      );
     });
   });
 

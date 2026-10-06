@@ -197,10 +197,9 @@ class IntegrationTestPeer {
   Future<void> _setupRelayServer() async {
     print('🌐 Setting up relay server...');
     
-    // Note: Relay service is automatically started by BasicHost when:
-    // - config.enableRelay = true AND
-    // - config.enableAutoNAT = false
-    // No manual event emission needed!
+    // BasicHost starts the relay service when config.enableRelay is true and
+    // the host is publicly reachable. The relay role sets forceReachability
+    // to public for this; turning AutoNAT off does not do it.
     
     print('📡 Relay server ready to accept connections');
   }

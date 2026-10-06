@@ -331,6 +331,8 @@ void main() {
             // Verify custom addresses were used
             final requests = invocation.positionalArguments[0] as List<Request>;
             expect(requests.length, customAddrs.length);
+            // Behind NAT the server asks for dial data (dart-libp2p-ta4).
+            expect(requests.every((r) => r.sendDialData), isTrue);
             return result;
           });
 
