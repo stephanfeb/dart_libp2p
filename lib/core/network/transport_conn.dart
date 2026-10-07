@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'conn.dart';
+import 'rcmgr.dart' show ConnManagementScope, ResourceManager, ResourceScopeSpan;
 
 /// TransportConn extends the Conn interface with methods for reading and writing raw data.
 /// This is used by transport implementations that need to send and receive data directly.
@@ -25,4 +26,22 @@ abstract class TransportConn extends Conn {
   /// potentially due to activity on a multiplexed stream over it.
   /// This can be used by multiplexers to inform the connection manager.
   void notifyActivity();
+}
+
+/// A [TransportConn] whose transport opened its resource scope, as go-libp2p
+/// transports do with `ResourceManager.OpenConnection`.
+///
+/// The scope covers the connection from the moment the transport makes it
+/// (in the transient scope, during the upgrade). The swarm uses this scope
+/// for the connection when [resourceManager] is the swarm's own resource
+/// manager, and moves it to the peer's scope with
+/// [ConnManagementScope.setPeer] once the peer is known. The connection is
+/// then counted once. Calling [ResourceScopeSpan.done] more than once on
+/// [managementScope] is allowed: the scope is released once.
+abstract class ScopedTransportConn implements TransportConn {
+  /// The resource manager that opened [managementScope].
+  ResourceManager get resourceManager;
+
+  /// The connection's scope, or null if it was not opened (or has failed).
+  ConnManagementScope? get managementScope;
 }

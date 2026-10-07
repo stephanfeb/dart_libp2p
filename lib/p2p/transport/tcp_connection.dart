@@ -11,7 +11,7 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnStats, Stats;
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/context.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceManager, ConnManagementScope, StreamManagementScope;
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, PeerScope, ScopeStat, ResourceScopeSpan, ResourceManager, ConnManagementScope, StreamManagementScope;
 import 'package:dart_libp2p/core/network/stream.dart' show P2PStream; // P2PStream might not be directly relevant if this is raw
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart';
@@ -34,7 +34,7 @@ import 'package:logging/logging.dart'; // Added for logging
 final _log = Logger('TCPConnection');
 
 /// TCP implementation of the Conn interface, upgraded for multiplexing.
-class TCPConnection implements TransportConn {
+class TCPConnection implements ScopedTransportConn {
   final Socket _socket; // The underlying (potentially secured) socket
   final MultiAddr _remoteAddr;
   final MultiAddr _localAddr;
@@ -126,10 +126,13 @@ class TCPConnection implements TransportConn {
     _socketIsDone = false; // Reset for new connection
 
     try {
-      _connManagementScope = await _resourceManager.openConnection(_direction, true /* useFd */, _remoteAddr);
-      if (_remotePeerId != null) { // Only set peer if known
-        await _connManagementScope!.setPeer(_remotePeerId!);
-      }
+      // The connection's scope, as go-libp2p's TCP transport opens it. It
+      // stays in the transient scope until the swarm, which knows the
+      // authenticated peer after the security handshake, calls setPeer.
+      // _remotePeerId is not used here: before the handshake it is only a
+      // placeholder.
+      _connManagementScope = _OnceConnManagementScope(
+          await _resourceManager.openConnection(_direction, true /* useFd */, _remoteAddr));
       
       _legacyConnManager?.updateState(this, transport_state.ConnectionState.active, error: null);
 
@@ -270,6 +273,12 @@ class TCPConnection implements TransportConn {
     }
     return _ConnScopeImpl(_connManagementScope!);
   }
+
+  @override
+  ResourceManager get resourceManager => _resourceManager;
+
+  @override
+  ConnManagementScope? get managementScope => _connManagementScope;
 
   @override
   Future<P2PStream> newStream(Context context) async {
@@ -572,4 +581,40 @@ class _ResourceScopeSpanImpl implements ResourceScopeSpan {
   ScopeStat get stat {
     return _underlyingSpan.stat;
   }
+}
+
+/// A connection scope whose [done] releases the scope once. The TCP
+/// connection and the swarm connection that uses its scope both call
+/// [done] when they close.
+class _OnceConnManagementScope implements ConnManagementScope {
+  final ConnManagementScope _inner;
+  bool _done = false;
+
+  _OnceConnManagementScope(this._inner);
+
+  @override
+  void done() {
+    if (_done) return;
+    _done = true;
+    _inner.done();
+  }
+
+  @override
+  PeerScope? get peerScope => _inner.peerScope;
+
+  @override
+  Future<void> setPeer(PeerId peerId) => _inner.setPeer(peerId);
+
+  @override
+  Future<ResourceScopeSpan> beginSpan() => _inner.beginSpan();
+
+  @override
+  void releaseMemory(int size) => _inner.releaseMemory(size);
+
+  @override
+  Future<void> reserveMemory(int size, int priority) =>
+      _inner.reserveMemory(size, priority);
+
+  @override
+  ScopeStat get stat => _inner.stat;
 }

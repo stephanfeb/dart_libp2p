@@ -11,7 +11,7 @@ import 'transport.dart';
 import 'transport_config.dart';
 import 'connection_manager.dart'; // Re-added import for ConnectionManager
 import '../../core/network/mux.dart'; // Multiplexer no longer directly used by TCPTransport constructor
-import '../../core/network/rcmgr.dart' show ResourceManager;
+import '../../core/network/rcmgr.dart' show NullResourceManager, ResourceManager;
 import '../../core/peer/peer_id.dart'; // For concrete PeerId class
 import 'tcp_connection.dart';
 import 'tcp_listener.dart';
@@ -25,19 +25,43 @@ class TCPTransport implements Transport {
   final TransportConfig config;
 
   final ConnManager _connManager;
-  // final Multiplexer multiplexer; // Removed, as TCPTransport now provides raw connections
-  final ResourceManager resourceManager;
+  ResourceManager? _resourceManager;
 
   @visibleForTesting
   ConnManager get connectionManager => _connManager;
 
+  /// Creates a TCP transport.
+  ///
+  /// Each TCP connection gets a connection scope from [resourceManager]
+  /// when the socket opens, as in go-libp2p. When this is the host's
+  /// resource manager, the swarm uses that scope for the connection, which
+  /// is counted once. Leave [resourceManager] out to use the host's: a host
+  /// made by `Libp2p.new_` gives it to the transport (see
+  /// [useResourceManager]); a transport used without such a host counts
+  /// nothing.
   TCPTransport({
-    // required this.multiplexer, // Removed
-    required this.resourceManager,
+    ResourceManager? resourceManager,
     TransportConfig? config,
     ConnManager? connManager,
   }) : config = config ?? TransportConfig.defaultConfig,
-       _connManager = connManager ?? ConnectionManager();
+       _connManager = connManager ?? ConnectionManager(),
+       _resourceManager = resourceManager;
+
+  /// The resource manager that opens the scopes of this transport's
+  /// connections. A [NullResourceManager] until one is given.
+  ResourceManager get resourceManager => _resourceManager ?? _nullResourceManager;
+  static final _nullResourceManager = NullResourceManager();
+
+  /// Whether a resource manager was given, to the constructor or to
+  /// [useResourceManager].
+  bool get hasResourceManager => _resourceManager != null;
+
+  /// Gives this transport [manager] if it has no resource manager yet.
+  /// Config calls it with the host's resource manager before the host
+  /// listens or dials. A resource manager given to the constructor is kept.
+  void useResourceManager(ResourceManager manager) {
+    _resourceManager ??= manager;
+  }
 
   @override
   Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) async {

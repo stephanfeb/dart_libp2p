@@ -26,6 +26,7 @@ import 'package:dart_libp2p/p2p/host/peerstore/pstoremem/peerstore.dart'; // For
 import 'package:dart_libp2p/p2p/host/resource_manager/resource_manager_impl.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limiter.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
+import 'package:dart_libp2p/p2p/transport/tcp_transport.dart' show TCPTransport;
 import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer_id; // For concrete PeerId if needed
 import 'package:dart_libp2p/core/peerstore.dart' show Peerstore; // For type hinting
 import 'package:dart_libp2p/core/network/rcmgr.dart' show ResourceManager; // For type hinting
@@ -224,6 +225,15 @@ class Config {
     final ResourceManager resourceManager = this.resourceManager ??
         ResourceManagerImpl(limiter: resourceLimiter ?? ConfigurableLimiter());
     final BasicUpgrader upgrader = BasicUpgrader(resourceManager: resourceManager);
+
+    // A TCPTransport made without a resource manager uses the host's, so
+    // that the limits cover its connections from the moment the socket
+    // opens. The swarm then uses the transport's connection scope.
+    for (final transport in transports) {
+      if (transport is TCPTransport && !transport.hasResourceManager) {
+        transport.useResourceManager(resourceManager);
+      }
+    }
 
     // Instantiate Swarm
     final Swarm swarm = Swarm(

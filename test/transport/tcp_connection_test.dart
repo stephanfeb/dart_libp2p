@@ -627,32 +627,30 @@ void main() {
       verifyNever(mockSocketClient.listen(any, onError: anyNamed('onError'), onDone: anyNamed('onDone')));
     });
 
-    test('create should handle errors from scope.setPeer and call scope.done', () async {
-      final setPeerError = Exception('Scope setPeer error');
-      final mockScope = MockConnManagementScope(); // Use a fresh mock for this test's specific behavior
-      
+    // The remote peer id given to create() is a placeholder before the
+    // security handshake. The swarm attaches the scope to the authenticated
+    // peer; TCPConnection does not.
+    test('create does not attach the scope to a peer; its scope is released once', () async {
+      final mockScope = MockConnManagementScope();
       when(mockScope.stat).thenReturn(const ScopeStat(memory: 0, numStreamsInbound: 0, numStreamsOutbound: 0, numConnsInbound: 0, numConnsOutbound: 0, numFD: 0));
-      when(mockScope.beginSpan()).thenAnswer((_) async => MockResourceScopeSpan());
-      when(mockScope.setPeer(any)).thenThrow(setPeerError); // Make setPeer throw
-      when(mockScope.done()).thenAnswer((_) async {}); // Ensure done can be called
-
-      // Make resourceManager.openConnection return this specific mockScope
+      when(mockScope.done()).thenAnswer((_) async {});
       when(mockResourceManager.openConnection(any, any, any)).thenAnswer((_) async => mockScope);
-      
-      // Default socket listen behavior is fine for this test
+
       final tempController = StreamController<Uint8List>.broadcast();
       when(mockSocketClient.listen(any,onError: anyNamed('onError'),onDone: anyNamed('onDone'),cancelOnError: anyNamed('cancelOnError')))
           .thenAnswer((inv) => tempController.stream.listen(inv.positionalArguments[0]));
 
+      final conn = await TCPConnection.create(
+          mockSocketClient, localAddr, remoteAddr, localPeerId, remotePeerId, mockResourceManager, false);
+      verifyNever(mockScope.setPeer(any));
+      expect(conn.resourceManager, same(mockResourceManager));
+      expect(conn.managementScope, isNotNull);
 
-      await expectLater(
-        TCPConnection.create(
-          mockSocketClient, localAddr, remoteAddr, localPeerId, remotePeerId, mockResourceManager, false),
-        throwsA(equals(setPeerError))
-      );
-
-      await Future.delayed(Duration.zero); // Allow async error handling
-      verify(mockScope.done()).called(1); // Crucial: scope.done() should be called on error
+      // The swarm connection and the TCP connection both release the scope
+      // when they close; the scope is released once.
+      conn.managementScope!.done();
+      await conn.close();
+      verify(mockScope.done()).called(1);
       await tempController.close();
     });
 

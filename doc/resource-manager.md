@@ -15,7 +15,7 @@ The main scopes are:
 -   **Connection**: A scope for a single network connection.
 -   **Stream**: A scope for a single stream within a connection.
 
-A connection starts in the transient scope and moves to its peer scope when the remote peer is known. A stream starts in its peer scope and the transient scope, and moves out of the transient scope into the protocol scope when its protocol is negotiated. A resource is counted once in every scope above it.
+A connection starts in the transient scope and moves to its peer scope when the remote peer is known (see [Transports](#transports)). A stream starts in its peer scope and the transient scope, and moves out of the transient scope into the protocol scope when its protocol is negotiated. A resource is counted once in every scope above it.
 
 ### Resource Limits
 
@@ -142,6 +142,20 @@ await host.network.resourceManager.viewSystem((scope) async {
 
 ### Transports
 
-`TCPTransport` takes its own `resourceManager`, and opens a connection scope for each TCP socket that stays in the transient scope. Give it a `NullResourceManager` (as the examples do) or a separate `ResourceManagerImpl`, not the host's resource manager: the host already counts each connection, and the TCP scopes would fill the host's transient scope.
+Each connection has one connection scope, whatever its transport.
+
+`TCPTransport` opens the connection scope when the socket opens, as go-libp2p's transports do with `OpenConnection`. The scope is in the transient scope while the connection is upgraded (security and multiplexer negotiation), so the transient limits also cover handshakes in progress. The upgrader carries the scope to the swarm. The swarm uses it for the connection and, when the security handshake has given the remote peer, moves it to the peer scope (`setPeer`). The connection is counted once.
+
+Make the `TCPTransport` without a `resourceManager` to share the host's resource manager. A host made with `Libp2p.new_` (or `Config.newNode`) gives its resource manager to such a transport:
+
+```dart
+Libp2p.transport(TCPTransport(connManager: connManager)),
+```
+
+A `TCPTransport` that you give a different resource manager (for example `NullResourceManager()`, as older examples do) counts its sockets in that manager only; the host then opens its own scope for each connection after the upgrade. You can also give it the host's manager explicitly.
+
+UDX connections and relayed (circuit v2) connections do not open a scope themselves: the swarm opens one for each connection after the upgrade and attaches it to the peer at once. Their handshakes are therefore not counted in the transient scope.
+
+A connection scope is released once, when the connection closes or when the connection fails: a failed upgrade (security or multiplexer negotiation), a refused `setPeer` (a peer limit), or a refused `openConnection` (a transient or system limit) closes the connection and releases its scope.
 
 By properly configuring the Resource Manager, you can build more resilient and secure peer-to-peer applications.

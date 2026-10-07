@@ -129,6 +129,11 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
   /// Connection context for event correlation
   final ConnectionContext? _context;
 
+  /// The transport connection under the security layer, if the upgrader
+  /// gave it. The swarm uses its resource scope when it carries one
+  /// ([ScopedTransportConn]).
+  final TransportConn? transportConn;
+
   UpgradedConnectionImpl({
     required core_mux.MuxedConn muxedConn,
     required SecuredConnection securedConn,
@@ -137,6 +142,7 @@ class UpgradedConnectionImpl implements Conn, core_mux.MuxedConn {
     required PeerId localPeerId,
     required PeerId remotePeerId,
     ConnectionContext? context,
+    this.transportConn,
   })  : _muxedConn = muxedConn,
         _securedConn = securedConn,
         _negotiatedSecurityProto = negotiatedSecurityProto,
@@ -376,6 +382,7 @@ class BasicUpgrader implements Upgrader {
         localPeerId: localPId,
         remotePeerId: securedConn.remotePeer,
         context: connContext,
+        transportConn: connection,
       );
 
     } catch (e) {
@@ -498,6 +505,7 @@ class BasicUpgrader implements Upgrader {
         localPeerId: localPId,
         remotePeerId: securedConn.remotePeer,
         context: connContext,
+        transportConn: connection,
       );
 
     } catch (e) {

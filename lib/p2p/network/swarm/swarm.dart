@@ -442,11 +442,7 @@ class Swarm implements Network {
 
         final ConnManagementScope connManagementScope;
         try {
-          connManagementScope = await _openConnScope(
-            Direction.inbound,
-            upgradedConn.remoteMultiaddr,
-            upgradedConn.remotePeer,
-          );
+          connManagementScope = await _connScopeFor(upgradedConn, Direction.inbound);
         } catch (e) {
           _logger.fine('Inbound connection from ${upgradedConn.remotePeer} refused by the resource manager: $e');
           await upgradedConn.close().catchError((_) {});
@@ -547,6 +543,37 @@ class Swarm implements Network {
         await listener.close();
         removeListenAddress(listener.addr); // Also remove from _listenAddrs and notify
     });
+  }
+
+  /// Returns the resource scope of the upgraded connection [conn], attached
+  /// to its peer.
+  ///
+  /// As in go-libp2p, a transport can open the connection's scope itself
+  /// (TCPTransport does). When it opened it with this swarm's resource
+  /// manager, that scope is carried through the upgrade and used here, so
+  /// that the connection is counted once: setPeer moves it from the
+  /// transient scope to the peer scope. Other connections (UDX, relayed,
+  /// or a transport with its own resource manager) get a new scope. On
+  /// failure (a limit), the scope is released and this throws; the caller
+  /// closes the connection.
+  Future<ConnManagementScope> _connScopeFor(Conn conn, Direction direction) async {
+    final raw = conn is UpgradedConnectionImpl ? conn.transportConn : null;
+    final carried = raw is ScopedTransportConn &&
+            identical(raw.resourceManager, _resourceManager)
+        ? raw.managementScope
+        : null;
+    if (carried == null) {
+      return _openConnScope(direction, conn.remoteMultiaddr, conn.remotePeer);
+    }
+    try {
+      if (carried.peerScope == null) {
+        await carried.setPeer(conn.remotePeer);
+      }
+    } catch (_) {
+      carried.done();
+      rethrow;
+    }
+    return carried;
   }
 
   /// Opens the resource scope of a new connection and attaches it to
@@ -1042,11 +1069,7 @@ class Swarm implements Network {
       // Obtain a ConnManagementScope for the new connection
       final ConnManagementScope connManagementScope;
       try {
-        connManagementScope = await _openConnScope(
-          Direction.outbound,
-          conn.remoteMultiaddr,
-          conn.remotePeer,
-        );
+        connManagementScope = await _connScopeFor(conn, Direction.outbound);
       } catch (e) {
         await conn.close().catchError((_) {});
         rethrow;
