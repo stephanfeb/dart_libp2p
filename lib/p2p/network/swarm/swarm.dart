@@ -90,7 +90,7 @@ class Swarm implements Network {
   /// Track connection creation time (for grace period logic)
   final Map<String, DateTime> _connectionCreatedAt = {};
 
-  /// Track consecutive probe failures per peer (for recovery logic)
+  /// Track consecutive probe failures per connection (for recovery logic)
   final Map<String, int> _consecutiveProbeFailures = {};
 
   /// Track peers that connected via relay (prefer relay addresses for them)
@@ -121,7 +121,9 @@ class Swarm implements Network {
   /// Next connection ID
   int _nextConnID = 0;
 
-  /// Event-driven connection health tracking
+  /// Event-driven connection health, keyed by connection ID. It was keyed
+  /// by peer: one failed connection then made every other connection to the
+  /// peer look failed, and a new connection made a failed one look healthy.
   final Map<String, ConnectionHealthState> _connectionHealthStates = {};
 
 
@@ -499,7 +501,7 @@ class Swarm implements Network {
           // Fix 1.1 & 1.2: Initialize activity tracking and creation time for incoming connections
           _connectionLastActivity[swarmConn.id] = DateTime.now();
           _connectionCreatedAt[swarmConn.id] = DateTime.now();
-          _connectionHealthStates[actualPeerIdStr] = ConnectionHealthState.healthy;
+          _connectionHealthStates[swarmConn.id] = ConnectionHealthState.healthy;
           
           // Complete upgrading completer if this was a relay connection
           final completer = _upgradingConnections.remove(actualPeerIdStr);
@@ -1037,7 +1039,7 @@ class Swarm implements Network {
         // Fix 1.2: Initialize activity tracking and creation time for outbound connections
         _connectionLastActivity[swarmConn.id] = DateTime.now();
         _connectionCreatedAt[swarmConn.id] = DateTime.now();
-        _connectionHealthStates[peerIDStr] = ConnectionHealthState.healthy;
+        _connectionHealthStates[swarmConn.id] = ConnectionHealthState.healthy;
       });
       
       // Calculate dial latency for metrics
@@ -1239,6 +1241,10 @@ class Swarm implements Network {
       if (conns.isEmpty) {
         _connections.remove(peerIDStr);
       }
+      _connectionLastActivity.remove(conn.id);
+      _connectionCreatedAt.remove(conn.id);
+      _connectionHealthStates.remove(conn.id);
+      _consecutiveProbeFailures.remove(conn.id);
     });
 
     // Notify connection closed
@@ -1368,9 +1374,8 @@ class Swarm implements Network {
 
   /// Event-driven connection health change handler
   void onConnectionHealthChanged(SwarmConn conn, ConnectionHealthState newState) {
-    final peerIdStr = conn.remotePeer.toString();
-    final oldState = _connectionHealthStates[peerIdStr];
-    _connectionHealthStates[peerIdStr] = newState;
+    final oldState = _connectionHealthStates[conn.id];
+    _connectionHealthStates[conn.id] = newState;
     
     _logger.info('Swarm: Connection health changed for ${conn.remotePeer} (${conn.id}): $oldState -> $newState');
     
@@ -1406,8 +1411,9 @@ class Swarm implements Network {
   /// Marks a connection to a peer as unhealthy
   /// Called by transport layers (e.g., CircuitV2Client) when they detect relay path failures
   void markConnectionUnhealthy(PeerId peer) {
-    final peerIdStr = peer.toString();
-    _connectionHealthStates[peerIdStr] = ConnectionHealthState.failed;
+    for (final conn in _connections[peer.toString()] ?? const <SwarmConn>[]) {
+      _connectionHealthStates[conn.id] = ConnectionHealthState.failed;
+    }
     _logger.warning('Swarm: Marked connection to ${peer.toBase58()} as unhealthy');
   }
 
@@ -1436,8 +1442,7 @@ class Swarm implements Network {
       }
 
       // Check event-driven health state
-      final peerIdStr = conn.remotePeer.toString();
-      final healthState = _connectionHealthStates[peerIdStr] ?? ConnectionHealthState.unknown;
+      final healthState = _connectionHealthStates[conn.id] ?? ConnectionHealthState.unknown;
       
       // If we have health state information, use it
       if (healthState == ConnectionHealthState.failed) {
@@ -1544,7 +1549,7 @@ class Swarm implements Network {
   /// test stream creation for UDX connections. Falls back to test streams
   /// for non-UDX transports.
   Future<void> _probeRelayedConnection(SwarmConn conn) async {
-    final peerStr = conn.remotePeer.toString();
+    final connId = conn.id;
     bool probeSuccess = false;
     
     try {
@@ -1576,17 +1581,17 @@ class Swarm implements Network {
       _connectionLastActivity[conn.id] = DateTime.now();
       
       // Fix 1.4: SUCCESS - Reset failure count and mark healthy
-      _consecutiveProbeFailures[peerStr] = 0;
-      _connectionHealthStates[peerStr] = ConnectionHealthState.healthy;
+      _consecutiveProbeFailures[connId] = 0;
+      _connectionHealthStates[connId] = ConnectionHealthState.healthy;
       
     } catch (e) {
       // Fix 1.4: Track consecutive failures and only mark as failed after 3 failures
-      final failures = (_consecutiveProbeFailures[peerStr] ?? 0) + 1;
-      _consecutiveProbeFailures[peerStr] = failures;
+      final failures = (_consecutiveProbeFailures[connId] ?? 0) + 1;
+      _consecutiveProbeFailures[connId] = failures;
       
       if (failures >= 3) {
         _logger.warning('Swarm: Connection ${conn.id} probe failed $failures times: $e');
-        _connectionHealthStates[peerStr] = ConnectionHealthState.failed;
+        _connectionHealthStates[connId] = ConnectionHealthState.failed;
       } else {
         _logger.fine('Swarm: Connection ${conn.id} probe failed ($failures/3): $e');
         // Don't mark as failed yet - allow recovery

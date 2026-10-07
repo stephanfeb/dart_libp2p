@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-10-07
+
+### Fixed
+
+- **A failed relayed connection closed the direct connection to the same peer.** The swarm kept connection health for each peer, not for each connection. When a relayed connection failed (for example, three failed probes), the peer was marked as failed. The next `dialPeer` then found all connections to the peer unhealthy, closed the working direct (hole-punched) connection, and dialed a new one. Also, a new connection set the peer to healthy, so an older connection that had failed looked healthy. Health and probe failures are now kept for each connection.
+- **Swarm bookkeeping grew with each connection.** The activity, creation time, health and probe-failure entries of a connection stayed after the connection was removed. `removeConnection` now removes them.
+
+### Tests
+
+- New `test/network/swarm_conn_health_test.dart`: a failed relayed connection leaves the direct one in use, and `dialPeer` uses an inbound relayed connection instead of dialing a new one.
+- The AutoNAT v2 interop tests have a 90-s timeout; under a full-suite run, starting the go-libp2p processes did not always finish in 30 s.
+
 ## [4.4.0] - 2026-10-07
 
 ### Fixed

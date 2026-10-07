@@ -1,3 +1,8 @@
+// Each test starts a go-libp2p process; under a busy full-suite run the
+// default 30 s was not always enough.
+@Timeout(Duration(seconds: 90))
+library;
+
 import 'dart:io';
 
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
