@@ -27,6 +27,11 @@ class ConnectionManager implements ConnManager {
   /// Custom notifiee for connection events
   final _notifiee = NotifyBundle();
 
+  /// Set when [dispose] starts. A connection registered after that, such as
+  /// one a listener accepts while the host closes, is closed at once: the
+  /// snapshot that [closeAll] closes does not contain it.
+  bool _disposed = false;
+
   /// Duration after which an idle connection is considered stale
   final Duration idleTimeout;
 
@@ -44,6 +49,10 @@ class ConnectionManager implements ConnManager {
   /// Registers a new connection with the manager
   void registerConnection(TransportConn connection) {
     if (_connections.containsKey(connection)) {
+      return;
+    }
+    if (_disposed) {
+      connection.close().catchError((_) {});
       return;
     }
 
@@ -93,7 +102,9 @@ class ConnectionManager implements ConnManager {
   /// Records activity on a connection
   void recordActivity(TransportConn connection) {
     if (!_connections.containsKey(connection)) {
-      throw StateError('Connection not registered with manager');
+      // Removed already (closed, or dropped by dispose). Stream listeners
+      // call this with nothing to catch an error, so ignore it.
+      return;
     }
 
     _updateActivityTimestamp(connection);
@@ -228,6 +239,7 @@ class ConnectionManager implements ConnManager {
 
   /// Disposes of the connection manager and releases all resources
   Future<void> dispose() async {
+    _disposed = true;
     await closeAll();
     for (final controller in _stateControllers.values) {
       await controller.close();
