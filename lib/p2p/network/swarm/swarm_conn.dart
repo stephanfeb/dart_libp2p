@@ -203,6 +203,10 @@ class SwarmConn implements Conn {
       await conn.close();
 
     });
+
+    // Remove the connection from the swarm, which notifies the notifiees.
+    // Not under _streamsLock: removeConnection() takes the swarm's locks.
+    await swarm.removeConnection(this);
   }
 
 

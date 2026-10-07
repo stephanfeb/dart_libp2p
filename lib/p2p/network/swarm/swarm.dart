@@ -165,34 +165,23 @@ class Swarm implements Network {
       _relayProbeTimer?.cancel();
       _relayProbeTimer = null;
 
+      // Close all connections, before the listeners: a UDX connection sends
+      // its close through the listener's socket. Close them outside _connLock: each
+      // SwarmConn.close() calls removeConnection(), which takes the lock and
+      // tells the notifiees that the connection is disconnected.
+      final allConnsToClose = await _connLock.synchronized(
+          () => _connections.values.expand((conns) => conns).toList());
+      for (final conn in allConnsToClose) {
+        await conn.close();
+      }
+      await _connLock.synchronized(() => _connections.clear());
+
       // Close all listeners
       final listenersToClose = List<Listener>.from(_listeners); // Create a copy
       for (final listener in listenersToClose) {
         await listener.close(); // This might trigger onDone/onError, modifying original _listeners
       }
       _listeners.clear(); // Clear original list after all are processed
-
-      // Close all connections
-      await _connLock.synchronized(() async {
-        final allConnsToClose = <SwarmConn>[];
-        // Iterate over a copy of values if modification during iteration is possible
-        // or clear the map after collecting all connections.
-        final connectionLists = List<List<SwarmConn>>.from(_connections.values);
-        for (final connsList in connectionLists) {
-          allConnsToClose.addAll(connsList);
-        }
-        // It's safer to clear the original map after collecting all items if conn.close()
-        // could lead to re-entrant calls that modify _connections.
-        // However, if conn.close() only triggers notifiees that don't modify _connections directly,
-        // iterating _connections.values and then _connections.clear() might be okay.
-        // For max safety, let's clear after collecting.
-        // _connections.clear(); // Moved down
-
-        for (final conn in allConnsToClose) {
-          await conn.close();
-        }
-        _connections.clear(); // Clear after all connections are processed and closed.
-      });
 
       // Notify all notifiees about closed listeners and connections
       await _notifieeLock.synchronized(() async {
@@ -211,21 +200,6 @@ class Swarm implements Network {
             notifiee.listenClose(this, addr);
           }
 
-          // Notify about closed connections
-          // Since _connections should be empty, this loop might not run.
-          // If it can run, we need to be careful.
-          // The previous block iterates a copy of connections and closes them.
-          // Here, we should notify based on what *was* closed.
-          // This notification logic might be better integrated into the actual closing loops.
-          // For now, let's assume this is for any remaining state.
-          // The original code iterated _connections.values directly.
-          // If _connections is cleared above, this loop is problematic.
-
-          // Re-thinking: The notification for disconnected should happen when a conn is actually closed.
-          // SwarmConn.close() calls swarm.removeConnection(), which calls notifiee.disconnected.
-          // So, this explicit loop here might be redundant or even racy if removeConnection also iterates _notifiees.
-
-          // Let's stick to notifying about listenClose for addresses that were active.
           // The disconnected notifications are handled by removeConnection.
         }
       });
@@ -491,7 +465,7 @@ class Swarm implements Network {
               // Close stale connections through the same relay
               for (final stale in staleRelayConns) {
                 _logger.warning('[CONN-DEDUP-DIAG] Closing stale relay connection ${stale.id} to peer $actualPeerIdStr via relay $relayId in favor of new connection ${swarmConn.id}');
-                existingConns.remove(stale);
+                // close() removes it from _connections and notifies.
                 Future.microtask(() => stale.close());
               }
             });
@@ -690,6 +664,10 @@ class Swarm implements Network {
           _logger.fine('AcceptStream loop for conn ${conn.id} to ${conn.remotePeer} terminated due to connection closure.');
         }
       }
+      // The connection is gone. close() is safe to call again; it makes sure
+      // the swarm removes the connection and reports it disconnected, also
+      // when newStream() only marked it closed.
+      await conn.close();
     });
   }
 
@@ -1204,11 +1182,10 @@ class Swarm implements Network {
   @override
   Future<void> closePeer(PeerId peerId) async {
     final peerIDStr = peerId.toString();
-    final conns = await _connLock.synchronized(() {
-      final conns = _connections[peerIDStr] ?? [];
-      _connections.remove(peerIDStr);
-      return conns;
-    });
+    // Leave the connections in _connections: SwarmConn.close() removes each
+    // one through removeConnection(), which notifies the notifiees.
+    final conns = await _connLock.synchronized(
+        () => List<SwarmConn>.from(_connections[peerIDStr] ?? const []));
 
     for (final conn in conns) {
       await conn.close();
@@ -1301,13 +1278,14 @@ class Swarm implements Network {
     return false;
   }
 
-  /// Removes a connection from the swarm
+  /// Removes a connection from the swarm and notifies the notifiees that it
+  /// is disconnected. Only the first call for a connection notifies.
   Future<void> removeConnection(SwarmConn conn) async {
     final peerIDStr = conn.remotePeer.toString();
 
-    await _connLock.synchronized(() {
-      final conns = _connections[peerIDStr] ?? [];
-      conns.remove(conn);
+    final removed = await _connLock.synchronized(() {
+      final conns = _connections[peerIDStr];
+      if (conns == null || !conns.remove(conn)) return false;
 
       if (conns.isEmpty) {
         _connections.remove(peerIDStr);
@@ -1316,7 +1294,9 @@ class Swarm implements Network {
       _connectionCreatedAt.remove(conn.id);
       _connectionHealthStates.remove(conn.id);
       _consecutiveProbeFailures.remove(conn.id);
+      return true;
     });
+    if (!removed) return;
 
     // Notify connection closed
     await _notifieeLock.synchronized(() async {
