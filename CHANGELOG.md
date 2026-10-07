@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.2] - 2026-10-08
+
+### Fixed
+
+- **An uncaught `StateError` could end the process when a host closed** (dart-libp2p-036). `BasicHost.close` disposes the connection manager before it closes the network, so a listener can accept a connection while `ConnectionManager.dispose()` runs. That connection was not closed: `dispose()` cleared it from the manager while it was still open. Its next data event called `recordActivity`, which threw `StateError('Connection not registered with manager')` in a UDX stream listener, where nothing catches it. Now:
+  - `ConnectionManager.recordActivity` ignores a connection that the manager does not know, as `updateState` and `closeConnection` do.
+  - A connection registered after `dispose()` has started is closed at once.
+
 ## [4.6.1] - 2026-10-08
 
 ### Fixed
