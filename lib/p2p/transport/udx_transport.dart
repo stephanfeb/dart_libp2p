@@ -5,6 +5,7 @@ import 'dart:io' show SocketException, InternetAddress, InternetAddressType, Soc
 
 import 'package:dart_libp2p/p2p/transport/udx_stream_adapter.dart';
 import 'package:dart_libp2p/p2p/transport/udx_exceptions.dart';
+export 'package:dart_libp2p/p2p/transport/udx_exceptions.dart' show UDXDialCancelledException;
 import 'package:dart_udx/dart_udx.dart';
 import 'package:logging/logging.dart';
 
@@ -84,9 +85,18 @@ class UDXTransport implements Transport {
 
   /// Dials [addr]. The dial leaves from an active listener's socket, so the
   /// peer observes this host at its listen port (see [_performDial]).
+  ///
+  /// When [cancel] completes before the handshake does, the dial stops
+  /// sending and fails with [UDXDialCancelledException]. The swarm uses it
+  /// to stop the dials that lost a Happy Eyeballs race.
   @override
-  Future<TransportConn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false}) =>
-      _dial(addr, timeout: timeout, simultaneousConnect: simultaneousConnect, reuseListenSocket: true);
+  Future<TransportConn> dial(MultiAddr addr,
+          {Duration? timeout, bool simultaneousConnect = false, Future<void>? cancel}) =>
+      _dial(addr,
+          timeout: timeout,
+          simultaneousConnect: simultaneousConnect,
+          reuseListenSocket: true,
+          cancel: cancel);
 
   /// Dials [addr] from a fresh ephemeral socket instead of the listener's.
   ///
@@ -94,14 +104,15 @@ class UDXTransport implements Transport {
   /// peer, such as the one DCUtR tries before it punches: unanswered packets
   /// from the listen socket could leave an entry at the peer's NAT that makes
   /// the NAT remap the peer's punch.
-  Future<TransportConn> dialFromEphemeralSocket(MultiAddr addr, {Duration? timeout}) =>
-      _dial(addr, timeout: timeout, simultaneousConnect: false, reuseListenSocket: false);
+  Future<TransportConn> dialFromEphemeralSocket(MultiAddr addr, {Duration? timeout, Future<void>? cancel}) =>
+      _dial(addr, timeout: timeout, simultaneousConnect: false, reuseListenSocket: false, cancel: cancel);
 
   Future<TransportConn> _dial(
     MultiAddr addr, {
     Duration? timeout,
     required bool simultaneousConnect,
     required bool reuseListenSocket,
+    Future<void>? cancel,
   }) async {
     _logger.fine('[UDXTransport.dial] Attempting to dial $addr with timeout: ${timeout ?? config.dialTimeout}, simultaneousConnect: $simultaneousConnect, reuseListenSocket: $reuseListenSocket');
     final host = addr.valueForProtocol('ip4') ?? addr.valueForProtocol('ip6');
@@ -118,7 +129,7 @@ class UDXTransport implements Transport {
     // unreachable address hold a dial for minutes: each attempt waited out
     // the full handshake timeout.
     return await UDXExceptionHandler.handleUDXOperation(
-      () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect, reuseListenSocket),
+      () => _performDial(addr, host, port, effectiveTimeout, simultaneousConnect, reuseListenSocket, cancel),
       'UDXTransport.dial($addr)',
       retryConfig: UDXRetryConfig.none,
     );
@@ -132,7 +143,12 @@ class UDXTransport implements Transport {
     Duration effectiveTimeout,
     bool simultaneousConnect,
     bool reuseListenSocket,
+    Future<void>? cancel,
   ) async {
+    // Ends a wait early when [cancel] completes.
+    Future<T> untilCancelled<T>(Future<T> work) => cancel == null
+        ? work
+        : Future.any([work, cancel.then<T>((_) => throw UDXDialCancelledException(addr))]);
     RawDatagramSocket? rawSocket;
     UDXMultiplexer? multiplexer;
     UDPSocket? udpSocket;
@@ -229,14 +245,14 @@ class UDXTransport implements Transport {
       }
       initialStream = await UDXExceptionHandler.handleUDXOperation(
         () => UDXExceptionUtils.withTimeout(
-          UDXStream.createOutgoing(
+          untilCancelled(UDXStream.createOutgoing(
             _udxInstance,
             udpSocket!,
             localInitialStreamId,
             remoteInitialStreamId,
             host,
             port,
-          ),
+          )),
           remaining(),
           'UDXStream.createOutgoing($host:$port)',
         ),
@@ -252,7 +268,7 @@ class UDXTransport implements Transport {
       try {
         await UDXExceptionHandler.handleUDXOperation(
           () => UDXExceptionUtils.withTimeout(
-            udpSocket!.handshakeComplete,
+            untilCancelled(udpSocket!.handshakeComplete),
             remaining(),
             'UDPSocket.handshakeComplete($host:$port)',
           ),
@@ -264,7 +280,11 @@ class UDXTransport implements Transport {
       } catch (e) {
         final handshakeError = e.toString();
         final handshakeDuration = DateTime.now().difference(handshakeStart);
-        _logger.warning('[UDXTransport._performDial] Handshake failed for $host:$port after ${handshakeDuration.inMilliseconds}ms: $e');
+        if (e is UDXDialCancelledException) {
+          _logger.fine('[UDXTransport._performDial] Dial to $host:$port cancelled after ${handshakeDuration.inMilliseconds}ms');
+        } else {
+          _logger.warning('[UDXTransport._performDial] Handshake failed for $host:$port after ${handshakeDuration.inMilliseconds}ms: $e');
+        }
         
         // Notify metrics observer of handshake failure
         if (metricsObserver != null && udpSocket != null) {
@@ -320,13 +340,21 @@ class UDXTransport implements Transport {
       return sessionConn;
 
     } catch (error) {
-      _logger.warning('[UDXTransport._performDial] Error during dial to $addr: $error. Performing cleanup.');
+      if (error is UDXDialCancelledException) {
+        _logger.fine('[UDXTransport._performDial] Dial to $addr cancelled. Performing cleanup.');
+      } else {
+        _logger.warning('[UDXTransport._performDial] Error during dial to $addr: $error. Performing cleanup.');
+      }
       
       // Comprehensive resource cleanup using UDXExceptionUtils.
       // Only close the multiplexer/rawSocket if this dial created them — a
       // reused listener multiplexer must keep serving that listener's
       // inbound sessions after a failed dial attempt.
+      // The dial's own socket goes too: left open, it went on sending the
+      // handshake until its 30-s idle close. Its close waits for the stream
+      // to close, which a silent peer never confirms, so it is capped.
       await UDXExceptionUtils.safeCloseAll({
+        'udpSocket': () async => await udpSocket?.close().timeout(const Duration(seconds: 1), onTimeout: () {}),
         'initialStream': () async => await initialStream?.close(),
         if (ownsMultiplexer) 'multiplexer': () async => multiplexer?.close(),
         if (ownsMultiplexer) 'rawSocket': () async => rawSocket?.close(),

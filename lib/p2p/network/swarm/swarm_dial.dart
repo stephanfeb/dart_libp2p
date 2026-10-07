@@ -307,6 +307,15 @@ class HappyEyeballsDialer {
     final errors = <String, Exception>{};
     var pendingAttempts = _addrs.length;
     var cancelled = false;
+    // Completes when one attempt wins or the dial times out. The attempts
+    // still under way see it in their context and stop (UDX stops sending
+    // at once). Before, a losing attempt ran until its own timeout.
+    final cancelLosers = Completer<void>();
+    void cancelAll() {
+      cancelled = true;
+      if (!cancelLosers.isCompleted) cancelLosers.complete();
+    }
+    final attemptContext = _context.withDialCancel(cancelLosers.future);
 
     // Start staggered connection attempts
     for (var i = 0; i < _addrs.length; i++) {
@@ -323,12 +332,12 @@ class HappyEyeballsDialer {
         _logger.fine('Attempting ${scored.addr} (priority ${scored.priority})');
         
         try {
-          final conn = await _dialFunc(_context, scored.addr, _peerId)
+          final conn = await _dialFunc(attemptContext, scored.addr, _peerId)
               .timeout(scored.timeout);
 
           if (!completer.isCompleted) {
-            cancelled = true;  // Signal other attempts to stop
             completer.complete(conn);
+            cancelAll(); // stops the other attempts
             _logger.fine('Connected via ${scored.addr}');
           } else {
             // Another attempt won, close this connection
@@ -362,7 +371,7 @@ class HappyEyeballsDialer {
     ) + (staggerDelay * _addrs.length);
 
     return completer.future.timeout(maxWait, onTimeout: () {
-      cancelled = true;
+      cancelAll();
       throw Exception('Connection timed out after ${maxWait.inMilliseconds}ms');
     });
   }

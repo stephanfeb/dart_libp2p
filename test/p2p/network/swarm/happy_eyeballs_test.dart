@@ -201,6 +201,50 @@ void main() {
       );
     });
     
+    // A losing attempt ran on until its own timeout; a UDX dial went on
+    // sending its handshake all that time.
+    test('signals the losing attempts to stop when one wins', () async {
+      final peerId = PeerId.fromString('12D3KooWTest');
+      final addresses = [
+        ScoredAddress(
+          addr: MultiAddr('/ip4/1.2.3.4/udp/4001/udx'),
+          type: AddressType.directIPv4Public,
+          priority: 1,
+          timeout: Duration(seconds: 10),
+        ),
+        ScoredAddress(
+          addr: MultiAddr('/ip4/5.6.7.8/udp/4001/udx'),
+          type: AddressType.directIPv4Public,
+          priority: 2,
+          timeout: Duration(seconds: 10),
+        ),
+      ];
+
+      var loserStopped = false;
+      // The first address never answers; it stops only when cancelled.
+      Future<Conn> dialFunc(Context ctx, MultiAddr addr, PeerId pid) async {
+        if (addr.ip4 == '1.2.3.4') {
+          await ctx.getDialCancel()!;
+          loserStopped = true;
+          throw Exception('cancelled');
+        }
+        return MockConn(addr);
+      }
+
+      final dialer = HappyEyeballsDialer(
+        peerId: peerId,
+        addrs: addresses,
+        dialFunc: dialFunc,
+        context: Context(),
+      );
+
+      final conn = await dialer.dial();
+      await Future.delayed(Duration.zero);
+
+      expect(conn.remoteMultiaddr.ip4, '5.6.7.8');
+      expect(loserStopped, isTrue);
+    });
+
     test('throws exception when no addresses provided', () {
       final peerId = PeerId.fromString('12D3KooWTest');
       final context = Context();

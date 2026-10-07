@@ -25,6 +25,13 @@ class UDXTransportException extends ConnectionFailedException {
   String toString() => 'UDXTransportException: $message (context: $context, transient: $isTransient)';
 }
 
+/// A UDX dial stopped because its cancel signal completed, for example
+/// because another address won a Happy Eyeballs race.
+class UDXDialCancelledException extends UDXTransportException {
+  UDXDialCancelledException(Object addr)
+      : super('Dial to $addr was cancelled', 'UDXTransport.dial($addr)', null);
+}
+
 /// UDX connection-specific exception
 class UDXConnectionException extends UDXTransportException {
   UDXConnectionException(
@@ -139,7 +146,11 @@ class UDXExceptionHandler {
         // If this is the last attempt or error is not retryable, throw
         if (attempt >= retryConfig.maxRetries || 
             !shouldRetryError(classifiedException, shouldRetry)) {
-          _logger.warning('[UDXExceptionHandler] Operation failed permanently: $context. Error: $classifiedException');
+          if (classifiedException is UDXDialCancelledException) {
+            _logger.fine('[UDXExceptionHandler] Operation cancelled: $context');
+          } else {
+            _logger.warning('[UDXExceptionHandler] Operation failed permanently: $context. Error: $classifiedException');
+          }
           throw classifiedException;
         }
         

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-10-07
+
+### Fixed
+
+- **A UDX dial that lost a Happy Eyeballs race went on sending.** The swarm dials several addresses of a peer in parallel and uses the first connection. The other UDX dials went on sending their handshake until their own timeout (15 s for a direct address, 30 s for a relay). On a phone this used data and battery for each dial to a peer with more than one address. The Happy Eyeballs dialer now cancels the dials that lost, and a cancelled UDX dial stops at once and closes its socket.
+- **A failed UDX dial went on sending.** A dial that failed (for example, at its timeout) closed its stream but not its socket. When the dial used the listener's socket, the dial's socket went on sending the handshake until its 30-s idle close. It is now closed when the dial fails.
+
+### Added
+
+- `UDXTransport.dial` and `dialFromEphemeralSocket` take an optional `cancel` future. When it completes before the handshake, the dial fails with `UDXDialCancelledException` (exported from `udx_transport.dart`) and stops sending.
+- `Context.withDialCancel(Future<void>)` and `Context.getDialCancel()` carry that signal through the swarm.
+
+### Tests
+
+- The identify timeout test has a 90-s limit; it takes about 30 s on its own and went past 40 s in a busy full-suite run.
+
 ## [4.4.1] - 2026-10-07
 
 ### Fixed

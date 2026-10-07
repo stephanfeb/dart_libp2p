@@ -1110,13 +1110,23 @@ class Swarm implements Network {
     // Only a timeout shorter than the transport's own is passed down.
     final dialPeerTimeout = context.getDialPeerTimeout();
     final timeout = dialPeerTimeout < _config.dialTimeout ? dialPeerTimeout : null;
+    // UDX stops a dial that lost a Happy Eyeballs race at once; other
+    // transports run until their own timeout.
+    final cancel = context.getDialCancel();
     final transportConn = transport is UDXTransport && uncoordinatedDirect
-        ? await transport.dialFromEphemeralSocket(dialAddr, timeout: timeout)
-        : await transport.dial(
-            dialAddr,
-            timeout: timeout,
-            simultaneousConnect: simultaneousConnect,
-          );
+        ? await transport.dialFromEphemeralSocket(dialAddr, timeout: timeout, cancel: cancel)
+        : transport is UDXTransport
+            ? await transport.dial(
+                dialAddr,
+                timeout: timeout,
+                simultaneousConnect: simultaneousConnect,
+                cancel: cancel,
+              )
+            : await transport.dial(
+                dialAddr,
+                timeout: timeout,
+                simultaneousConnect: simultaneousConnect,
+              );
     
     // Upgrade the connection
     final upgradedConn = await _upgrader.upgradeOutbound(

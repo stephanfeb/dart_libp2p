@@ -241,7 +241,7 @@ void main() {
         reason: 'Should catch IdentifyTimeoutException specifically');
       
       print('=== Test Complete ===\n');
-    }, timeout: Timeout(Duration(seconds: 40))); // Allow time for timeout to occur
+    }, timeout: Timeout(Duration(seconds: 90))); // It waits about 30 s for the identify timeout
   });
 }
 

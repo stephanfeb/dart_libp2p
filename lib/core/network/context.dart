@@ -135,6 +135,16 @@ class Context {
     return withValue(_dialPeerTimeoutKey, timeout);
   }
 
+  /// Creates a new Context whose dial stops when [cancel] completes.
+  /// Transports that support it (UDX) stop sending at once; the Happy
+  /// Eyeballs dialer uses it to stop the dials that lost the race.
+  Context withDialCancel(Future<void> cancel) {
+    return withValue(_dialCancelKey, cancel);
+  }
+
+  /// Gets the dial cancel signal from the Context, if any.
+  Future<void>? getDialCancel() => getValue(_dialCancelKey) as Future<void>?;
+
   /// Creates a new Context with the allow limited connection option
   Context withAllowLimitedConn(String reason) {
     return withValue(_allowLimitedConnKey, reason);
@@ -185,3 +195,4 @@ const _allowLimitedConnKey = 'allowLimitedConn';
 const _simConnectIsServerKey = 'simConnectIsServer';
 const _simConnectIsClientKey = 'simConnectIsClient';
 const _dialPeerTimeoutKey = 'dialPeerTimeout';
+const _dialCancelKey = 'dialCancel';

@@ -1740,6 +1740,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
     _i4.MultiAddr? addr, {
     Duration? timeout,
     bool? simultaneousConnect = false,
+    _i22.Future<void>? cancel,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -1748,6 +1749,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
           {
             #timeout: timeout,
             #simultaneousConnect: simultaneousConnect,
+            #cancel: cancel,
           },
         ),
         returnValue:
@@ -1759,6 +1761,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
             {
               #timeout: timeout,
               #simultaneousConnect: simultaneousConnect,
+            #cancel: cancel,
             },
           ),
         )),
