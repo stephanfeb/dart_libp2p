@@ -14,7 +14,7 @@ import 'package:synchronized/synchronized.dart';
 
 import '../../../core/network/common.dart';
 import '../../../core/network/mux.dart' as core_mux; // ADDED for MuxedConn
-import '../../../core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope, ConnManagementScope;
+import '../../../core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope, ConnManagementScope, StreamManagementScope;
 import '../../transport/basic_upgrader.dart'; // For UpgradedConnectionImpl
 import '../../transport/multiplexing/yamux/session.dart'; // For YamuxSession
 import 'connection_health.dart'; // For event-driven health monitoring
@@ -47,8 +47,12 @@ class SwarmConn implements Conn {
   /// Whether the connection is closed
   bool _isClosed = false;
 
-  /// Map of streams by ID
-  final Map<int, SwarmStream> _streams = {};
+  /// Whether close() has run. [_isClosed] is also set when the muxer
+  /// session is found closed; close() must still release the scope then.
+  bool _closeDone = false;
+
+  /// Open streams, inbound and outbound, by stream ID.
+  final Map<String, SwarmStream> _streams = {};
 
   /// Lock for streams map
   final Lock _streamsLock = Lock();
@@ -188,7 +192,8 @@ class SwarmConn implements Conn {
     }
 
     await _streamsLock.synchronized(() async {
-      if (_isClosed) return;
+      if (_closeDone) return;
+      _closeDone = true;
       _isClosed = true;
 
       // Signal that the connection scope is done
@@ -257,13 +262,17 @@ class SwarmConn implements Conn {
 
     // Obtain a StreamManagementScope from the ResourceManager
     _logger.fine('SwarmConn.newStream ($id): Obtaining StreamManagementScope for SwarmStream using underlying muxed stream id: ${underlyingMuxedStreamResult.id()}.');
-    final streamManagementScope = await swarm.resourceManager.openStream(
-      remotePeer, // The peer this stream is being opened to
-      Direction.outbound, // Streams created via newStream are outbound
-    );
-
-    // Use the underlying Yamux stream ID directly
-    final yamuxStreamId = int.parse(underlyingMuxedStreamResult.id());
+    final StreamManagementScope streamManagementScope;
+    try {
+      streamManagementScope = await swarm.resourceManager.openStream(
+        remotePeer, // The peer this stream is being opened to
+        Direction.outbound, // Streams created via newStream are outbound
+      );
+    } catch (e) {
+      // A limit: do not leave the muxed stream open.
+      await underlyingMuxedStreamResult.reset().catchError((_) {});
+      rethrow;
+    }
 
     // Create the SwarmStream wrapper
     final stream = SwarmStream(
@@ -276,9 +285,7 @@ class SwarmConn implements Conn {
     );
 
     // Add to our streams map using the Yamux stream ID
-    await _streamsLock.synchronized(() async {
-      _streams[yamuxStreamId] = stream;
-    });
+    await addStream(stream);
 
     // Record successful stream creation for health tracking
     _healthMonitor.recordSuccess('Stream created successfully');
@@ -334,10 +341,23 @@ class SwarmConn implements Conn {
     return _ConnScopeImpl(managementScope: _managementScope);
   }
 
+  /// Adds a stream to this connection, which closes it when it closes.
+  /// If the connection is already closed, closes the stream.
+  Future<void> addStream(SwarmStream stream) async {
+    final closed = await _streamsLock.synchronized(() {
+      if (_closeDone) return true;
+      _streams[stream.id()] = stream;
+      return false;
+    });
+    if (closed) await stream.reset();
+  }
+
   /// Removes a stream from this connection
   Future<void> removeStream(SwarmStream stream) async {
     await _streamsLock.synchronized(() {
-      _streams.remove(int.parse(stream.id()));
+      if (identical(_streams[stream.id()], stream)) {
+        _streams.remove(stream.id());
+      }
     });
   }
 

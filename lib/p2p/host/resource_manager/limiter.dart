@@ -2,6 +2,9 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limit.dart';
 
+export 'package:dart_libp2p/p2p/host/resource_manager/limiter_config.dart'
+    show LimiterConfig, ConfigurableLimiter;
+
 /// Limiter is the interface for providing limits to the resource manager.
 abstract class Limiter {
   Limit getSystemLimits();
@@ -17,9 +20,11 @@ abstract class Limiter {
   Limit getConnLimits(); // Corresponds to GetConnLimits() in Go, used for individual connections
 }
 
-/// FixedLimiter is a limiter with fixed limits.
-/// Initially, it will return generous default limits.
-/// Configuration will be added later.
+/// FixedLimiter sets no limit on the system, transient, service, protocol
+/// and peer scopes; only a single connection and a single stream have
+/// limits. Use it to turn the limits off:
+/// `Libp2p.resourceLimiter(FixedLimiter())`. For limits, use
+/// [ConfigurableLimiter], the default of a host made with `Libp2p.new_`.
 class FixedLimiter implements Limiter {
   // Placeholder for actual configuration. For now, we use simple defaults.
   final BaseLimit _defaultSystemLimit;

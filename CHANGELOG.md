@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A host now has resource limits by default.** Before, `Config` always made a `ResourceManagerImpl` with a `FixedLimiter`, which sets no limit on the system, transient, service, protocol and peer scopes. A long-running node (DHT server, relay, GossipSub) accepted any number of connections and streams. A host made with `Libp2p.new_` (or `Config.newNode`) now uses a `ConfigurableLimiter` with go-libp2p's default limits, scaled to a budget of 1 GiB of memory and 512 file descriptors: for example, 256 connections and 4096 streams in total, 8 connections and 768 streams per peer, 68 inbound streams per peer and protocol. See `doc/resource-manager.md` for the table. A connection or stream over a limit fails with `ResourceLimitExceededException`. To keep the old behaviour, use `Libp2p.resourceLimiter(FixedLimiter())` or `Libp2p.resourceManager(NullResourceManager())`. `ResourceManagerImpl()` without a limiter still uses a `FixedLimiter`.
+
+### Added
+
+- **`ConfigurableLimiter` and `LimiterConfig`** (exported from `limiter.dart`), as `doc/resource-manager.md` described them. `LimiterConfig.defaults()`, `LimiterConfig.scaled(memory:, fds:)` (go-libp2p's `ScalingLimitConfig.Scale`) and `LimiterConfig.unlimited()`. `LimiterConfig(...)` replaces the limits you give: system, transient, service, servicePeer, protocol, protocolPeer, peer, conn, stream, and overrides per service, protocol and peer. A zero field keeps the default; a negative value blocks.
+- **`Libp2p.resourceLimiter(Limiter)` and `Libp2p.resourceManager(ResourceManager)`** options (`Config.resourceLimiter`, `Config.resourceManager`). The host closes a resource manager given with the option.
+- `ResourceManagerImpl.gc()` and `ResourceManagerImpl.peerScopeCount`.
+
+### Fixed
+
+- **Resource scopes that were never released.** With unlimited scopes these leaks were not seen; with limits they would block a long-running node.
+  - A stream that the remote peer reset, or whose connection closed, kept its scope until local code closed it. The swarm now releases the scope when the Yamux stream ends.
+  - Inbound streams were not tracked by their connection, so closing the connection did not close them.
+  - A connection that a "session is closed" error marked as closed never released its scope.
+  - When `openConnection` or `setPeer` failed (a limit), the swarm leaked the connection scope and did not close the connection. When `openStream` failed, the muxed stream was not reset.
+  - Peer scopes, and the per-peer scopes within protocols and services, were never dropped, so the resource manager kept one for each peer it ever saw.
+- `doc/resource-manager.md` described classes that did not exist. It now matches the code.
+
 ## [4.5.0] - 2026-10-07
 
 ### Fixed

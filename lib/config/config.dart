@@ -24,7 +24,7 @@ import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // Added for BasicH
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/p2p/host/peerstore/pstoremem/peerstore.dart'; // For MemoryPeerstore
 import 'package:dart_libp2p/p2p/host/resource_manager/resource_manager_impl.dart';
-import 'package:dart_libp2p/p2p/host/resource_manager/limiter.dart'; // For FixedLimiter
+import 'package:dart_libp2p/p2p/host/resource_manager/limiter.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer_id; // For concrete PeerId if needed
 import 'package:dart_libp2p/core/peerstore.dart' show Peerstore; // For type hinting
@@ -140,6 +140,16 @@ class Config {
   // Relay metrics observer (for instrumentation)
   RelayMetricsObserver? relayMetricsObserver;
 
+  /// The limiter of the host's resource manager. Null gives a
+  /// [ConfigurableLimiter] with [LimiterConfig.defaults]. Use
+  /// [FixedLimiter] for no limits. Cannot be set with [resourceManager].
+  Limiter? resourceLimiter;
+
+  /// The host's resource manager. Null makes a [ResourceManagerImpl] with
+  /// [resourceLimiter]. The host closes it when the host closes. Cannot be
+  /// set with [resourceLimiter].
+  ResourceManager? resourceManager;
+
   // Dial timeout configuration
   Duration dialTimeout = const Duration(seconds: 15);
   Duration relayDialTimeout = const Duration(seconds: 30);
@@ -211,8 +221,8 @@ class Config {
     peerstore.keyBook.addPrivKey(localPeerId, this.peerKey!.privateKey);
     peerstore.keyBook.addPubKey(localPeerId, this.peerKey!.publicKey);
     
-    final Limiter limiter = FixedLimiter(); // Or use a Limiter from Config if added later
-    final ResourceManager resourceManager = ResourceManagerImpl(limiter: limiter);
+    final ResourceManager resourceManager = this.resourceManager ??
+        ResourceManagerImpl(limiter: resourceLimiter ?? ConfigurableLimiter());
     final BasicUpgrader upgrader = BasicUpgrader(resourceManager: resourceManager);
 
     // Instantiate Swarm
@@ -224,7 +234,8 @@ class Config {
       upgrader: upgrader,
       config: this, // Pass the Config instance itself
       transports: transports, // From this.transports
-      // The resource manager was created for this swarm alone.
+      // The resource manager was created for this swarm, or given to this
+      // host with the resourceManager option; the host owns it.
       closeResourceManager: true,
     );
 
@@ -273,6 +284,11 @@ class Config {
 
     if (!insecure && securityProtocols.isEmpty) {
       throw Exception('No security protocols specified and insecure is not enabled');
+    }
+
+    if (resourceLimiter != null && resourceManager != null) {
+      throw Exception('Cannot use both a resource limiter and a resource manager; '
+          'give the limiter to the resource manager');
     }
 
     // Add more validation as needed
@@ -420,6 +436,17 @@ extension ConfigOptions on Config {
     enableHolePunching = enabled;
   }
   
+  /// Configures the limiter of the host's resource manager. See
+  /// [Config.resourceLimiter].
+  Future<void> withResourceLimiter(Limiter limiter) async {
+    resourceLimiter = limiter;
+  }
+
+  /// Configures the host's resource manager. See [Config.resourceManager].
+  Future<void> withResourceManager(ResourceManager manager) async {
+    resourceManager = manager;
+  }
+
   /// Configures the dial timeout for direct connections.
   Future<void> withDialTimeout(Duration timeout) async {
     dialTimeout = timeout;
@@ -644,6 +671,22 @@ class Libp2p {
 
   static Option holePunching(bool enabled) {
     return (config) => config.withHolePunching(enabled);
+  }
+
+  /// Sets the limits of the host's resource manager. The default is a
+  /// [ConfigurableLimiter] with [LimiterConfig.defaults];
+  /// `resourceLimiter(FixedLimiter())` removes the limits. See
+  /// doc/resource-manager.md.
+  static Option resourceLimiter(Limiter limiter) {
+    return (config) => config.withResourceLimiter(limiter);
+  }
+
+  /// Gives the host a resource manager, for example
+  /// `ResourceManagerImpl(limiter: ...)` or `NullResourceManager()`. The
+  /// host closes it when the host closes. Cannot be used with
+  /// [resourceLimiter].
+  static Option resourceManager(ResourceManager manager) {
+    return (config) => config.withResourceManager(manager);
   }
 
   /// Creates a new Config instance.

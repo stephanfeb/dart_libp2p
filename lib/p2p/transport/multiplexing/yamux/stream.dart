@@ -80,6 +80,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// Whether [_onClosed] has been called.
   bool _released = false;
+
+  final Completer<void> _terminated = Completer<void>();
+
+  /// Completes once, when the stream reaches its end: closed, reset by
+  /// either side, or force-reset when the session closes. The swarm uses
+  /// it to release the stream's resource scope.
+  Future<void> get onTerminated => _terminated.future;
   
   /// Remote peer ID for metrics reporting
   final PeerId? _remotePeer;
@@ -1035,6 +1042,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _released = true;
       _onClosed?.call(this);
     }
+    if (!_terminated.isCompleted) _terminated.complete();
   }
 
   @override

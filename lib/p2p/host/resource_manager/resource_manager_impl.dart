@@ -75,16 +75,29 @@ class ResourceManagerImpl implements ResourceManager {
 
   void _startGarbageCollector() {
     _gcTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      _gc();
+      gc();
     });
   }
 
-  void _gc() {
+  /// Drops the peer, protocol and per-peer sub-scopes that nothing uses.
+  /// Runs every minute; a scope that is used again later is made again.
+  ///
+  /// The manager holds one reference on each scope in its maps, so a scope
+  /// with only that reference and no resources is unused. (Before, that
+  /// reference kept every scope, and the maps grew by one entry for each
+  /// peer the node ever saw.)
+  void gc() {
     _logger.fine('Running GC...');
-    // GC Protocol Scopes
+    for (final scope in _serviceScopes.values) {
+      scope.gcPeerSubScopes();
+    }
+    for (final scope in _protocolScopes.values) {
+      scope.gcPeerSubScopes();
+    }
+
     _protocolScopes.removeWhere((id, scope) {
       if (_stickyProtocols.contains(id)) return false;
-      if (scope.isUnused()) {
+      if (scope.peerSubScopeCount == 0 && scope.isUnused(ownRefs: 1)) {
         scope.done();
         _logger.fine('GC: Removed unused protocol scope: $id');
         return true;
@@ -92,24 +105,20 @@ class ResourceManagerImpl implements ResourceManager {
       return false;
     });
 
-    // GC Peer Scopes
-    final deadPeers = <PeerId>[];
     _peerScopes.removeWhere((id, scope) {
       if (_stickyPeers.contains(id)) return false;
-      if (scope.isUnused()) {
+      if (scope.isUnused(ownRefs: 1)) {
         scope.done();
         _logger.fine('GC: Removed unused peer scope: $id');
-        deadPeers.add(id);
         return true;
       }
       return false;
     });
-
-    // TODO: In Go, GC also cleans up peer entries within service/protocol scopes.
-    // This requires more complex logic if ServiceScopeImpl/ProtocolScopeImpl manage their own peer sub-scopes.
-    // For now, this basic GC handles top-level peer and protocol scopes.
     _logger.fine('GC finished.');
   }
+
+  /// The number of peer scopes the manager keeps.
+  int get peerScopeCount => _peerScopes.length;
 
   @override
   Future<ConnManagementScope> openConnection(Direction direction, bool useFd, MultiAddr remoteAddr) async {
@@ -246,16 +255,25 @@ class ResourceManagerImpl implements ResourceManager {
   @override
   Future<T> viewProtocol<T>(ProtocolID protocol, Future<T> Function(ProtocolScope scope) f) async {
     final scope = getProtocolScopeInternal(protocol);
-    // The cast is now valid as getProtocolScopeInternal returns ProtocolScopeImpl
-    return await f(scope);
+    scope.incRef();
+    try {
+      return await f(scope);
+    } finally {
+      scope.decRef();
+    }
   }
 
   @override
   Future<T> viewPeer<T>(PeerId peer, Future<T> Function(PeerScope scope) f) async {
     // Assuming PeerId can be used where PeerId is expected
     final scope = getPeerScopeInternal(peer);
-    // The cast is now valid as getPeerScopeInternal returns PeerScopeImpl
-    return await f(scope);
+    // Hold the scope while [f] runs, so that gc() does not drop it.
+    scope.incRef();
+    try {
+      return await f(scope);
+    } finally {
+      scope.decRef();
+    }
   }
 
   @override

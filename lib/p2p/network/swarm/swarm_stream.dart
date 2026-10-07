@@ -8,6 +8,7 @@ import 'package:synchronized/synchronized.dart';
 
 import '../../../core/network/conn.dart';
 import '../../../core/network/rcmgr.dart' show StreamScope, ScopeStat, ResourceScopeSpan, ResourceScope, StreamManagementScope;
+import '../../transport/multiplexing/yamux/stream.dart' show YamuxStream;
 import 'swarm_conn.dart';
 
 /// SwarmStream is a stream over a SwarmConn.
@@ -58,7 +59,23 @@ class SwarmStream implements P2PStream<Uint8List> {
     _direction = direction,
     _opened = opened,
     _underlyingMuxedStream = underlyingMuxedStream,
-    _managementScope = managementScope;
+    _managementScope = managementScope {
+    // Release the scope when the muxed stream ends, even if no one calls
+    // close() or reset() here: the remote peer reset the stream, or the
+    // connection closed. Otherwise the scope would count against the
+    // limits until the node stopped.
+    final muxed = underlyingMuxedStream;
+    if (muxed is YamuxStream) {
+      muxed.onTerminated.then((_) => _onUnderlyingTerminated());
+    }
+  }
+
+  void _onUnderlyingTerminated() {
+    if (_scopeCleanedUp) return;
+    _logger.fine('Stream $_id: muxed stream ended; releasing its scope');
+    cleanupScope();
+    _conn.removeStream(this).catchError((_) {});
+  }
 
   @override
   String id() => _id;

@@ -298,6 +298,10 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
   /// how go-libp2p's SetPeer and SetProtocol juggle resources. Throws, and
   /// changes nothing, if a gained ancestor's limit would be exceeded.
   void reparent(List<ResourceScopeImpl> newEdges) {
+    // A scope that is done holds nothing and refers to nothing; moving it
+    // would only take references that are never dropped. (A stream whose
+    // remote peer reset it is done before the protocol is set.)
+    if (_isDone) return;
     if (_owner != null) {
       throw StateError('$name: a span cannot be reparented');
     }
@@ -486,11 +490,14 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
     }
   }
 
-  bool isUnused() {
+  /// Whether nothing uses this scope: it holds no resource and no scope or
+  /// span refers to it. [ownRefs] references are not counted; the resource
+  /// manager holds one on each peer scope it keeps.
+  bool isUnused({int ownRefs = 0}) {
     if (_isDone) {
       return true;
     }
-    if (_refCnt > 0) {
+    if (_refCnt > ownRefs) {
       return false;
     }
     final s = stat;

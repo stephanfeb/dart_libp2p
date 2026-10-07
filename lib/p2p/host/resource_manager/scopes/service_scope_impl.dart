@@ -34,4 +34,20 @@ class ServiceScopeImpl extends ResourceScopeImpl implements ServiceScope {
       return newPeerSubScope;
     });
   }
+
+  /// Drops the per-peer sub-scopes that nothing uses. Called by the resource
+  /// manager's garbage collector; without it this map would keep an entry
+  /// for every peer that ever used this service.
+  void gcPeerSubScopes() {
+    _peerSubScopes.removeWhere((_, scope) {
+      if (scope.isUnused(ownRefs: 1)) {
+        scope.done();
+        return true;
+      }
+      return false;
+    });
+  }
+
+  /// The number of per-peer sub-scopes.
+  int get peerSubScopeCount => _peerSubScopes.length;
 }

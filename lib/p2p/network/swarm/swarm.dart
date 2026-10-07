@@ -440,13 +440,24 @@ class Swarm implements Network {
           return; 
         }
 
-        final connManagementScope = await _resourceManager.openConnection(
-          Direction.inbound,
-          true, 
-          upgradedConn.remoteMultiaddr, 
-        );
-        
-        await connManagementScope.setPeer(upgradedConn.remotePeer);
+        final ConnManagementScope connManagementScope;
+        try {
+          connManagementScope = await _openConnScope(
+            Direction.inbound,
+            upgradedConn.remoteMultiaddr,
+            upgradedConn.remotePeer,
+          );
+        } catch (e) {
+          _logger.fine('Inbound connection from ${upgradedConn.remotePeer} refused by the resource manager: $e');
+          await upgradedConn.close().catchError((_) {});
+          if (remotePeerIdStr != null && upgradingCompleter != null) {
+            await _connLock.synchronized(() {
+              _upgradingConnections.remove(remotePeerIdStr);
+            });
+            if (!upgradingCompleter.isCompleted) upgradingCompleter.completeError(e);
+          }
+          return;
+        }
 
         final connID = _nextConnID++;
         final swarmConn = SwarmConn(
@@ -538,6 +549,20 @@ class Swarm implements Network {
     });
   }
 
+  /// Opens the resource scope of a new connection and attaches it to
+  /// [peer]. On failure (a limit), releases the scope and throws.
+  Future<ConnManagementScope> _openConnScope(
+      Direction direction, MultiAddr remoteAddr, PeerId peer) async {
+    final scope = await _resourceManager.openConnection(direction, true, remoteAddr);
+    try {
+      await scope.setPeer(peer);
+    } catch (_) {
+      scope.done();
+      rethrow;
+    }
+    return scope;
+  }
+
   /// Handles incoming streams from a connection
   void _handleIncomingStreams(SwarmConn conn) {
     // This streamHandler is set on the SwarmConn.
@@ -545,10 +570,17 @@ class Swarm implements Network {
     // The 'muxedStream' parameter is the P2PStream from the multiplexer.
     conn.streamHandler = (P2PStream muxedStream) async { // Ensure type is P2PStream
       // Obtain a StreamManagementScope for the new inbound stream
-      final streamManagementScope = await _resourceManager.openStream(
-        conn.remotePeer, // The peer this stream is from
-        Direction.inbound, // This is an inbound stream
-      );
+      final StreamManagementScope streamManagementScope;
+      try {
+        streamManagementScope = await _resourceManager.openStream(
+          conn.remotePeer, // The peer this stream is from
+          Direction.inbound, // This is an inbound stream
+        );
+      } catch (e) {
+        _logger.fine('Inbound stream from ${conn.remotePeer} refused by the resource manager: $e');
+        await muxedStream.reset().catchError((_) {});
+        return;
+      }
 
       // Create a SwarmStream wrapper for the muxed stream using the actual stream ID
       final swarmStream = SwarmStream(
@@ -559,6 +591,8 @@ class Swarm implements Network {
         underlyingMuxedStream: muxedStream as P2PStream<Uint8List>, // Cast if necessary
         managementScope: streamManagementScope,
       );
+      // The connection closes its streams when it closes.
+      await conn.addStream(swarmStream);
 
       // Set a negotiation deadline on the inbound stream so that stalled
       // protocol negotiations don't hang forever.
@@ -1006,13 +1040,17 @@ class Swarm implements Network {
       _logger.fine('Swarm.dialPeer: Successfully connected to $peerId');
       
       // Obtain a ConnManagementScope for the new connection
-      final connManagementScope = await _resourceManager.openConnection(
-        Direction.outbound,
-        true,
-        conn.remoteMultiaddr,
-      );
-      
-      await connManagementScope.setPeer(conn.remotePeer);
+      final ConnManagementScope connManagementScope;
+      try {
+        connManagementScope = await _openConnScope(
+          Direction.outbound,
+          conn.remoteMultiaddr,
+          conn.remotePeer,
+        );
+      } catch (e) {
+        await conn.close().catchError((_) {});
+        rethrow;
+      }
       
       // Create a swarm connection
       final connID = _nextConnID++;
