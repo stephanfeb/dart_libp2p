@@ -476,7 +476,9 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   final UDPSocket _udpSocket;
   final UDXStream _initialStream; 
   final MultiAddr _localMultiaddr;
-  final MultiAddr _remoteMultiaddr;
+  /// The peer's address. It changes when dart_udx moves the connection to
+  /// a new path (see [_onPathUpdate]).
+  MultiAddr _remoteMultiaddr;
   final UDXTransport _transport;
   final ConnManager _connManager;
   final bool _isDialer;
@@ -495,6 +497,7 @@ class UDXSessionConn implements MuxedConn, TransportConn {
   
   final Map<int, UDXP2PStreamAdapter> _activeStreams = {};
   StreamSubscription? _socketMessageSubscription;
+  StreamSubscription? _pathUpdateSubscription;
   StreamSubscription? _initialStreamCloseSubscription;
   
   late int _nextOwnStreamId; 
@@ -581,6 +584,8 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     // own close below), the session cannot carry data any more. Close it, so
     // its streams return EOF and the layers above drop the connection at once
     // instead of when their next write fails.
+    _pathUpdateSubscription = _udpSocket.on('pathUpdate').listen(_onPathUpdate);
+
     _udpSocket.on('close').listen((event) {
       if (_isClosed || _isClosing) return;
       final timeSinceOpen = DateTime.now().difference(_openedAt);
@@ -696,8 +701,10 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     final rawData = eventPayload['rawData'] as Uint8List;
     _logger.fine('[UDXSessionConn $id] Unmatched packet details: destId=${packet.destinationStreamId}, srcId=${packet.sourceStreamId}, from=${remoteAddress.address}:$remotePort');
 
-    final expectedRemoteHost = _remoteMultiaddr.valueForProtocol(remoteAddress.type == InternetAddressType.IPv4 ? 'ip4' : 'ip6');
-    final expectedRemotePort = int.parse(_remoteMultiaddr.valueForProtocol('udp')!);
+    // The socket's current address: it changes when the peer moves to a
+    // new path.
+    final expectedRemoteHost = _udpSocket.remoteAddress.address;
+    final expectedRemotePort = _udpSocket.remotePort;
 
     if (remoteAddress.address != expectedRemoteHost || remotePort != expectedRemotePort) {
       _logger.fine('[UDXSessionConn $id] (Dialer): Received unmatched packet from unexpected source ${remoteAddress.address}:$remotePort. Expected $expectedRemoteHost:$expectedRemotePort. Ignoring.');
@@ -761,10 +768,10 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _nextExpectedRemoteStreamId += 2;
     _logger.fine('[UDXSessionConn $id] Opening new stream. LocalId: $localStreamId, RemoteExpectedId: $remoteStreamId');
 
-    final remoteHost = _remoteMultiaddr.valueForProtocol('ip4') ?? _remoteMultiaddr.valueForProtocol('ip6');
-    final remotePort = int.parse(_remoteMultiaddr.valueForProtocol('udp') ?? '0');
+    final remoteHost = _udpSocket.remoteAddress.address;
+    final remotePort = _udpSocket.remotePort;
 
-    if (remoteHost == null || remotePort == 0) {
+    if (remotePort == 0) {
       _logger.fine('[UDXSessionConn $id] Remote address not set, cannot open stream.');
       throw StateError('Remote address not properly set for UDXSessionConn');
     }
@@ -811,6 +818,22 @@ class UDXSessionConn implements MuxedConn, TransportConn {
 
   @override
   MultiAddr get remoteMultiaddr => _remoteMultiaddr;
+
+  /// dart_udx validated a new path to the peer (a network change or a NAT
+  /// rebinding) and sends to it now. The remote address follows, so the
+  /// layers above (they all read it from here) see where the peer is.
+  void _onPathUpdate(UDXEvent event) {
+    final data = event.data as Map;
+    final host = data['host'] as String;
+    final port = data['port'] as int;
+    final old = _remoteMultiaddr;
+    final text = old.toString();
+    final udx = text.indexOf('/udx');
+    final suffix = udx < 0 ? '' : text.substring(udx + '/udx'.length);
+    final family = InternetAddress.tryParse(host)?.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+    _remoteMultiaddr = MultiAddr('/$family/$host/udp/$port/udx$suffix');
+    _logger.info('[UDXSessionConn $id] Peer moved to a new path: $old -> $_remoteMultiaddr');
+  }
 
   @override
   PeerId get localPeer => _localPeer ?? (throw StateError("Local PeerId not set."));
@@ -913,6 +936,8 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     _logger.fine('[UDXSessionConn $id] CLEANUP_ORDER: 1. Cancelling socket and initial stream subscriptions');
     await _socketMessageSubscription?.cancel();
     _socketMessageSubscription = null;
+    await _pathUpdateSubscription?.cancel();
+    _pathUpdateSubscription = null;
     await _initialStreamCloseSubscription?.cancel();
     _initialStreamCloseSubscription = null;
 

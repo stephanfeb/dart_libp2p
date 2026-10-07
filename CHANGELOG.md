@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A UDX dial that lost a Happy Eyeballs race went on sending.** The swarm dials several addresses of a peer in parallel and uses the first connection. The other UDX dials went on sending their handshake until their own timeout (15 s for a direct address, 30 s for a relay). On a phone this used data and battery for each dial to a peer with more than one address. The Happy Eyeballs dialer now cancels the dials that lost, and a cancelled UDX dial stops at once and closes its socket.
+- **A UDX connection kept the old remote address after the peer moved.** When a peer changes network (Wi-Fi to cellular) or its NAT rebinds, dart_udx validates the new path and sends to it. The connection's `remoteMultiaddr` stayed at the old address, so the swarm, identify and the peerstore used an address that was gone. Also, on the dialing side, a stream that the peer opened from the new path was dropped. The connection now follows dart_udx's path update (dart-libp2p-1pp).
 - **A failed UDX dial went on sending.** A dial that failed (for example, at its timeout) closed its stream but not its socket. When the dial used the listener's socket, the dial's socket went on sending the handshake until its 30-s idle close. It is now closed when the dial fails.
 
 ### Added
