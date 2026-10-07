@@ -11,6 +11,8 @@ import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // For P2PStream
 import 'package:dart_libp2p/core/network/common.dart' show Direction; // Import Direction
+import 'package:dart_libp2p/core/event/bus.dart' show Subscription;
+import 'package:dart_libp2p/core/event/nattype.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
@@ -35,6 +37,13 @@ class HolePunchResult {
 
   HolePunchResult(this.addrs, this.obsAddrs, this.rtt);
 }
+
+/// How many times to try a hole punch. Behind a symmetric NAT the peer
+/// cannot know the port to send to, so a punch works only when the peer's
+/// NAT is lenient; one attempt finds that out, and more attempts only spend
+/// data and time.
+int holePunchAttempts(NATDeviceType udpNatType) =>
+    udpNatType == NATDeviceType.symmetric ? 1 : maxRetries;
 
 /// Error thrown when another hole punching attempt is currently running
 class HolePunchActiveError implements Exception {
@@ -89,6 +98,13 @@ class HolePuncher {
   /// Address filter
   final AddrFilter? _filter;
 
+  /// This host's UDP NAT type, from `EvtNATDeviceTypeChanged`.
+  NATDeviceType _udpNatType = NATDeviceType.unknown;
+  Subscription? _natTypeSub;
+
+  /// This host's UDP NAT type as the hole puncher knows it.
+  NATDeviceType get udpNatType => _udpNatType;
+
   /// How long [directConnect] waits for the peer's own hole punch when the
   /// peer must start it (see [directConnect]).
   final Duration peerHolePunchTimeout;
@@ -102,6 +118,27 @@ class HolePuncher {
     _tracer = tracer,
     _filter = filter {
     _host.network.notify(_NetNotifiee(this));
+    _watchNatType();
+  }
+
+  Future<void> _watchNatType() async {
+    try {
+      final sub = await _host.eventBus.subscribe(EvtNATDeviceTypeChanged);
+      if (_closed) {
+        await sub.close();
+        return;
+      }
+      _natTypeSub = sub;
+      sub.stream.listen((event) {
+        if (event is EvtNATDeviceTypeChanged &&
+            event.transportProtocol == NATTransportProtocol.udp &&
+            event.natDeviceType != NATDeviceType.unknown) {
+          _udpNatType = event.natDeviceType;
+        }
+      });
+    } catch (e) {
+      _log.fine('Hole puncher cannot watch the NAT type: $e');
+    }
   }
 
   /// Begins a direct connect attempt
@@ -186,7 +223,8 @@ class HolePuncher {
     _log.fine('Got inbound proxy conn');
 
     // Hole punch
-    for (int i = 1; i <= maxRetries; i++) {
+    final attempts = holePunchAttempts(_udpNatType);
+    for (int i = 1; i <= attempts; i++) {
       try {
         final result = await _initiateHolePunch(peerId);
         final addrs = result.addrs;
@@ -233,8 +271,8 @@ class HolePuncher {
         return;
       }
 
-      if (i == maxRetries) {
-        _tracer?.holePunchFinished('initiator', maxRetries, [], [], null);
+      if (i == attempts) {
+        _tracer?.holePunchFinished('initiator', attempts, [], [], null);
       }
     }
 
@@ -387,6 +425,7 @@ class HolePuncher {
     await _closedMutex.synchronized(() {
       _closed = true;
     });
+    await _natTypeSub?.close();
 
     _ctx.complete();
     return _ctx.future;

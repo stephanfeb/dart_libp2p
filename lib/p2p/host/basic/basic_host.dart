@@ -7,6 +7,9 @@ import 'package:dart_libp2p/core/event/addrs.dart';
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/event/protocol.dart';
 import 'package:dart_libp2p/core/event/reachability.dart';
+import 'package:dart_libp2p/core/event/nattype.dart';
+import 'package:dart_libp2p/p2p/host/eventbus/opts.dart' show stateful;
+import 'package:dart_libp2p/p2p/nat/stun/stun_nat_type.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/network.dart';
@@ -147,6 +150,14 @@ class BasicHost implements Host {
   CircuitV2Client? get circuitV2Client => _circuitV2Client;
   AmbientAutoNATv2? _autoNATService; // Changed to AmbientAutoNATv2 orchestrator
   Host? _autoNATDialerHost;
+
+  /// The latest UDP NAT type: from identify's observed addresses, or from
+  /// STUN when [Config.enableStunNatDetection] is on.
+  NATDeviceType _udpNatDeviceType = NATDeviceType.unknown;
+  Subscription? _natTypeSub;
+  Emitter? _stunNatTypeEmitter;
+  Timer? _stunNatTypeTimer;
+  NATDeviceType _lastStunNatType = NATDeviceType.unknown;
   HolePunchService? _holePunchService; // Added HolePunchService field
   late final BasicUpgrader _upgrader; // Added BasicUpgrader field
   
@@ -408,6 +419,8 @@ class BasicHost implements Host {
       
       _log.fine('[BasicHost start] After AutoNATv2 creation. network.hashCode: ${_network.hashCode}, network.listenAddresses: ${_network.listenAddresses}');
     }
+
+    await _startNatTypeTracking();
 
     // Initialize HolePunchService if enabled
     if (_config.enableHolePunching) {
@@ -1478,6 +1491,49 @@ class BasicHost implements Host {
     return dialerHost;
   }
 
+  /// The type of this host's NAT for UDP, as far as it is known: from the
+  /// addresses that peers observe (identify), or from STUN when
+  /// [Config.enableStunNatDetection] is on. The hole puncher reads the same
+  /// events.
+  NATDeviceType get udpNatDeviceType => _udpNatDeviceType;
+
+  Future<void> _startNatTypeTracking() async {
+    try {
+      final sub = await eventBus.subscribe(EvtNATDeviceTypeChanged);
+      _natTypeSub = sub;
+      sub.stream.listen((event) {
+        if (event is EvtNATDeviceTypeChanged &&
+            event.transportProtocol == NATTransportProtocol.udp &&
+            event.natDeviceType != NATDeviceType.unknown) {
+          _udpNatDeviceType = event.natDeviceType;
+        }
+      });
+    } catch (e) {
+      _log.fine('Could not subscribe to NAT type events: $e');
+    }
+
+    if (!_config.enableStunNatDetection) return;
+    _stunNatTypeEmitter = await eventBus.emitter(EvtNATDeviceTypeChanged, opts: [stateful()]);
+    final probe = StunNatTypeProbe(servers: _config.stunServers);
+    Future<void> run() async {
+      if (_closed) return;
+      try {
+        final type = await probe.probe();
+        if (_closed || type == NATDeviceType.unknown || type == _lastStunNatType) return;
+        _lastStunNatType = type;
+        _log.info('STUN NAT type for UDP: $type');
+        await _stunNatTypeEmitter?.emit(EvtNATDeviceTypeChanged(
+          transportProtocol: NATTransportProtocol.udp,
+          natDeviceType: type,
+        ));
+      } catch (e) {
+        _log.fine('STUN NAT type probe failed: $e');
+      }
+    }
+    unawaited(run());
+    _stunNatTypeTimer = Timer.periodic(const Duration(minutes: 10), (_) => run());
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;
@@ -1498,6 +1554,10 @@ class BasicHost implements Host {
 
     // Close RelayManager if initialized
     await _relayManager?.close();
+
+    _stunNatTypeTimer?.cancel();
+    await _natTypeSub?.close();
+    await _stunNatTypeEmitter?.close();
 
     // Close AutoNATService if initialized
     await _autoNATService?.close();

@@ -118,7 +118,12 @@ class StunClient {
     }
   }
   
-  ({InternetAddress address, int port})? _extractMappedAddress(StunMessage message) {
+  /// The address in a binding response: XOR-MAPPED-ADDRESS, or else
+  /// MAPPED-ADDRESS. Null when the response has neither.
+  static ({InternetAddress address, int port})? mappedAddressOf(StunMessage message) =>
+      _extractMappedAddress(message);
+
+  static ({InternetAddress address, int port})? _extractMappedAddress(StunMessage message) {
     // First try XOR-MAPPED-ADDRESS (RFC 5389)
     final xorMapped = message.attributes[StunAttribute.xorMappedAddress];
     if (xorMapped != null) {
@@ -134,7 +139,7 @@ class StunClient {
     return null;
   }
 
-  ({InternetAddress address, int port})? _decodeXorMappedAddress(Uint8List data, List<int> transactionId) {
+  static ({InternetAddress address, int port})? _decodeXorMappedAddress(Uint8List data, List<int> transactionId) {
     if (data.length < 8) return null;
     
     final buffer = ByteData.view(data.buffer, data.offsetInBytes);
@@ -157,7 +162,7 @@ class StunClient {
     );
   }
 
-  ({InternetAddress address, int port})? _decodeMappedAddress(Uint8List data) {
+  static ({InternetAddress address, int port})? _decodeMappedAddress(Uint8List data) {
     if (data.length < 8) return null;
     
     final buffer = ByteData.view(data.buffer, data.offsetInBytes);

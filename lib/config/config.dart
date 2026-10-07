@@ -15,6 +15,8 @@ import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart'; // Added
 import 'package:dart_libp2p/core/event/bus.dart'; // Added
 import 'package:dart_libp2p/p2p/host/basic/natmgr.dart'; // Added
+import 'package:dart_libp2p/p2p/nat/stun/stun_client_pool.dart' show StunClientPool;
+import 'package:dart_libp2p/p2p/nat/stun/stun_nat_type.dart' show StunNatTypeProbe;
 import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Added for AddrsFactory
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // Added for BasicHost
 
@@ -110,6 +112,18 @@ class Config {
   /// still checks its own reachability (the client).
   bool enableAutoNATv2Server = true;
   bool enableHolePunching = true; // Default to true for Hole Punching service
+
+  /// Whether the host asks two STUN servers whether its NAT maps UDP like a
+  /// cone or like a symmetric NAT (see [StunNatTypeProbe]), at start and
+  /// every 10 minutes. Off by default, because it contacts the STUN servers
+  /// in [stunServers] (Google's when null). The result is published as
+  /// `EvtNATDeviceTypeChanged`; with a symmetric NAT, a hole punch makes one
+  /// attempt instead of three.
+  bool enableStunNatDetection = false;
+
+  /// The STUN servers for [enableStunNatDetection]; null uses
+  /// [StunClientPool.defaultStunServers].
+  List<({String host, int port})>? stunServers;
 
   // AutoNATv2 specific configurations
   List<AutoNATv2Option> autoNATv2Options = [];
@@ -395,6 +409,12 @@ extension ConfigOptions on Config {
     enableAutoNATv2Server = enabled;
   }
 
+  /// Configures STUN NAT type detection. See [enableStunNatDetection].
+  Future<void> withStunNatDetection(bool enabled, {List<({String host, int port})>? servers}) async {
+    enableStunNatDetection = enabled;
+    if (servers != null) stunServers = servers;
+  }
+
   /// Configures libp2p to enable/disable the Hole Punching service.
   Future<void> withHolePunching(bool enabled) async {
     enableHolePunching = enabled;
@@ -565,6 +585,12 @@ class Libp2p {
     return (config) => config.withAutoNATv2Server(enabled);
   }
   
+  /// Turns STUN NAT type detection on or off. See
+  /// [Config.enableStunNatDetection].
+  static Option stunNatDetection(bool enabled, {List<({String host, int port})>? servers}) {
+    return (config) => config.withStunNatDetection(enabled, servers: servers);
+  }
+
   /// Configures the dial timeout for direct connections.
   static Option dialTimeout(Duration timeout) {
     return (config) => config.withDialTimeout(timeout);

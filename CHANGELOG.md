@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **STUN NAT type detection (opt-in).** `Libp2p.stunNatDetection(true, servers: [...])` makes the host ask two STUN servers, from one UDP socket, which address they see. The same address means a cone NAT; a different port means a symmetric NAT. The host probes at start and every 10 minutes and publishes the result as `EvtNATDeviceTypeChanged` (UDP), the event that identify already publishes from the addresses peers observe. It is off by default because it contacts the STUN servers (Google's unless you give others). `StunNatTypeProbe` can also be used on its own (dart-libp2p-omy).
+- **`BasicHost.udpNatDeviceType`**: this host's UDP NAT type, from identify or from STUN.
+- **Fewer hole-punch attempts behind a symmetric NAT.** The hole puncher follows `EvtNATDeviceTypeChanged`. When this host's UDP NAT is symmetric, a hole punch makes one attempt instead of three: the peer cannot know the port to send to, so the punch works only when the peer's NAT is lenient, and more attempts only spend data and time. `holePunchAttempts()` gives the number.
+- `StunClient.mappedAddressOf()` returns the mapped address in a STUN binding response.
 - `UDXTransport.dial` and `dialFromEphemeralSocket` take an optional `cancel` future. When it completes before the handshake, the dial fails with `UDXDialCancelledException` (exported from `udx_transport.dart`) and stops sending.
 - `Context.withDialCancel(Future<void>)` and `Context.getDialCancel()` carry that signal through the swarm.
 
