@@ -3,6 +3,7 @@ import 'dart:io' show InternetAddress, RawDatagramSocket;
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/multiaddr.dart';
+import 'package:dart_libp2p/core/network/common.dart' show Direction;
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
@@ -31,6 +32,28 @@ class _EmptyAddrBook implements AddrBook {
 class _DirectConn implements Conn {
   @override
   MultiAddr get remoteMultiaddr => MultiAddr('/ip4/5.6.7.8/udp/4001/udx');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Stats extends ConnStats {
+  _Stats(Direction direction)
+      : super(stats: Stats(direction: direction, opened: DateTime.now()), numStreams: 0);
+}
+
+/// A relayed connection that this host dialed (outbound) or accepted.
+class _RelayedConn implements Conn {
+  final Direction direction;
+
+  _RelayedConn(this.direction);
+
+  @override
+  MultiAddr get remoteMultiaddr => MultiAddr('/ip4/1.2.3.4/udp/4001/udx'
+      '/p2p/12D3KooWJfrcqqdoAcKUjAB6dGkC9KHCsTG5WKHZH8hk1wLs67it/p2p-circuit');
+
+  @override
+  ConnStats get stat => _Stats(direction);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -128,6 +151,60 @@ void main() {
 
     await puncher.directConnect(remote);
     verify(host.newStream(any, any, any)).called(1);
+  });
+
+  // In DCUtR the peer that accepted the relayed connection starts the punch,
+  // and it resets a hole punch stream on a connection it sees as inbound.
+  // Before, a directConnect from the dialing side failed with "Unexpected
+  // EOF" although the peer's own punch then succeeded (dart-libp2p-114).
+  group('HolePuncher on a relayed connection that it dialed', () {
+    late MockHost host;
+    late MockNetwork network;
+    late PeerId remote;
+    late List<Conn> conns;
+
+    setUp(() async {
+      host = MockHost();
+      network = MockNetwork();
+      final peerstore = MockPeerstore();
+      remote = await PeerId.random();
+      conns = [_RelayedConn(Direction.outbound)];
+      when(host.id).thenReturn(await PeerId.random());
+      when(host.network).thenReturn(network);
+      when(host.peerStore).thenReturn(peerstore);
+      when(peerstore.addrBook).thenReturn(_EmptyAddrBook());
+      when(network.connsToPeer(any)).thenAnswer((_) => conns);
+      when(host.newStream(any, any, any)).thenThrow(Exception('Unexpected EOF while reading byte'));
+    });
+
+    HolePuncher puncher() => HolePuncher(
+          host,
+          MockIDService(),
+          () => [MultiAddr('/ip4/9.9.9.9/udp/4001/udx')],
+          peerHolePunchTimeout: const Duration(milliseconds: 600),
+        );
+
+    test('waits for the peer\'s hole punch and does not start one', () async {
+      Future.delayed(const Duration(milliseconds: 300), () => conns = [...conns, _DirectConn()]);
+
+      await puncher().directConnect(remote);
+      verifyNever(host.newStream(any, any, any));
+    });
+
+    test('fails with a clear error when the peer\'s punch does not succeed', () async {
+      await expectLater(
+        puncher().directConnect(remote),
+        throwsA(predicate((e) => '$e'.contains('the peer starts the hole punch'))),
+      );
+      verifyNever(host.newStream(any, any, any));
+    });
+
+    test('starts the punch itself on a relayed connection it accepted', () async {
+      conns = [_RelayedConn(Direction.inbound)];
+
+      await expectLater(puncher().directConnect(remote), throwsA(anything));
+      verify(host.newStream(any, any, any)).called(greaterThan(0));
+    });
   });
 
   // A hole punch dial waits 5 s, as in go-libp2p, not the 15-s dial timeout.

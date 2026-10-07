@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-10-07
+
+### Fixed
+
+- **A hole punch from the side that dialed the relayed connection was reported as failed.** In DCUtR, the peer that accepted the relayed connection starts the hole punch, and it resets a hole punch stream on a connection it sees as inbound. `HolePunchService.directConnect` on the peer that dialed through the relay therefore failed with `Unexpected EOF`, but the other peer's punch made the direct connection a short time later. When this host dialed every relayed connection to the peer, `directConnect` now does not start a punch. It waits for the direct connection that the peer's punch makes, and returns. If no direct connection comes in `HolePuncher.peerHolePunchTimeout` (default 30 s), it throws an error that tells why (dart-libp2p-114).
+
+### Added
+
+- **mDNS query options.** `MdnsDiscovery` takes `queryOptions`, an `MdnsQueryOptions` value: query timeout, network interface, unicast answers, IPv4 or IPv6 only, `reusePort`, `reuseAddress`, multicast TTL and a logger. The defaults are the values from before, and `reusePort` is still off on Android unless you set it. Requested in PR #11 by syzygyinteractivemedia (dart-libp2p-6hx).
+
+### Tests
+
+- **AutoNAT v2 interop with go-libp2p** over TCP and UDX: a go-libp2p server checks a Dart address, a go-libp2p server that asks for dial data gets it from Dart, and a Dart server checks a go-libp2p address and gets dial data. The go interop peer has new modes `autonat-server` and `autonat-client` (dart-libp2p-8wx).
+
 ## [4.3.0] - 2026-10-06
 
 ### Fixed

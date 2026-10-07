@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	yamux "github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	goyamux "github.com/libp2p/go-yamux/v5"
+	"github.com/libp2p/go-libp2p/p2p/protocol/autonatv2"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	relayv2client "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -93,7 +94,7 @@ func main() {
 		}
 	}()
 
-	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-relay-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers, pubsub-server, pubsub-client")
+	mode := flag.String("mode", "server", "Mode: server, client, ping, echo-server, echo-client, push-test, relay, relay-echo-server, relay-echo-client, dht-server, dht-relay-server, dht-put-value, dht-get-value, dht-provide, dht-find-providers, pubsub-server, pubsub-client, autonat-server, autonat-client")
 	port := flag.Int("port", 0, "Listen port (0 for random)")
 	target := flag.String("target", "", "Target multiaddr for client/ping modes")
 	message := flag.String("message", "hello from go-libp2p", "Message to send in echo-client mode")
@@ -153,6 +154,10 @@ func main() {
 		runPubSubServer(*port, *topic, cfg)
 	case "pubsub-client":
 		runPubSubClient(*target, *topic, *message, cfg)
+	case "autonat-server":
+		runAutoNATServer(*port, *transport, cfg)
+	case "autonat-client":
+		runAutoNATClient(*target, *transport, cfg)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -1246,3 +1251,99 @@ func runPubSubClient(targetStr, topicName, message string, cfg *PeerConfig) {
 	fmt.Println("PubSub client done")
 }
 
+// autonat-server mode: answer AutoNAT v2 reachability checks. Dial-backs go
+// out from a separate dialer host, as in go-libp2p. Private and loopback
+// addresses are allowed so that the check works on one machine.
+func runAutoNATServer(port int, transport string, cfg *PeerConfig) {
+	h, err := createHost(port, transport, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+	dialer, err := createHost(0, transport, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating dialer host: %v\n", err)
+		os.Exit(1)
+	}
+	defer dialer.Close()
+
+	an, err := autonatv2.New(dialer, autonatv2.AllowPrivateAddrs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating autonatv2: %v\n", err)
+		os.Exit(1)
+	}
+	if err := an.Start(h); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting autonatv2: %v\n", err)
+		os.Exit(1)
+	}
+	defer an.Close()
+
+	printHostInfo(h)
+	waitForShutdown()
+}
+
+// autonat-client mode: connect to the target, then ask it to check this
+// host's loopback address with AutoNAT v2, sending dial data if asked.
+// Prints "AutoNATResult: <reachability> <addr>".
+func runAutoNATClient(targetStr, transport string, cfg *PeerConfig) {
+	if targetStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target required")
+		os.Exit(1)
+	}
+	h, err := createHost(0, transport, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	an, err := autonatv2.New(h, autonatv2.AllowPrivateAddrs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating autonatv2: %v\n", err)
+		os.Exit(1)
+	}
+	if err := an.Start(h); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting autonatv2: %v\n", err)
+		os.Exit(1)
+	}
+	defer an.Close()
+
+	info, err := parseTarget(targetStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := h.Connect(ctx, *info); err != nil {
+		fmt.Fprintf(os.Stderr, "Connect failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var addr multiaddr.Multiaddr
+	for _, a := range h.Addrs() {
+		if strings.Contains(a.String(), "/ip4/127.0.0.1/") {
+			addr = a
+			break
+		}
+	}
+	if addr == nil {
+		fmt.Fprintln(os.Stderr, "Error: no loopback address")
+		os.Exit(1)
+	}
+
+	// The target becomes a server candidate after identify; retry until then.
+	for {
+		res, err := an.GetReachability(ctx, []autonatv2.Request{{Addr: addr, SendDialData: true}})
+		if err == nil {
+			fmt.Printf("AutoNATResult: %s %s\n", res.Reachability, res.Addr)
+			return
+		}
+		if ctx.Err() != nil {
+			fmt.Fprintf(os.Stderr, "GetReachability failed: %v\n", err)
+			os.Exit(1)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}

@@ -89,10 +89,15 @@ class HolePuncher {
   /// Address filter
   final AddrFilter? _filter;
 
+  /// How long [directConnect] waits for the peer's own hole punch when the
+  /// peer must start it (see [directConnect]).
+  final Duration peerHolePunchTimeout;
+
   /// Creates a new holepuncher
   HolePuncher(this._host, this._ids, this._listenAddrs, {
     HolePunchTracer? tracer,
     AddrFilter? filter,
+    this.peerHolePunchTimeout = const Duration(seconds: 30),
   }) : 
     _tracer = tracer,
     _filter = filter {
@@ -118,6 +123,13 @@ class HolePuncher {
   /// Attempts to make a direct connection with a remote peer.
   /// It first attempts a direct dial (if we have a public address of that peer), and then
   /// coordinates a hole punch over the given relay connection.
+  ///
+  /// In DCUtR, the peer that accepted the relayed connection starts the hole
+  /// punch, and it refuses a punch on a connection it sees as inbound. When
+  /// this host dialed every relayed connection to [peerId], the peer starts
+  /// the punch on its own. This method then waits up to
+  /// [peerHolePunchTimeout] for the direct connection that the peer's punch
+  /// makes.
   Future<void> directConnect(PeerId peerId) async {
     try {
       await _beginDirectConnect(peerId);
@@ -164,6 +176,11 @@ class HolePuncher {
           break;
         }
       }
+    }
+
+    if (_peerStartsHolePunch(peerId)) {
+      await _waitForPeerHolePunch(peerId);
+      return;
     }
 
     _log.fine('Got inbound proxy conn');
@@ -224,6 +241,37 @@ class HolePuncher {
     throw Exception('All retries for hole punch with peer $peerId failed');
   }
 
+
+  /// Whether the peer must start the hole punch: there are relayed
+  /// connections to it, and this host dialed all of them. The peer refuses
+  /// our stream on such a connection, and the exchange fails with
+  /// `Unexpected EOF`.
+  bool _peerStartsHolePunch(PeerId peerId) {
+    final relayed = _host.network
+        .connsToPeer(peerId)
+        .where((c) => isRelayAddress(c.remoteMultiaddr))
+        .toList();
+    return relayed.isNotEmpty &&
+        relayed.every((c) => c.stat.stats.direction == Direction.outbound);
+  }
+
+  /// Waits for a direct connection to [peerId] that the peer's hole punch
+  /// makes. Throws when none appears in [peerHolePunchTimeout].
+  Future<void> _waitForPeerHolePunch(PeerId peerId) async {
+    _log.fine('We dialed the relayed connection to $peerId; waiting for its hole punch');
+    final deadline = DateTime.now().add(peerHolePunchTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (_closed) throw ClosedError();
+      if (getDirectConnection(_host, peerId) != null) {
+        _log.fine('The hole punch of $peerId made a direct connection');
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    throw Exception('No direct connection to $peerId after '
+        '${peerHolePunchTimeout.inSeconds}s. We dialed the relayed connection, '
+        'so the peer starts the hole punch, and its punch did not succeed');
+  }
 
   /// Initiates a hole punch with a remote peer
   Future<HolePunchResult> _initiateHolePunch(PeerId peerId) async {

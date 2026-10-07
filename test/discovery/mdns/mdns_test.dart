@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:dart_libp2p/p2p/discovery/mdns/mdns.dart';
 import 'package:dart_libp2p/core/peer/addr_info.dart';
@@ -196,6 +197,53 @@ void main() {
       expect(MdnsConstants.mdnsDomain, equals('local'));
       expect(MdnsConstants.dnsaddrPrefix, equals('dnsaddr='));
       expect(MdnsConstants.defaultPort, equals(4001));
+    });
+  });
+
+  // The query parameters were fixed in MdnsDiscovery (dart-libp2p-6hx).
+  group('MdnsQueryOptions', () {
+    test('defaults to the values MdnsDiscovery always used', () {
+      final params = const MdnsQueryOptions().toQueryParams('_p2p._udp');
+
+      expect(params.service, '_p2p._udp');
+      expect(params.domain, 'local');
+      expect(params.timeout, const Duration(seconds: 10));
+      expect(params.networkInterface, isNull);
+      expect(params.wantUnicastResponse, isFalse);
+      expect(params.disableIPv4, isFalse);
+      expect(params.disableIPv6, isFalse);
+      expect(params.reusePort, !Platform.isAndroid);
+      expect(params.reuseAddress, isTrue);
+      expect(params.multicastHops, 1);
+      expect(params.logger, isNull);
+    });
+
+    test('passes the given values to the query', () {
+      void log(String message) {}
+      final params = MdnsQueryOptions(
+        timeout: const Duration(seconds: 3),
+        wantUnicastResponse: true,
+        disableIPv6: true,
+        reusePort: false,
+        multicastHops: 2,
+        logger: log,
+      ).toQueryParams('_p2p._udp');
+
+      expect(params.timeout, const Duration(seconds: 3));
+      expect(params.wantUnicastResponse, isTrue);
+      expect(params.disableIPv6, isTrue);
+      expect(params.reusePort, isFalse);
+      expect(params.multicastHops, 2);
+      expect(params.logger, same(log));
+    });
+
+    test('MdnsDiscovery accepts query options', () {
+      final mdns = MdnsDiscovery(
+        MockHost(testPeerId, []),
+        queryOptions: const MdnsQueryOptions(wantUnicastResponse: true),
+      );
+
+      expect(mdns, isNotNull);
     });
   });
 }

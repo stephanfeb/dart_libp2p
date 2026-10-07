@@ -25,6 +25,66 @@ class MdnsConstants {
   static const int defaultPort = 4001;
 }
 
+/// Options for the mDNS queries that [MdnsDiscovery] sends to find peers.
+/// The defaults are the values that [MdnsDiscovery] always used.
+class MdnsQueryOptions {
+  /// How long one query waits for answers.
+  final Duration timeout;
+
+  /// The network interface for multicast. When null, the system selects it.
+  final NetworkInterface? networkInterface;
+
+  /// Whether to ask for unicast answers. In Docker or other bridged
+  /// networks, multicast answers often do not arrive.
+  final bool wantUnicastResponse;
+
+  /// Whether to send no IPv4 queries.
+  final bool disableIPv4;
+
+  /// Whether to send no IPv6 queries.
+  final bool disableIPv6;
+
+  /// Whether to set SO_REUSEPORT on the multicast sockets. When null, it is
+  /// set on all platforms except Android, where binding with it can fail.
+  final bool? reusePort;
+
+  /// Whether to set SO_REUSEADDR on the multicast sockets.
+  final bool reuseAddress;
+
+  /// The multicast TTL. 1 keeps the queries on the local network.
+  final int multicastHops;
+
+  /// Receives the log messages of the mDNS client.
+  final void Function(String message)? logger;
+
+  const MdnsQueryOptions({
+    this.timeout = const Duration(seconds: 10),
+    this.networkInterface,
+    this.wantUnicastResponse = false,
+    this.disableIPv4 = false,
+    this.disableIPv6 = false,
+    this.reusePort,
+    this.reuseAddress = true,
+    this.multicastHops = 1,
+    this.logger,
+  });
+
+  /// The query parameters for [service] in the `local` domain.
+  QueryParams toQueryParams(String service) => QueryParams(
+        service: service,
+        domain: MdnsConstants.mdnsDomain,
+        timeout: timeout,
+        networkInterface: networkInterface,
+        wantUnicastResponse: wantUnicastResponse,
+        disableIPv4: disableIPv4,
+        disableIPv6: disableIPv6,
+        reusePort: reusePort ?? !Platform.isAndroid,
+        reuseAddress: reuseAddress,
+        multicastHops: multicastHops,
+        logger: logger,
+      );
+}
+
 /// Interface for handling discovered peers
 abstract class MdnsNotifee {
   /// Called when a peer is discovered
@@ -36,6 +96,7 @@ class MdnsDiscovery implements Discovery {
   final Host _host;
   final String _serviceName;
   final String _peerName;
+  final MdnsQueryOptions _queryOptions;
   MdnsNotifee? _notifee;
 
   // mDNS server for advertising our service
@@ -55,13 +116,16 @@ class MdnsDiscovery implements Discovery {
     _notifee = value;
   }
 
-  /// Creates a new MdnsDiscovery service
+  /// Creates a new MdnsDiscovery service. [queryOptions] sets how it
+  /// queries for peers.
   MdnsDiscovery(this._host, {
     String? serviceName,
     MdnsNotifee? notifee,
+    MdnsQueryOptions queryOptions = const MdnsQueryOptions(),
   }) : 
     _serviceName = serviceName ?? MdnsConstants.serviceName,
     _peerName = _generateRandomString(32 + Random().nextInt(32)),
+    _queryOptions = queryOptions,
     _notifee = notifee;
 
   /// Starts the mDNS discovery service
@@ -214,15 +278,8 @@ class MdnsDiscovery implements Discovery {
       // Use MDNSClient.query() with longer timeout instead of lookup() which has 1s timeout
       // Extract just the service part (remove .local if present)  
       final serviceOnly = serviceName.replaceAll('.local', '');
-      final params = QueryParams(
-        service: serviceOnly,  // Pass "_p2p._udp" not "_p2p._udp.local"
-        domain: 'local',
-        timeout: const Duration(seconds: 10), // Extended timeout for better discovery
-        wantUnicastResponse: false,
-        reusePort: !Platform.isAndroid,
-        reuseAddress: true,
-        multicastHops: 1,
-      );
+      // Pass "_p2p._udp", not "_p2p._udp.local".
+      final params = _queryOptions.toQueryParams(serviceOnly);
       
       final stream = await MDNSClient.query(params);
       

@@ -161,6 +161,24 @@ class GoProcessManager {
     ).timeout(const Duration(seconds: 30));
   }
 
+  /// Starts the Go peer as an AutoNAT v2 server that also checks private
+  /// and loopback addresses.
+  Future<void> startAutoNATServer({int port = 0, String transport = 'tcp'}) async {
+    await _start(['--mode=autonat-server', '--port=$port', '--transport=$transport']);
+  }
+
+  /// Runs the Go peer as an AutoNAT v2 client: it connects to [target] and
+  /// asks it to check the Go peer's loopback address. On success, stdout has
+  /// "AutoNATResult: <reachability> <addr>".
+  Future<ProcessResult> runAutoNATClient(String target, {String transport = 'tcp'}) async {
+    return Process.run(
+      binaryPath,
+      ['--mode=autonat-client', '--target=$target', '--transport=$transport'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 45));
+  }
+
   /// Starts the Go peer in relay mode (circuit relay v2 service).
   Future<void> startRelay({int port = 0}) async {
     await _start(['--mode=relay', '--port=$port']);
