@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.1] - 2026-10-08
+
+### Fixed
+
+- **`Notifiee.disconnected` was not called when a connection closed** (dart-libp2p-omr). `Network.closePeer`, a close by the remote peer and `Swarm.close` all closed the connection without a notification, so code that tracks peers from network notifications (for example a pubsub router) kept disconnected peers. Now each closed connection is removed from the swarm and reported once:
+  - `SwarmConn.close()` calls `Swarm.removeConnection()`, which notifies only the first time a connection is removed.
+  - `closePeer` and `Swarm.close` let `close()` remove the connections. `Swarm.close` closes them outside the connection lock.
+  - The swarm closes a connection when its accept loop ends, also when `newStream` only marked it closed.
+  - `Swarm.close` closes the connections before the listeners, so a UDX close reaches the remote peer.
+  - A relayed connection that a newer one replaces is reported when it closes.
+
 ## [4.6.0] - 2026-10-08
 
 ### Changed
