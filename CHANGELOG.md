@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When `openConnection` or `setPeer` failed (a limit), the swarm leaked the connection scope and did not close the connection. When `openStream` failed, the muxed stream was not reset.
   - Peer scopes, and the per-peer scopes within protocols and services, were never dropped, so the resource manager kept one for each peer it ever saw.
 - `doc/resource-manager.md` described classes that did not exist. It now matches the code.
+- **Identify pushes to closing connections raised errors (dart-libp2p-8av).** When a host removes or adds a stream handler, Identify pushes the new protocol list to every connected peer. When peers shut down at the same time, the pushes failed. In 4.0.0 the receiving side's failure was an unhandled async error (`Bad state: Stream is closed`, from the push handler); since 4.0.1 the host caught it but logged it as a failed stream handler, and Identify logged SEVERE errors for each push. Now every push and push handler catches and logs its failure at FINE, the event and push-trigger listeners and the NAT emitter set-up catch their errors, closed connections get no push, and failures of the initial identify on a closed connection log at FINE.
+- **A push stream that ended before its message cleared the peer's protocols.** Identify consumed an empty message when a peer closed a push stream before it wrote the message (for example, because it shut down), and so removed all of the peer's protocols from the peerstore and emitted `EvtPeerProtocolsUpdated` with all protocols removed. Such a push is now ignored, as in go-libp2p.
 
 ## [4.5.0] - 2026-10-07
 

@@ -265,7 +265,11 @@ class IdentifyService implements IDService {
 
     // Create NAT emitter - use factory method
     NATEmitter.create(host, _observedAddrMgr!, const Duration(minutes: 1))
-      .then((emitter) => _natEmitter = emitter);
+        .then<void>((emitter) {
+      _natEmitter = emitter;
+    }, onError: (Object e) {
+      _log.warning('IdentifyService: could not create the NAT emitter: $e');
+    });
   }
 
   @override
@@ -313,7 +317,14 @@ class IdentifyService implements IDService {
       }
 
       _log.finer('IdentifyService._startEventLoop: Received event: ${event.runtimeType}');
-      final updated = await _updateSnapshot();
+      // Nothing awaits this listener, so an error here would be unhandled.
+      final bool updated;
+      try {
+        updated = await _updateSnapshot();
+      } catch (e) {
+        _log.fine('IdentifyService._startEventLoop: Could not update the snapshot: $e');
+        return;
+      }
       if (!updated) {
         _log.finer('IdentifyService._startEventLoop: Snapshot not updated, not triggering push.');
         return;
@@ -343,7 +354,10 @@ class IdentifyService implements IDService {
       }
 
       _log.fine('IdentifyService._startEventLoop: Push trigger received, calling _sendPushes.');
-      _sendPushes();
+      // Pushes are best effort: a failure is logged, never thrown.
+      _sendPushes().catchError((Object e) {
+        _log.fine('IdentifyService: Push round failed: $e');
+      });
     });
   }
 
@@ -525,13 +539,16 @@ class IdentifyService implements IDService {
         continue;
       }
       
-      // Coordinate PUSH operation lifecycle
+      // Coordinate PUSH operation lifecycle. Nothing awaits this future,
+      // so every error is caught here.
       sem.acquire().then((_) async {
         try {
           await _sendPushWithLifecycleCoordination(conn);
         } finally {
           sem.release();
         }
+      }).catchError((Object e) {
+        _log.fine('IdentifyService: Push to ${conn.remotePeer} failed: $e');
       });
     }
   }
@@ -558,71 +575,23 @@ class IdentifyService implements IDService {
 
   Future<void> _sendPush(Conn conn) async {
     final peerId = conn.remotePeer;
-    
-    // Enhanced connection health checks
-    if (conn.isClosed) {
+
+    // A closed or closing connection gets no push.
+    if (conn.isClosed || _shutdownInProgress || _closed) {
       return;
     }
-    
-    // Check if connection is in a healthy state for new streams
+
     try {
-      // Additional health check - verify connection can accept new streams
-      final connState = conn.state;
-      if (connState.toString().contains('closing') || connState.toString().contains('closed')) {
-        return;
-      }
-    } catch (e) {
-      // Proceed cautiously if state check fails
-    }
-    
-    try {
-      // Pre-emptive check to avoid triggering session-level errors
-      if (conn.isClosed) {
-        return;
-      }
-      
       final stream = await _newStreamAndNegotiate(conn, idPush);
       if (stream == null) {
         return;
       }
       await sendIdentifyResp(stream, true);
-    } catch (e, st) {
-      // Comprehensive error isolation to prevent session-level cascades
-      final errorStr = e.toString();
-      
-      // Connection/Stream closure errors - expected during cleanup
-      if (errorStr.contains('Stream is closed') || 
-          errorStr.contains('closed by remote') ||
-          errorStr.contains('Session is closed') ||
-          errorStr.contains('Connection is closed') ||
-          errorStr.contains('Bad state: Stream is closed') ||
-          errorStr.contains('Stream closed by remote') ||
-          errorStr.contains('No element') ||
-          errorStr.contains('Stream YamuxStreamState.reset') ||
-          errorStr.contains('Stream YamuxStreamState.closed')) {
-        // Completely absorb the error - do not rethrow or propagate
-        return;
-      }
-      
-      // Network/Transport errors - also expected during cleanup
-      if (errorStr.contains('SocketException') ||
-          errorStr.contains('Connection refused') ||
-          errorStr.contains('Connection reset') ||
-          errorStr.contains('Broken pipe') ||
-          errorStr.contains('Network is unreachable')) {
-        return;
-      }
-      
-      // Timeout errors - can happen during connection cleanup
-      if (errorStr.contains('TimeoutException') ||
-          errorStr.contains('timeout') ||
-          errorStr.contains('Timeout')) {
-        return;
-      }
-      
-      // Only log unexpected errors as warnings, but still don't propagate
-      _log.warning('IdentifyService._sendPush: Unexpected error sending PUSH to $peerId (isolated): $e');
-      // Note: We still don't rethrow - PUSH is non-critical and should never break other operations
+    } catch (e) {
+      // A push is best effort, as in go-libp2p. It fails when the peer closes
+      // the connection or resets the stream while we push, which is normal
+      // during shutdown. Log the failure; never let it escape.
+      _log.fine('IdentifyService._sendPush: Push to $peerId failed (connection closed: ${conn.isClosed}): $e');
     }
   }
 
@@ -661,18 +630,17 @@ class IdentifyService implements IDService {
       return stream;
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(streamCreateStart);
-      _log.severe('[IdentifyService] STREAM_ERROR: peer=$peerId, error=$e, duration=${totalDuration.inMilliseconds}ms, stream_state=${stream?.isClosed ?? 'null'}');
-      
-      // Enhanced error detection for the target race condition
-      if (e.toString().contains('closed by remote') || e.toString().contains('Stream is closed') || e.toString().contains('Stream closed by remote')) {
-        _log.severe('[IdentifyService] PREMATURE_CLOSURE: This is the target error! Conn details: ${conn.id}, ${conn.state}, conn_age=${connAge.inMilliseconds}ms');
-        _log.severe('[IdentifyService] PREMATURE_CLOSURE_CONTEXT: stream_id=${stream?.id() ?? 'null'}, protocol=$protoIDString, error_detail=$e');
-      }
-      
+      // A push is best effort, and a stream on a closed connection is
+      // expected to fail: log these at FINE.
+      final level = (protoIDString == idPush || conn.isClosed || _closed)
+          ? Level.FINE
+          : Level.SEVERE;
+      _log.log(level, '[IdentifyService] STREAM_ERROR: peer=$peerId, proto=$protoIDString, error=$e, duration=${totalDuration.inMilliseconds}ms, stream_state=${stream?.isClosed ?? 'null'}, conn_age=${connAge.inMilliseconds}ms, conn_closed=${conn.isClosed}');
+
       // Cleanup the stream if it was opened
       if (stream != null && !stream.isClosed) {
-        _log.warning('IdentifyService._newStreamAndNegotiate: Resetting stream due to error for ${conn.remotePeer}.');
-        await stream.reset();
+        _log.fine('IdentifyService._newStreamAndNegotiate: Resetting stream due to error for ${conn.remotePeer}.');
+        await stream.reset().catchError((_) {});
       }
       
       // Check if this is a timeout-related exception
@@ -689,12 +657,12 @@ class IdentifyService implements IDService {
       // This is a common race condition on shutdown, where the connection is closed
       // between the check and the stream creation. It's not a critical error.
       if (e.toString().contains('Bad state: Stream is closed')) {
-        _log.warning('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
+        _log.fine('IdentifyService._newStreamAndNegotiate: Handled race condition for ${conn.remotePeer} for $protoIDString: $e');
         return null;
       }
-      
+
       // For other errors, wrap in typed exception
-      _log.severe('IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
+      _log.log(level, 'IdentifyService._newStreamAndNegotiate: Error opening or negotiating stream with ${conn.remotePeer} for $protoIDString: $e\n$st');
       throw IdentifyStreamException(
         peerId: peerId,
         message: 'Error opening or negotiating stream with $peerId for $protoIDString',
@@ -706,15 +674,33 @@ class IdentifyService implements IDService {
   // Made public for testing
   Future<void> handleIdentifyRequest(P2PStream stream, PeerId peerId) async {
     _log.fine('IdentifyService.handleIdentifyRequest: SERVER received identify request from ${stream.conn.remotePeer} (reported as $peerId) on stream ${stream.id()}');
-    await sendIdentifyResp(stream, false);
+    try {
+      await sendIdentifyResp(stream, false);
+    } catch (e) {
+      // sendIdentifyResp reset the stream. The failure affects only this
+      // stream; the peer sees it as a failed identify.
+      _log.log(_quietLevel(stream.conn, Level.WARNING),
+          'IdentifyService.handleIdentifyRequest: Could not answer identify from $peerId: $e');
+    }
   }
+
+  /// [Level.FINE] when [conn] or this service is closed, as errors are then
+  /// expected; [otherwise] if not.
+  Level _quietLevel(Conn conn, Level otherwise) =>
+      (conn.isClosed || _closed || _shutdownInProgress) ? Level.FINE : otherwise;
 
   // Made public for testing
   Future<void> handlePush(P2PStream stream, PeerId peerId) async {
     _log.fine('IdentifyService.handlePush: SERVER received identify PUSH from ${stream.conn.remotePeer} (reported as $peerId) on stream ${stream.id()}');
     _log.finer('IdentifyService.handlePush: Setting deadline for PUSH stream from ${stream.conn.remotePeer}');
     stream.setDeadline(DateTime.now().add(timeout));
-    await handleIdentifyResponse(stream, true); 
+    try {
+      await handleIdentifyResponse(stream, true);
+    } catch (e) {
+      // A push that fails, for example because the peer closes while it
+      // pushes, changes nothing: handleIdentifyResponse reset the stream.
+      _log.fine('IdentifyService.handlePush: Push from $peerId failed: $e');
+    }
   }
 
   // Made public for testing
@@ -728,8 +714,8 @@ class IdentifyService implements IDService {
       _log.finer('IdentifyService.sendIdentifyResp: Setting service scope for stream to $peer.');
       await stream.scope().setService(serviceName);
     } catch (e) {
-      _log.warning('IdentifyService.sendIdentifyResp: Failed to attach stream to identify service for $peer: $e. Resetting stream.');
-      await stream.reset();
+      _log.log(_quietLevel(stream.conn, Level.WARNING), 'IdentifyService.sendIdentifyResp: Failed to attach stream to identify service for $peer: $e. Resetting stream.');
+      await stream.reset().catchError((_) {});
       throw Exception('Failed to attach stream to identify service for $peer: $e');
     }
 
@@ -779,8 +765,9 @@ class IdentifyService implements IDService {
       // DO NOT CALL stream.close() here anymore. Let Yamux handle full closure based on FINs from both sides.
       _log.fine('IdentifyService.sendIdentifyResp: Successfully sent identify response and signalled closeWrite to $peer. IsPush: $isPush.');
     } catch (e, st) {
-      _log.warning('IdentifyService.sendIdentifyResp: Error sending identify response to $peer. IsPush: $isPush. Error: $e\n$st');
-      await stream.reset();
+      _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING),
+          'IdentifyService.sendIdentifyResp: Error sending identify response to $peer. IsPush: $isPush. Error: $e\n$st');
+      await stream.reset().catchError((_) {});
       rethrow;
     }
   }
@@ -897,9 +884,9 @@ class IdentifyService implements IDService {
       final serviceScopeTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
-      _log.warning(' [HANDLE-IDENTIFY-RESPONSE-PHASE-1-ERROR] ($side) Error attaching stream to identify service for peer=$peer: $e. Resetting stream.');
-      await stream.reset();
-      throw e;
+      _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-1-ERROR] ($side) Error attaching stream to identify service for peer=$peer: $e. Resetting stream.');
+      await stream.reset().catchError((_) {});
+      rethrow;
     }
     
     try {
@@ -908,18 +895,24 @@ class IdentifyService implements IDService {
       final memoryReserveTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
-      _log.warning(' [HANDLE-IDENTIFY-RESPONSE-PHASE-2-ERROR] ($side) Error reserving memory for identify stream for peer=$peer: $e. Resetting stream.');
-      await stream.reset();
-      throw e;
+      _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-2-ERROR] ($side) Error reserving memory for identify stream for peer=$peer: $e. Resetting stream.');
+      await stream.reset().catchError((_) {});
+      rethrow;
     }
     
     try {
       final conn = stream.conn;
 
-      final mes = await _readAllIDMessages(stream);
-      final readMessagesTime = DateTime.now().difference(handleStart);
-
-      
+      final received = await _readAllIDMessages(stream, isPush);
+      if (received == null && isPush) {
+        // The peer closed the stream before it sent a message, for example
+        // because it shuts down. An empty message would clear its protocols
+        // and addresses, so nothing is consumed.
+        _log.fine('IdentifyService.handleIdentifyResponse ($side): Push from $peer ended before a message; ignored.');
+        await stream.closeWrite().catchError((_) {});
+        return;
+      }
+      final mes = received ?? Identify();
 
       await _consumeMessage(mes, conn, isPush);
       final consumeMessageTime = DateTime.now().difference(handleStart);
@@ -958,8 +951,8 @@ class IdentifyService implements IDService {
 
     } catch (e, st) {
       final errorTime = DateTime.now().difference(handleStart);
-      _log.severe(' [HANDLE-IDENTIFY-RESPONSE-ERROR] ($side) Error reading or processing identify message from peer=$peer, duration=${errorTime.inMilliseconds}ms, error=$e\n$st');
-      await stream.reset();
+      _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.SEVERE), ' [HANDLE-IDENTIFY-RESPONSE-ERROR] ($side) Error reading or processing identify message from peer=$peer, duration=${errorTime.inMilliseconds}ms, error=$e\n$st');
+      await stream.reset().catchError((_) {});
       rethrow;
     } finally {
 
@@ -967,7 +960,9 @@ class IdentifyService implements IDService {
     }
   }
 
-  Future<Identify> _readAllIDMessages(P2PStream stream) async {
+  /// Reads the identify message. Returns null when the stream ends before a
+  /// message.
+  Future<Identify?> _readAllIDMessages(P2PStream stream, bool isPush) async {
     final peer = stream.conn.remotePeer;
     final readStart = DateTime.now();
 
@@ -978,8 +973,8 @@ class IdentifyService implements IDService {
     final totalReadTime = DateTime.now().difference(readStart);
 
     if (msgBytes == null || msgBytes.isEmpty) {
-      _log.severe(' [READ-ALL-ID-MESSAGES] No identify message received from peer=$peer, duration=${totalReadTime.inMilliseconds}ms');
-      return Identify();
+      _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [READ-ALL-ID-MESSAGES] No identify message received from peer=$peer, duration=${totalReadTime.inMilliseconds}ms');
+      return null;
     }
 
     _log.fine(' [READ-ALL-ID-MESSAGES] Parsed identify from peer=$peer, ${msgBytes.length} bytes, duration=${totalReadTime.inMilliseconds}ms');
@@ -1508,11 +1503,17 @@ class IdentifyService implements IDService {
       }
     }).catchError((error, stackTrace) {
       final duration = DateTime.now().difference(spawnStart);
-      _log.warning(' [SPAWN-IDENTIFY-ERROR] _identifyConn for peer=$peerId failed, duration=${duration.inMilliseconds}ms, error=$error\n$stackTrace');
-      _evtPeerIdentificationFailed.emit(EvtPeerIdentificationFailed(
-        peer: peerId,
-        reason: Exception(error.toString()), // Standardize to Exception
-      ));
+      _log.log(_quietLevel(conn, Level.WARNING), ' [SPAWN-IDENTIFY-ERROR] _identifyConn for peer=$peerId failed, duration=${duration.inMilliseconds}ms, error=$error\n$stackTrace');
+      // Nothing awaits this callback: an emitter closed by shutdown must not
+      // raise an unhandled error.
+      try {
+        _evtPeerIdentificationFailed.emit(EvtPeerIdentificationFailed(
+          peer: peerId,
+          reason: Exception(error.toString()), // Standardize to Exception
+        ));
+      } catch (e) {
+        _log.fine(' [SPAWN-IDENTIFY-ERROR] Could not emit EvtPeerIdentificationFailed for peer=$peerId: $e');
+      }
       if (!entry.identifyWaitCompleter!.isCompleted) {
 
         entry.identifyWaitCompleter!.completeError(error, stackTrace);
@@ -1552,17 +1553,11 @@ class IdentifyService implements IDService {
 
     } catch (e, st) {
       final duration = DateTime.now().difference(identifyStart);
-      _log.severe(' [IDENTIFY-CONN-ERROR] peer=$peerId, error=$e, duration=${duration.inMilliseconds}ms, stream_state=${stream?.isClosed ?? 'null'}');
-      
-      // Enhanced error detection for the target race condition
-      if (e.toString().contains('closed by remote') || e.toString().contains('Stream is closed') || e.toString().contains('Stream closed by remote')) {
-        _log.severe(' [IDENTIFY-CONN-PREMATURE-CLOSURE] This is the target error! peer=$peerId, conn_age=${connAge.inMilliseconds}ms, stream_id=${stream?.id() ?? 'null'}');
-      }
-      
+      _log.log(_quietLevel(conn, Level.SEVERE), ' [IDENTIFY-CONN-ERROR] peer=$peerId, error=$e, duration=${duration.inMilliseconds}ms, stream_state=${stream?.isClosed ?? 'null'}, conn_age=${connAge.inMilliseconds}ms, conn_closed=${conn.isClosed}');
+
       // Ensure stream is reset if it was opened
       if (stream != null && !stream.isClosed) {
-
-        await stream.reset();
+        await stream.reset().catchError((_) {});
       }
       rethrow; // Rethrow to be caught by _spawnIdentifyConn
     }
@@ -1724,7 +1719,7 @@ class _NetNotifiee implements Notifiee {
     // Don't await here to avoid blocking the notifiee callback.
     _ids.identifyWait(conn).catchError((e, st) {
       final direction = conn.stat.stats.direction == Direction.outbound ? 'outbound' : 'inbound';
-      _log.warning('Identify.Notifiee.connected: identifyWait for $direction $peerId failed in background: $e\n$st');
+      _log.log(_ids._quietLevel(conn, Level.WARNING), 'Identify.Notifiee.connected: identifyWait for $direction $peerId failed in background: $e\n$st');
       // Error is already handled and emitted by identifyWait/spawnIdentifyConn
     });
   }
