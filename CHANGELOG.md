@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.3] - 2026-10-09
+
+### Fixed
+
+- **Two connections to a peer through one relay closed each other, leaving none** (dart-libp2p-a8g). Every stream on them ended with "Unexpected end of stream". There were two ways in:
+  - One `dialPeer` dialled the relay twice. It deduplicated circuit addresses by relay and destination, so a relay's address with `/p2p/<peer>` on the end and the same address without it were two routes. The dialer closed the second connection as redundant. The peer saw that newer connection arrive and closed the older one.
+  - Two peers that dialled each other at once through a relay each closed their own connection when the other's arrived.
+
+  Now a dial makes one attempt per relay (`Swarm.deduplicateCircuitAddrs`). A newer inbound connection through a relay closes an older one only if that one is also inbound and carries no streams.
+
 ## [4.6.2] - 2026-10-08
 
 ### Fixed
