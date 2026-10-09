@@ -28,6 +28,7 @@ import '../../transport/basic_upgrader.dart'; // Added for BasicUpgrader
 import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm_conn.dart';
 import 'swarm_stream.dart';
+import 'package:meta/meta.dart';
 import 'swarm_dial.dart'; // For AddrDialer and DelayDialRanker
 import 'address_filter.dart'; // For AddressFilter
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // For OutboundCapabilityInfo
@@ -450,23 +451,30 @@ class Swarm implements Network {
         final String actualPeerIdStr = upgradedConn.remotePeer.toString();
         _logger.fine('Storing inbound connection for peer=$actualPeerIdStr, conn_id=${swarmConn.id}');
         
-        // For relayed connections, deduplicate older connections to same peer via same relay
+        // A peer that dials us again through the same relay has given up on
+        // its earlier connection there: close that one, unless it still
+        // carries streams. Our own dials are ours to keep. Before, any older
+        // connection through the relay was closed, so two peers dialling each
+        // other at once closed each other's and kept none. (A dial makes one
+        // attempt per relay, see deduplicateCircuitAddrs, so it races no twin
+        // through the same relay.)
         if (_isRelayedConnection(swarmConn)) {
           final relayId = _extractRelayFromCircuitAddr(swarmConn.remoteMultiaddr);
           if (relayId != null) {
             await _connLock.synchronized(() async {
-              final existingConns = _connections[actualPeerIdStr] ?? [];
-              final staleRelayConns = existingConns.where((existing) {
-                if (!_isRelayedConnection(existing)) return false;
-                final existingRelayId = _extractRelayFromCircuitAddr(existing.remoteMultiaddr);
-                return existingRelayId == relayId && existing.id != swarmConn.id;
-              }).toList();
-              
-              // Close stale connections through the same relay
-              for (final stale in staleRelayConns) {
-                _logger.warning('[CONN-DEDUP-DIAG] Closing stale relay connection ${stale.id} to peer $actualPeerIdStr via relay $relayId in favor of new connection ${swarmConn.id}');
+              final superseded = [
+                for (final existing in _connections[actualPeerIdStr] ?? const <SwarmConn>[])
+                  if (existing.id != swarmConn.id &&
+                      existing.direction == Direction.inbound &&
+                      _isRelayedConnection(existing) &&
+                      _extractRelayFromCircuitAddr(existing.remoteMultiaddr) == relayId &&
+                      existing.stat.numStreams == 0)
+                    existing
+              ];
+              for (final old in superseded) {
+                _logger.fine('Swarm: closing relay connection ${old.id} to $actualPeerIdStr via $relayId, superseded by ${swarmConn.id}');
                 // close() removes it from _connections and notifies.
-                Future.microtask(() => stale.close());
+                Future.microtask(() => old.close());
               }
             });
           }
@@ -996,7 +1004,7 @@ class Swarm implements Network {
     // 4b. Deduplicate circuit relay addresses
     // Prevent Happy Eyeballs from creating multiple concurrent relay connections
     // through the same relay to the same destination
-    dialableAddrs = _deduplicateCircuitAddrs(dialableAddrs);
+    dialableAddrs = deduplicateCircuitAddrs(dialableAddrs);
     _logger.fine('Swarm.dialPeer: After circuit dedup: ${dialableAddrs.length} addresses');
 
     // 5. Rank by priority, with preference for relay if peer connected via relay
@@ -1344,83 +1352,30 @@ class Swarm implements Network {
     return false;
   }
 
-  /// Deduplicate circuit relay addresses to prevent Happy Eyeballs from creating
-  /// multiple concurrent relay connections through the same relay to the same destination.
-  /// 
-  /// Without this, if a peer advertises multiple circuit addresses (IPv4 + IPv6) through
-  /// the same relay, Happy Eyeballs will start 2+ parallel HOP requests. Since relay
-  /// connections take ~1s to establish (vs ~100ms for direct), all requests complete
-  /// before cancellation, causing the relay to see multiple concurrent connections.
-  List<MultiAddr> _deduplicateCircuitAddrs(List<MultiAddr> addrs) {
-    final seenRelayRoutes = <String>{};
-    final deduplicated = <MultiAddr>[];
-    
-    for (final addr in addrs) {
-      if (_isCircuitAddr(addr)) {
-        // Extract relay route (relayPeerID -> destPeerID)
-        final route = _extractRelayRoute(addr);
-        if (route != null) {
-          if (seenRelayRoutes.contains(route)) {
-            _logger.fine('Swarm: Skipping duplicate circuit route: $addr (route: $route)');
-            continue;  // Skip duplicate route through same relay
-          }
-          seenRelayRoutes.add(route);
-          _logger.fine('Swarm: Keeping circuit route: $addr (route: $route)');
-        }
-      }
-      deduplicated.add(addr);
-    }
-    
-    return deduplicated;
+  /// [addrs] with one circuit address per relay. A dial targets one peer,
+  /// so circuit addresses through the same relay are one route, whatever
+  /// the relay's transport and whether the address ends in the peer's id.
+  /// Without this, Happy Eyeballs starts a HOP request per address and the
+  /// peer gets several connections through the relay at once.
+  @visibleForTesting
+  static List<MultiAddr> deduplicateCircuitAddrs(List<MultiAddr> addrs) {
+    final relays = <String>{};
+    return [
+      for (final addr in addrs)
+        if (!addr.hasProtocol('p2p-circuit') || relays.add(_relayOf(addr) ?? addr.toString())) addr
+    ];
   }
 
-  /// Check if an address is a circuit relay address
-  bool _isCircuitAddr(MultiAddr addr) {
-    return addr.toString().contains('/p2p-circuit');
-  }
-
-  /// Extract relay route key from a circuit address
-  /// Format: relayPeerID->destPeerID
-  /// Returns null if address is not a valid circuit address
-  String? _extractRelayRoute(MultiAddr addr) {
-    try {
-      final components = addr.components;
-      String? relayPeerId;
-      String? destPeerId;
-      
-      // Find /p2p/{relayId}/p2p-circuit/p2p/{destId} pattern
-      for (int i = 0; i < components.length; i++) {
-        final (protocol, value) = components[i];
-        
-        // Find relay peer ID (before /p2p-circuit)
-        if (protocol.code == Protocols.p2p.code && 
-            i + 1 < components.length &&
-            components[i + 1].$1.code == Protocols.circuit.code) {
-          relayPeerId = value;
-        }
-        
-        // Find destination peer ID (after /p2p-circuit)
-        if (protocol.code == Protocols.circuit.code &&
-            i + 1 < components.length &&
-            components[i + 1].$1.code == Protocols.p2p.code) {
-          destPeerId = components[i + 1].$2;
-        }
+  /// The id of the relay a circuit address goes through: the `/p2p` before
+  /// `/p2p-circuit`.
+  static String? _relayOf(MultiAddr addr) {
+    final components = addr.components;
+    for (var i = 0; i + 1 < components.length; i++) {
+      if (components[i].$1.code == Protocols.p2p.code && components[i + 1].$1.code == Protocols.circuit.code) {
+        return components[i].$2;
       }
-      
-      if (relayPeerId != null && destPeerId != null) {
-        return '$relayPeerId->$destPeerId';
-      }
-      
-      // If we have relay but no dest, use just relay (for relay-only circuit addrs)
-      if (relayPeerId != null) {
-        return relayPeerId;
-      }
-      
-      return null;
-    } catch (e) {
-      _logger.warning('Swarm: Error extracting relay route from $addr: $e');
-      return null;
     }
+    return null;
   }
 
   /// Event-driven connection health change handler
