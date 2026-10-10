@@ -102,7 +102,7 @@ class Swarm implements Network {
 
   /// Dials in progress, keyed by peer and dial options. A second [dialPeer]
   /// call for the same key joins the dial in progress, as in go-libp2p.
-  final Map<String, Future<Conn>> _activeDials = {};
+  final Map<String, ({Future<Conn> dial, DateTime started})> _activeDials = {};
 
   /// Whether the swarm is closed
   bool _isClosed = false;
@@ -258,12 +258,18 @@ class Swarm implements Network {
     // Create a new stream - let the underlying connection manage stream IDs
     _logger.fine('Swarm.newStream: About to call (conn as SwarmConn).newStream() for peer ${peerId.toString()} on SwarmConn ${conn.id}.');
     
-    final P2PStream stream;
+    P2PStream stream;
     try {
       stream = await conn.newStream(context);
     } catch (e, st) {
       _logger.fine('Swarm.newStream: Error from (conn as SwarmConn).newStream() for peer ${peerId.toString()}: $e\n$st');
-      rethrow;
+      // The connection was found closed (its session ended without the swarm
+      // noticing yet). It is removed now, so one more dial gets a new one.
+      if (!conn.isClosed || _isClosed) rethrow;
+      _logger.fine('Swarm.newStream: Connection ${conn.id} to $peerId is closed; dialing again');
+      final retryConn = await dialPeer(context, peerId);
+      if (retryConn is! SwarmConn || identical(retryConn, conn)) rethrow;
+      stream = await retryConn.newStream(context);
     }
     
     _logger.fine('Swarm.newStream: Successfully called (conn as SwarmConn).newStream() for peer ${peerId.toString()}. Returned Stream ID: ${stream.id()}, Stream protocol: ${stream.protocol}');
@@ -780,15 +786,39 @@ class Swarm implements Network {
         '|${context.getSimultaneousConnect().$1}';
     final active = _activeDials[key];
     if (active != null) {
-      _logger.fine('Swarm.dialPeer: joining the dial in progress to $peerId');
-      return active;
+      // A dial runs for at most its address time-outs plus the upgrade. One
+      // that is older is stuck; joining it would hang this caller too.
+      final age = DateTime.now().difference(active.started);
+      if (age < _maxDialAge) {
+        _logger.fine('Swarm.dialPeer: joining the dial in progress to $peerId');
+        return active.dial;
+      }
+      _logger.warning('Swarm.dialPeer: the dial to $peerId has run for ${age.inSeconds}s; starting a new dial');
     }
     final dial = _dialPeer(context, peerId);
-    _activeDials[key] = dial;
+    final entry = (dial: dial, started: DateTime.now());
+    _activeDials[key] = entry;
     dial.whenComplete(() {
-      if (identical(_activeDials[key], dial)) _activeDials.remove(key);
+      if (identical(_activeDials[key], entry)) _activeDials.remove(key);
     }).ignore();
     return dial;
+  }
+
+  Duration get _maxDialAge =>
+      (_config.dialTimeout > _config.relayDialTimeout ? _config.dialTimeout : _config.relayDialTimeout) * 2;
+
+  /// Removes [conn] and closes it without waiting for the close. Closing a
+  /// connection whose writes stall can take long; the caller (a dial, the
+  /// stale-connection sweep) must not wait for it.
+  Future<void> _dropConnection(SwarmConn conn, String caller) async {
+    try {
+      await removeConnection(conn);
+    } catch (e) {
+      _logger.warning('$caller: Error removing stale connection ${conn.id}: $e');
+    }
+    conn.close().catchError((Object e) {
+      _logger.fine('$caller: Error closing stale connection ${conn.id}: $e');
+    });
   }
 
   Future<Conn> _dialPeer(Context context, PeerId peerId) async {
@@ -875,14 +905,9 @@ class Swarm implements Network {
             }
           }
           
-          // Properly remove and close the stale connection so notifiees
-          // (identify, etc.) are informed and the old accept loop terminates.
-          try {
-            await removeConnection(staleConn);
-            await staleConn.close();
-          } catch (e) {
-            _logger.warning('Swarm.dialPeer: Error cleaning up stale connection ${staleConn.id}: $e');
-          }
+          // Remove and close the stale connection so notifiees (identify,
+          // etc.) are informed and the old accept loop terminates.
+          await _dropConnection(staleConn, 'Swarm.dialPeer');
         }
       }
       
@@ -1653,12 +1678,7 @@ class Swarm implements Network {
           }
         }
         
-        try {
-          await removeConnection(staleConn);
-          await staleConn.close();
-        } catch (e) {
-          _logger.warning('Swarm._cleanupStaleConnections: Error cleaning up stale connection ${staleConn.id}: $e');
-        }
+        await _dropConnection(staleConn, 'Swarm._cleanupStaleConnections');
       }
     } else if (totalConnections > 0) {
       _logger.fine('Swarm._cleanupStaleConnections: All $totalConnections connections are healthy');

@@ -1387,7 +1387,14 @@ class BasicHost implements Host {
       final selectStartTime = DateTime.now();
       _log.fine('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
       
-      final selectedProtocol = await _mux.selectOneOf(stream, pids);
+      // The stream deadline bounds reads only; a write that waits behind a
+      // stalled connection is bounded here.
+      final select = _mux.selectOneOf(stream, pids);
+      final selectedProtocol = hasTimeout
+          ? await select.timeout(_negtimeout, onTimeout: () {
+              throw TimeoutException('Protocol negotiation with $p timed out', _negtimeout);
+            })
+          : await select;
       _log.fine('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
       
       final selectTime = DateTime.now().difference(selectStartTime);

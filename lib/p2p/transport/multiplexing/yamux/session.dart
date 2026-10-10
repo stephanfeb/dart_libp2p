@@ -34,6 +34,29 @@ enum YamuxCloseReason {
 }
 
 
+/// Names for the GO_AWAY codes go-libp2p sends when it closes a connection
+/// (network.ConnErrorCode). go-yamux puts them in the GO_AWAY frame in place
+/// of the yamux codes 0-2.
+const goLibp2pConnErrorCodes = {
+  0x1000: 'protocol negotiation failed',
+  0x1001: 'resource limit exceeded',
+  0x1002: 'rate limited',
+  0x1003: 'protocol violation',
+  0x1004: 'supplanted',
+  0x1005: 'garbage collected',
+  0x1006: 'shutdown',
+  0x1007: 'gated',
+  0x1008: 'code out of range',
+};
+
+/// A readable name for a received GO_AWAY [code].
+String goAwayCodeName(int code) {
+  for (final reason in YamuxCloseReason.values) {
+    if (reason.value == code) return reason.name;
+  }
+  return goLibp2pConnErrorCodes[code] ?? 'unknown';
+}
+
 class YamuxConstants {
   static const String protocolId = '/yamux/1.0.0';
 }
@@ -71,6 +94,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   Completer<void>? _incomingStreamNotifier;
   bool _closed = false;
   bool _cleanupStarted = false; 
+  // Completes when _cleanupWithoutFrames has finished.
+  final _cleanupDone = Completer<void>();
   final _initCompleter = Completer<void>();
   Timer? _keepaliveTimer;
   String get _logPrefix => "[$_instanceId][${_isClient ? "Client" : "Server"}]";
@@ -81,10 +106,10 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   // existed.
   int _highestRemoteStreamId = 0;
   
-  // Ping-pong timeout detection
+  // Keep-alive: one ping at a time, as go-yamux does. If its pong does not
+  // come within keepAliveTimeout, the session is closed.
   final Map<int, DateTime> _pendingPings = {};
-  static const Duration _pingTimeout = Duration(seconds: 30);
-  static const int _pingTimeoutThreshold = 5; // Close after this many timeouts
+  Timer? _pingDeadline;
   
   // Note: No write lock at this level. SecuredConnection handles serialization
   // of encryption (nonce ordering) and UDX transmission via its async write queue.
@@ -117,26 +142,22 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
   Future<void> _sendPing() async {
     if (_closed) return;
-    
-    // Check for timed-out pings
-    final now = DateTime.now();
-    final timedOut = _pendingPings.entries
-        .where((e) => now.difference(e.value) > _pingTimeout)
-        .toList();
-    
-    if (timedOut.isNotEmpty) {
+    // The previous ping is still waiting for its pong; its deadline decides.
+    if (_pendingPings.isNotEmpty) return;
 
-      // After threshold timeouts, close the session as unhealthy
-      // This is lenient for mobile connections with intermittent connectivity
-      if (timedOut.length >= _pingTimeoutThreshold) {
-        await close();
-        return;
-      }
-    }
-    
+    final now = DateTime.now();
     final pingId = ++_lastPingId;
     _pendingPings[pingId] = now;
-    
+    // The deadline starts before the send: a ping stuck behind a stalled
+    // write queue is a dead connection too.
+    _pingDeadline?.cancel();
+    _pingDeadline = Timer(_config.keepAliveTimeout, () {
+      if (_closed || !_pendingPings.containsKey(pingId)) return;
+      _log.warning('$_logPrefix [YAMUX-KEEPALIVE] No pong for ping $pingId within '
+          '${_config.keepAliveTimeout.inSeconds}s. Closing the session.');
+      _goAway(YamuxCloseReason.internalError);
+    });
+
     try {
       final frame = YamuxFrame.ping(false, pingId);
       await _sendFrame(frame);
@@ -541,6 +562,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       // PONG received (ACK flag) - clear from pending pings
       final removed = _pendingPings.remove(opaqueValue);
       if (removed != null) {
+        _pingDeadline?.cancel();
+        _pingDeadline = null;
         final receivedTime = DateTime.now();
         final rtt = receivedTime.difference(removed);
 
@@ -562,15 +585,16 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   Future<void> _handleGoAway(YamuxFrame frame) async {
-    // The reason code from frame.length is an int. We need to map it to YamuxCloseReason or use a default.
-    YamuxCloseReason reason;
-    try {
-      reason = YamuxCloseReason.values.firstWhere((r) => r.value == frame.length);
-    } catch (_) {
-      reason = YamuxCloseReason.protocolError; // Default if unknown code
+    final code = frame.length;
+    final message = '$_logPrefix Received GO_AWAY: ${goAwayCodeName(code)} '
+        '(code=$code). Active streams: ${_streams.length}. Session will close.';
+    if (code == YamuxCloseReason.normal.value || goLibp2pConnErrorCodes.containsKey(code)) {
+      _log.fine(message);
+    } else {
+      _log.warning(message);
     }
-    _log.warning('$_logPrefix [SESSION-DIAG] Received REMOTE GO_AWAY frame. Reason: ${reason.name} (code=${frame.length}). Active streams: ${_streams.length}. Session will close.');
-    await _goAway(reason);
+    // The remote has closed the session; yamux does not answer a GO_AWAY.
+    await _cleanupWithoutFrames();
   }
 
   /// Sends a yamux frame to the underlying (secured) connection.
@@ -612,28 +636,29 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     }
   }
 
+  /// Sends GO_AWAY and tears the session down. The send waits at most
+  /// goAwayTimeout: on a connection whose writes stall, the GO_AWAY would
+  /// otherwise wait behind them for minutes, and the session (and anything
+  /// awaiting its close) with it.
   Future<void> _goAway(YamuxCloseReason reason) async {
-    if (_closed && _cleanupStarted) {
-      return;
+    if (_closed) {
+      // Another call is closing the session.
+      return _cleanupDone.future;
     }
-    _log.warning('$_logPrefix [SESSION-DIAG] _goAway() called. Reason: ${reason.name}. Already closed: $_closed. Active streams: ${_streams.length}.');
-    if (_closed && !_cleanupStarted) {
-        // _closed is true, so _sendFrame will only allow GO_AWAY if it's not already in cleanup.
-        // This path implies _goAway might be called recursively or from different error paths.
-        // The primary goal now is to ensure cleanup.
-    } else {
-       _closed = true; 
-    }
+    _closed = true;
+    _log.fine('$_logPrefix _goAway(${reason.name}). Active streams: ${_streams.length}.');
 
     try {
-      if (!_connection.isClosed && !_cleanupStarted) { // Only send if conn open and cleanup not started
-        final frame = YamuxFrame.goAway(reason.value);
-        await _sendFrame(frame); 
+      if (!_connection.isClosed) {
+        await _sendFrame(YamuxFrame.goAway(reason.value)).timeout(_config.goAwayTimeout);
       }
+    } on TimeoutException {
+      _log.fine('$_logPrefix _goAway(${reason.name}): GO_AWAY not sent within '
+          '${_config.goAwayTimeout.inMilliseconds}ms. Closing without it.');
     } catch (e) {
-      _log.warning('$_logPrefix _goAway(${reason.name}): Error occurred during _sendFrame for GO_AWAY: $e. Proceeding to cleanup.');
+      _log.fine('$_logPrefix _goAway(${reason.name}): Error sending GO_AWAY: $e. Proceeding to cleanup.');
     } finally {
-      await _cleanupWithoutFrames(); // This will set _cleanupStarted = true
+      await _cleanupWithoutFrames();
     }
   }
 
@@ -708,7 +733,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
     try {
       final frame = YamuxFrame.synStream(streamId);
-      await _sendFrame(frame);
+      await _sendFrame(frame).timeout(_config.streamOpenTimeout, onTimeout: () => _openTimedOut(streamId));
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] SYN sent for streamID=$streamId');
 
       // Don't block on ACK. The yamux spec allows the initiator to send
@@ -731,7 +756,9 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         _log.fine('$_logPrefix [OPEN-STREAM-DIAG] No standalone ACK for streamID=$streamId: $e');
       });
 
-      await stream.open();
+      // The SYN and the window update are queued in order, so once the SYN
+      // went out this one does not wait long; it has its own limit anyway.
+      await stream.open().timeout(_config.streamOpenTimeout, onTimeout: () => _openTimedOut(streamId));
       _log.fine('$_logPrefix [OPEN-STREAM-DIAG] stream.open() complete for streamID=$streamId');
 
       // Notify metrics observer of successful stream open
@@ -743,23 +770,21 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       _pendingStreams.remove(streamId);
       _streams.remove(streamId); // Ensure stream is removed if setup fails
       _log.finer('$_logPrefix openStream: Removed stream ID $streamId from _pendingStreams and _streams due to error.');
-      // Don't await reset if stream.open() failed, as stream might not be in a state to send reset.
-      // Just ensure local cleanup of the stream object if it was partially initialized.
-      // If _sendFrame for SYN failed, stream.reset() would also fail.
-      // If timeout occurred, stream.reset() is appropriate.
-      if (e is TimeoutException) {
-        await stream.reset().catchError((resetError) {
-          _log.warning('$_logPrefix openStream: Error resetting stream ID $streamId during newStream timeout handling: $resetError');
-        });
-      } else {
-        // For other errors (e.g. _sendFrame failed), a simple local cleanup might be best.
-        await stream.forceReset().catchError((forceResetError) {
-             _log.warning('$_logPrefix openStream: Error force-resetting stream ID $streamId: $forceResetError');
-        });
+      // Clean up locally. After a time-out the SYN may still go out, so
+      // queue an RST for it too, without waiting: the queue is what stalled.
+      if (e is TimeoutException && !_closed) {
+        _sendFrame(YamuxFrame.reset(streamId)).catchError((Object _) {});
       }
+      await stream.forceReset().catchError((forceResetError) {
+        _log.warning('$_logPrefix openStream: Error force-resetting stream ID $streamId: $forceResetError');
+      });
       rethrow;
     }
   }
+
+  Never _openTimedOut(int streamId) => throw TimeoutException(
+      'Opening yamux stream $streamId timed out: the connection does not send',
+      _config.streamOpenTimeout);
 
   @override
   Future<YamuxStream> acceptStream() async {
@@ -793,12 +818,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   @override
-  Future<void> close() async {
-    if (_closed && _cleanupStarted) {
-      return;
-    }
-    await _goAway(YamuxCloseReason.normal);
-  }
+  Future<void> close() => _goAway(YamuxCloseReason.normal);
 
   @override
   bool get isClosed => _closed;
@@ -828,8 +848,16 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     }
     _cleanupStarted = true; // Set flag at the beginning
     _closed = true; 
+    try {
+      await _cleanupSession();
+    } finally {
+      _cleanupDone.complete();
+    }
+  }
 
+  Future<void> _cleanupSession() async {
     _keepaliveTimer?.cancel();
+    _pingDeadline?.cancel();
 
     // Fail any pending outgoing streams
     _pendingStreams.forEach((id, completer) {

@@ -129,6 +129,8 @@ class SecuredConnection implements TransportConn {
   // (SYN-ACK, WINDOW_UPDATE, PING) behind slow data frame transmissions.
   final Queue<_PendingEncryptedWrite> _pendingWrites = Queue<_PendingEncryptedWrite>();
   bool _writeLoopActive = false;
+  // The write being sent to the underlying connection, if any.
+  _PendingEncryptedWrite? _inFlightWrite;
 
   SecuredConnection(
       this._connection,
@@ -247,7 +249,21 @@ class SecuredConnection implements TransportConn {
   }
 
   @override
-  Future<void> close() => _connection.close();
+  Future<void> close() {
+    // Fail the queued writes now. On a connection whose sends stall, they
+    // would otherwise wait their turn for minutes after the close, and so
+    // would everything awaiting them (stream opens, closes, resets).
+    final error = StateError('Connection closed');
+    final inFlight = _inFlightWrite;
+    if (inFlight != null && !inFlight.completer.isCompleted) {
+      inFlight.completer.completeError(error);
+    }
+    while (_pendingWrites.isNotEmpty) {
+      final pw = _pendingWrites.removeFirst();
+      if (!pw.completer.isCompleted) pw.completer.completeError(error);
+    }
+    return _connection.close();
+  }
 
   @override
   Future<Uint8List> read([int? length]) async {
@@ -483,6 +499,7 @@ class SecuredConnection implements TransportConn {
   Future<void> _drainPendingWrites() async {
     while (_pendingWrites.isNotEmpty) {
       final pw = _pendingWrites.removeFirst();
+      _inFlightWrite = pw;
       try {
         _log.finer('SecuredConnection: TO_UNDERLYING_WRITE - Length: ${pw.encryptedData.length}');
         await _connection.write(pw.encryptedData);
@@ -501,6 +518,8 @@ class SecuredConnection implements TransportConn {
           }
         }
         break;
+      } finally {
+        _inFlightWrite = null;
       }
     }
     _writeLoopActive = false;
@@ -548,7 +567,9 @@ class SecuredConnection implements TransportConn {
       final isLast = i == encryptedChunks.length - 1;
       _pendingWrites.add(_PendingEncryptedWrite(
         encryptedChunks[i],
-        isLast ? completer : Completer<void>(),
+        // Nothing awaits an intermediate chunk; failing one must not raise
+        // an uncaught error.
+        isLast ? completer : (Completer<void>()..future.ignore()),
       ));
     }
     _startWriteLoop();

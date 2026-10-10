@@ -187,9 +187,13 @@ class SwarmConn implements Conn {
       _streams.clear();
       return open;
     });
-    for (final stream in streams) {
-      await stream.close(); // This will also call done() on stream's scope
-    }
+    // Close them together and wait a short time only: on a connection whose
+    // writes stall, each FIN waits behind the stalled queue. Closing the
+    // connection below resets any stream that has not closed by then.
+    // stream.close() also calls done() on the stream's scope.
+    await Future.wait(streams.map((stream) => stream.close().catchError((Object e) {
+          _logger.fine('SwarmConn.close ($id): Error closing stream ${stream.id()}: $e');
+        }))).timeout(_streamCloseGrace, onTimeout: () => const []);
 
     await _streamsLock.synchronized(() async {
       if (_closeDone) return;
@@ -209,6 +213,8 @@ class SwarmConn implements Conn {
     await swarm.removeConnection(this);
   }
 
+
+  static const _streamCloseGrace = Duration(seconds: 2);
 
   /// Creates a new stream
   Future<P2PStream> newStream(Context context) async {
@@ -244,8 +250,8 @@ class SwarmConn implements Conn {
         // Mark this connection as closed
         _isClosed = true;
         
-        // Notify the swarm to remove this stale connection
-        // Use Future.microtask to avoid blocking the current operation
+        // Remove this stale connection from the swarm, then close it so the
+        // transport is released too. Neither is awaited here.
         Future.microtask(() async {
           try {
             await swarm.removeConnection(this);
@@ -253,6 +259,9 @@ class SwarmConn implements Conn {
           } catch (removeError) {
             _logger.warning('SwarmConn.newStream ($id): Error removing stale connection from swarm: $removeError');
           }
+          close().catchError((Object closeError) {
+            _logger.fine('SwarmConn.newStream ($id): Error closing stale connection: $closeError');
+          });
         });
         
         // Rethrow with a more descriptive error message

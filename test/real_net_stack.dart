@@ -74,6 +74,8 @@ Future<Libp2pNode> createLibp2pNode({
   Reachability? forceReachability, // Force reachability for testing
   AmbientAutoNATv2Config? ambientAutoNATConfig, // Custom config for AutoNAT
   List<String>? relayServers, // List of relay multiaddrs to auto-connect
+  MultiplexerConfig? yamuxConfig, // If null, the config below
+  Duration negotiationTimeout = const Duration(seconds: 20),
 }) async {
   final kp = keyPair ?? await crypto_ed25519.generateEd25519KeyPair();
   final peerId = await core_peer_id_lib.PeerId.fromPublicKey(kp.publicKey);
@@ -86,7 +88,7 @@ Future<Libp2pNode> createLibp2pNode({
     streamWriteTimeout: Duration(seconds: 10),
     maxStreams: 256,
   );
-  final muxerDefs = [_TestYamuxMuxerProvider(yamuxConfig: yamuxMultiplexerConfig)];
+  final muxerDefs = [_TestYamuxMuxerProvider(yamuxConfig: yamuxConfig ?? yamuxMultiplexerConfig)];
   final securityProtocols = [await NoiseSecurity.create(kp)];
   final peerstore = MemoryPeerstore();
 
@@ -143,7 +145,7 @@ Future<Libp2pNode> createLibp2pNode({
     ..relayServers = relayServers ?? [] // Set relay servers for auto-connect
     ..disableSignedPeerRecord = false
     ..addrsFactory = passThroughAddrsFactory
-    ..negotiationTimeout = Duration(seconds: 20)
+    ..negotiationTimeout = negotiationTimeout
     ..identifyUserAgent = "${userAgentPrefix ?? 'dart-libp2p-node'}/${peerId.toBase58().substring(0,6)}";
     // ..muxers = muxerDefs // Removed, should rely on Swarm's upgrader config
     // ..securityProtocols = securityProtocols; // Removed, should rely on Swarm's upgrader config

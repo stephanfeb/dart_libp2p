@@ -95,6 +95,21 @@ class MultiplexerConfig {
   /// Keep-alive interval (default: 10 seconds)
   final Duration keepAliveInterval;
 
+  /// How long a keep-alive ping may go unanswered before the session is
+  /// closed (default: 30 seconds). The time includes waiting to send the
+  /// ping, so a connection whose writes stall is also found dead.
+  final Duration keepAliveTimeout;
+
+  /// How long opening an outbound stream may take: sending its SYN and
+  /// initial window update (default: 10 seconds). On a connection whose
+  /// writes stall, the open fails with a [TimeoutException] instead of
+  /// waiting without a limit.
+  final Duration streamOpenTimeout;
+
+  /// How long closing a session waits to send its GO_AWAY frame before it
+  /// closes the connection anyway (default: 1 second).
+  final Duration goAwayTimeout;
+
   /// Connection-level read timeout for idle connections (default: 35 seconds)
   /// This should be at least 3x the keepAliveInterval to allow for keepalive pings
   /// before timing out an idle connection.
@@ -108,6 +123,9 @@ class MultiplexerConfig {
     this.streamReadTimeout = const Duration(seconds: 30),
     this.streamWriteTimeout = const Duration(seconds: 30),
     this.keepAliveInterval = const Duration(seconds: 10),
+    this.keepAliveTimeout = const Duration(seconds: 30),
+    this.streamOpenTimeout = const Duration(seconds: 10),
+    this.goAwayTimeout = const Duration(seconds: 1),
     this.connectionReadTimeout = const Duration(seconds: 35), // 3.5x keepalive
   });
 }

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A connection that died without a close hung every new stream to its peer, and the peer was not dialled again** (dart-libp2p-m06). On a dead UDX path, writes wait for acknowledgements that do not come. The yamux session waited to send its GO_AWAY before it closed, so the close did not finish. `Swarm.dialPeer` waited for that close, and each later dial to the peer joined that dial. Requests hung until the application's own time-out. Now:
+  - A yamux session waits at most `MultiplexerConfig.goAwayTimeout` (1 s) to send its GO_AWAY, then closes the connection.
+  - `SecuredConnection.close()` fails the writes that wait in its queue.
+  - Keep-alive sends one ping at a time, as go-yamux does. If no pong comes within `MultiplexerConfig.keepAliveTimeout` (30 s), the session closes. Before, the session closed only after 5 pings were 30 s old: 3 minutes or more.
+  - Opening a stream fails with a `TimeoutException` after `MultiplexerConfig.streamOpenTimeout` (10 s).
+  - `BasicHost.newStream` applies the negotiation time-out to the whole protocol negotiation. Before, the time-out applied to reads only.
+  - The swarm removes a stale connection and does not wait for its close. A dial older than twice the dial time-out is not joined.
+  - `SwarmConn.close()` waits at most 2 s for its streams to close.
+  - When a connection is found closed while a stream is opened, `Swarm.newStream` dials again one time.
+- **Multiaddr bytes did not agree with go-multiaddr** (dart-libp2p-cce.1). The binary form of a `dns4`, `dns6`, `dnsaddr` or `sni` value had two length prefixes. Dart read its own bytes, but identify could not read a Go peer's DNS address (`RangeError`), and Go read Dart's DNS addresses incorrectly. Also:
+  - A `certhash` is the multibase-decoded multihash in binary form, and its text form is base64url, as in go-multiaddr.
+  - New protocols: `/dns` (0x35) and `/webrtc-direct` (0x0118).
+  - Corrected codes: `quic-v1` is 0x01cd (it was 0x01cc, the code of the old `/quic`), `sni` is 0x01c1 (it was 0x01d3), and `webrtc` is 0x0119 (it was 0x0113).
+- **A received GO_AWAY was answered with a GO_AWAY, and go-libp2p codes were logged as `protocolError`.** A session now closes without a reply, as the yamux specification requires. The log gives the name of the code, for example `garbage collected` for go-libp2p's 0x1005 (4101).
+
+### Added
+
+- `MultiplexerConfig.keepAliveTimeout`, `MultiplexerConfig.streamOpenTimeout` and `MultiplexerConfig.goAwayTimeout`.
+
 ## [4.6.3] - 2026-10-09
 
 ### Fixed
