@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A `certhash` is the multibase-decoded multihash in binary form, and its text form is base64url, as in go-multiaddr.
   - New protocols: `/dns` (0x35) and `/webrtc-direct` (0x0118).
   - Corrected codes: `quic-v1` is 0x01cd (it was 0x01cc, the code of the old `/quic`), `sni` is 0x01c1 (it was 0x01d3), and `webrtc` is 0x0119 (it was 0x0113).
+- **`RoutingDiscovery` keyed a namespace differently from go-libp2p** (dart-libp2p-cce.3). `nsToCid` made a CID with codec sha2-256 and the bare digest as its multihash, so Go peers did not find Dart's advertisements, and Dart did not find Go's. Now the key is CIDv1, codec raw, multihash sha2-256 of the namespace, as in go-libp2p. Advertisements made by an older version are not found by this version.
 - **A received GO_AWAY was answered with a GO_AWAY, and go-libp2p codes were logged as `protocolError`.** A session now closes without a reply, as the yamux specification requires. The log gives the name of the code, for example `garbage collected` for go-libp2p's 0x1005 (4101).
 
 ### Added

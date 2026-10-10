@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
-import 'dart:typed_data';
-import 'package:crypto/crypto.dart';
 import 'package:dcid/dcid.dart';
 
 import 'package:dart_libp2p/core/discovery.dart';
@@ -127,13 +125,12 @@ class RoutingDiscovery implements Discovery {
     return controller.stream;
   }
 
-  /// Converts a namespace string to a CID
+  /// Converts a namespace string to a CID: CIDv1, codec raw, multihash
+  /// sha2-256 of the namespace, as `nsToCid` in go-libp2p. Before, the codec
+  /// was sha2-256 and the multihash was the bare digest, so Go peers never
+  /// found the advertisements.
   static Future<CID> nsToCid(String ns) async {
-    final bytes = utf8.encode(ns);
-    final hash = sha256.convert(bytes);
-
-    // Create a CID from the hash
-    return CID.create(CID.V1, 'sha2-256', Uint8List.fromList(hash.bytes));
+    return CID.fromData(CID.V1, 'raw', utf8.encode(ns));
   }
 }
 

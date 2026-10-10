@@ -111,6 +111,14 @@ void main() {
       routingDiscovery = RoutingDiscovery(mockRouter);
     });
 
+    test('nsToCid gives the key go-libp2p gives', () async {
+      // From go-libp2p's nsToCid: cid.NewCidV1(cid.Raw, mh.Sum(ns, SHA2_256)).
+      expect((await RoutingDiscovery.nsToCid('teranode/bitcoin/1.0.0/testnet-block')).toString(),
+          'bafkreihko5grryepfzapyh5wu47q2bzytva6t2lqvzpnh5kglcckpavk7m');
+      expect((await RoutingDiscovery.nsToCid('my-app')).toString(),
+          'bafkreicmtj24zjyx563izblpe25ieudtp5congangmmtzfh2bohjzv3brq');
+    });
+
     test('advertise calls provide on the router', () async {
       final duration = await routingDiscovery.advertise('test-namespace');
 
