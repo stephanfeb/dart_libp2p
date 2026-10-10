@@ -34,11 +34,10 @@ List<MultiAddr> cleanupAddressSet(List<MultiAddr> addrs) {
 bool isDNSAddr(MultiAddr a) {
   if (a.components.isEmpty) return false;
   final firstComponentProtocol = a.components.first.$1; // This is a Protocol object
-  return firstComponentProtocol.code == Protocols.dns4.code ||
+  return firstComponentProtocol.code == Protocols.dns.code ||
+      firstComponentProtocol.code == Protocols.dns4.code ||
       firstComponentProtocol.code == Protocols.dns6.code ||
       firstComponentProtocol.code == Protocols.dnsaddr.code;
-  // Note: Go's ma.P_DNS is not directly listed in the Dart Protocols class.
-  // Assuming dns4, dns6, and dnsaddr cover the intended DNS types.
 }
 
 class _AddrKeyAndPort {

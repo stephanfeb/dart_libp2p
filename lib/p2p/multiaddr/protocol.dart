@@ -68,6 +68,12 @@ class Protocols {
     size: 128,
   );
 
+  static const dns = Protocol(
+    name: 'dns',
+    code: 0x35,
+    size: -1,
+  );
+
   static const dns4 = Protocol(
     name: 'dns4',
     code: 0x36,
@@ -101,7 +107,7 @@ class Protocols {
 
   static const quicV1 = Protocol(
     name: 'quic-v1',
-    code: 0x01CC,
+    code: 0x01CD,
     size: 0,
   );
 
@@ -119,7 +125,7 @@ class Protocols {
 
   static const sni = Protocol(
     name: 'sni',
-    code: 0x01D3,
+    code: 0x01C1,
     size: -1,
   );
 
@@ -131,7 +137,13 @@ class Protocols {
 
   static const webrtc = Protocol(
     name: 'webrtc',
-    code: 0x0113,
+    code: 0x0119,
+    size: 0,
+  );
+
+  static const webrtcDirect = Protocol(
+    name: 'webrtc-direct',
+    code: 0x0118,
     size: 0,
   );
 
@@ -146,6 +158,7 @@ class Protocols {
     'tcp': tcp,
     'udp': udp,
     'ip6': ip6,
+    'dns': dns,
     'dns4': dns4,
     'dns6': dns6,
     'dnsaddr': dnsaddr,
@@ -157,6 +170,7 @@ class Protocols {
     'sni': sni,
     'p2p-circuit': circuit,
     'webrtc': webrtc,
+    'webrtc-direct': webrtcDirect,
     'udx': udx,
   };
 

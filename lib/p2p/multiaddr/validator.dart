@@ -16,6 +16,7 @@ class MultiAddrValidator {
       case 'udp':
         _validatePort(value);
         break;
+      case 'dns':
       case 'dns4':
       case 'dns6':
       case 'dnsaddr':

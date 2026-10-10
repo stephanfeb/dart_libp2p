@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:base32/base32.dart';
+import 'package:bs58/bs58.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'protocol.dart';
 import 'validator.dart';
@@ -26,6 +28,8 @@ class MultiAddrCodec {
         // The p2p protocol value is a peer ID string; encode it to raw multihash bytes.
         final peerId = PeerId.fromString(value);
         return peerId.toBytes();
+      case 'certhash':
+        return _encodeMultibase(value);
       default:
         if (protocol.size == 0) { // Protocol has no value component
           return Uint8List(0);
@@ -55,6 +59,8 @@ class MultiAddrCodec {
         // The p2p protocol value is raw multihash bytes encoding a peer ID.
         final peerId = PeerId.fromBytes(Uint8List.fromList(bytes));
         return peerId.toString();
+      case 'certhash':
+        return _decodeMultibase(bytes);
       default:
         if (protocol.size == 0) { // Protocol has no value component
           return '';
@@ -208,10 +214,49 @@ class MultiAddrCodec {
     return Uint8List.fromList(bytes);
   }
 
+  // The value only. MultiAddr.toBytes writes its varint length, as
+  // go-multiaddr does; the value itself has no second length prefix.
   static Uint8List _encodeString(String value) {
-    final bytes = utf8.encode(value);
-    final length = encodeVarint(bytes.length);
-    return Uint8List.fromList([...length, ...bytes]);
+    return Uint8List.fromList(utf8.encode(value));
+  }
+
+  // A certhash is a multibase string in text form and the decoded multihash
+  // in binary form, as in go-multiaddr.
+  static Uint8List _encodeMultibase(String value) {
+    if (value.length < 2) {
+      throw FormatException('Invalid multibase value: $value');
+    }
+    final body = value.substring(1);
+    switch (value[0]) {
+      case 'u': // base64url, no padding
+        return base64Url.decode(base64Url.normalize(body));
+      case 'U': // base64url, with padding
+        return base64Url.decode(body);
+      case 'm': // base64, no padding
+        return base64.decode(base64.normalize(body));
+      case 'b': // base32 lower case, no padding
+      case 'B': // base32 upper case, no padding
+        final upper = body.toUpperCase();
+        return base32.decode(upper.padRight((upper.length + 7) ~/ 8 * 8, '='));
+      case 'z': // base58btc
+        return base58.decode(body);
+      case 'f': // base16 lower case
+      case 'F': // base16 upper case
+        if (body.length.isOdd) {
+          throw FormatException('Invalid base16 multibase value: $value');
+        }
+        return Uint8List.fromList([
+          for (var i = 0; i < body.length; i += 2)
+            int.parse(body.substring(i, i + 2), radix: 16),
+        ]);
+      default:
+        throw FormatException('Unsupported multibase prefix in: $value');
+    }
+  }
+
+  // go-multiaddr writes a certhash as base64url without padding.
+  static String _decodeMultibase(Uint8List bytes) {
+    return 'u${base64Url.encode(bytes).replaceAll('=', '')}';
   }
 
   // Protocol-specific decoders
@@ -279,8 +324,6 @@ class MultiAddrCodec {
   }
 
   static String _decodeString(Uint8List bytes) {
-    final (length, bytesRead) = decodeVarint(bytes);
-    final stringBytes = bytes.sublist(bytesRead, bytesRead + length);
-    return utf8.decode(stringBytes);
+    return utf8.decode(bytes);
   }
 }
