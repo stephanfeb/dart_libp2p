@@ -897,17 +897,36 @@ void main() {
         final remoteFin = YamuxFrame.createData(1, Uint8List(0), fin: true);
         await stream.handleFrame(remoteFin);
         
-        // Stream should be in closing state (both FINs exchanged)
-        // The stream remains in closing state until all data is consumed via read()
-        // This prevents data loss in relay scenarios where one direction may still have
-        // pending data to read even after both FINs are exchanged.
-        expect(stream.streamState, equals(YamuxStreamState.closing));
-        
-        // Reading EOF triggers cleanup when both FINs sent and queue is empty
+        // Both FINs exchanged and nothing left to read: the stream releases
+        // itself without waiting for a read to EOF (dart-libp2p-85i).
+        expect(stream.streamState, equals(YamuxStreamState.closed));
+
+        // A late read is still a clean EOF.
         final eof = await stream.read();
         expect(eof.isEmpty, isTrue);
-        
-        // Now the stream should be fully closed
+      });
+
+      test('both FINs with data still queued stay readable until drained', () async {
+        final stream = YamuxStream(
+          id: 1,
+          protocol: '/test/1.0.0',
+          metadata: {},
+          initialWindowSize: 256 * 1024,
+          sendFrame: (frame) async {},
+          parentConn: MockConn(),
+          remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+          maxFrameSize: 64 * 1024,
+        );
+        await stream.open();
+        await stream.closeWrite();
+
+        final testData = Uint8List.fromList([1, 2, 3]);
+        await stream.handleFrame(YamuxFrame.createData(1, testData, fin: true));
+
+        // Queued data must not be dropped (relays depend on this).
+        expect(stream.streamState, equals(YamuxStreamState.closing));
+        expect(await stream.read(), equals(testData));
+        expect((await stream.read()).isEmpty, isTrue);
         expect(stream.streamState, equals(YamuxStreamState.closed));
       });
 

@@ -129,6 +129,9 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
   /// Flag to indicate if a local FIN has been sent via closeWrite()
   bool _localFinSent = false;
 
+  /// Flag to indicate if the remote FIN has been received
+  bool _remoteFinReceived = false;
+
   /// Flag to indicate if a local read has been closed via closeRead()
   bool _localReadClosed = false;
 
@@ -580,6 +583,12 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
     // Check deadline before starting read operation
     _checkDeadline();
 
+    // Both sides have half-closed and the stream was released with nothing
+    // left to read: a late read is a clean EOF, not an error.
+    if (_state == YamuxStreamState.closed && _localFinSent && _remoteFinReceived) {
+      return Uint8List(0);
+    }
+
     // Comprehensive state validation before proceeding
     if (!_isValidStateForRead()) {
       final stateError = _createStateErrorForRead();
@@ -949,6 +958,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
     // Handle FIN flag for stream closure
     if (frame.flags & YamuxFlags.fin != 0) {
+      _remoteFinReceived = true;
       if (_state == YamuxStreamState.open) {
         _state = YamuxStreamState.closing;
         _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] Received FIN, transitioning to closing state');
@@ -961,11 +971,12 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
           _readCompleter!.complete(Uint8List(0));
         }
       }
-      // FIX: Do NOT cleanup here even if both FINs have been sent.
-      // The incoming queue may still have data that needs to be consumed.
-      // Cleanup will happen when read() returns EOF and detects both FINs + empty queue.
-      // This prevents data loss in bidirectional relay scenarios.
       _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-FIN] FIN received. localFinSent=$_localFinSent, queueSize=${_incomingQueue.length}');
+      // Do not cleanup while the incoming queue still holds data: the reader
+      // must consume it first (bidirectional relays depend on this), and
+      // read() cleans up at EOF. With both FINs and nothing queued, nothing
+      // will ever drive read() to EOF, so release the stream now (85i).
+      await _cleanupIfDrained();
     }
   }
 
@@ -992,6 +1003,18 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _log.fine('$_logPrefix Finished processing frames in ${processingDuration.inMilliseconds}ms. Remaining in queue: ${_frameQueue.length}');
     } else if (processedInBatch > 0) {
       _log.fine('$_logPrefix Processed $processedInBatch queued frames in ${processingDuration.inMilliseconds}ms');
+    }
+  }
+
+  /// Releases the stream once both FINs are seen and no data is left to read.
+  /// A pending read (if any) gets EOF from [_cleanup].
+  Future<void> _cleanupIfDrained() async {
+    if (_state == YamuxStreamState.closing &&
+        _localFinSent &&
+        _remoteFinReceived &&
+        _incomingQueue.isEmpty) {
+      _log.fine('$_logPrefix Both FINs seen and nothing left to read. Cleaning up.');
+      await _cleanup();
     }
   }
 
@@ -1103,17 +1126,13 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
       _localFinSent = true;
       _log.fine('$_logPrefix closeWrite() sent FIN and set _localFinSent=true. Current stream state: $_state.');
 
-      // FIX: Do NOT call _cleanup() here even if both FINs have been sent.
-      // Both FINs sent only means "writing is done on both sides" - reading should
-      // continue until all buffered data is consumed. Premature cleanup here was
-      // causing bidirectional relay connections to become unidirectional because
-      // the incoming queue would be cleared before the relay could forward all data.
-      // 
-      // The stream will be properly cleaned up when:
-      // 1. read() returns EOF (empty data) after both FINs, OR
-      // 2. close() is explicitly called, OR
-      // 3. reset() is called due to an error
-      _log.fine('$_logPrefix closeWrite() completed. Stream remains readable in state: $_state.');
+      // Do not cleanup unconditionally here: both FINs only mean "writing
+      // is done on both sides", and queued data must still be read. Clearing
+      // the queue early turned bidirectional relays unidirectional.
+      _log.fine('$_logPrefix closeWrite() completed. State: $_state.');
+      // If the remote FIN came first and everything has been read, the
+      // stream is done in both directions (85i).
+      await _cleanupIfDrained();
     } catch (e) {
       _log.severe('$_logPrefix Error sending FIN frame during closeWrite(): $e. Resetting stream.');
       await reset(); // Escalate to reset on send error

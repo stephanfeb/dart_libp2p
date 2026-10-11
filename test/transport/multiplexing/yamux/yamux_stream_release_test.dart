@@ -124,6 +124,56 @@ void main() {
       await stream.close();
       expect(client.numStreams, 0);
     });
+
+    // dart-libp2p-85i: a handler that reads one message and closeWrite()s
+    // never reads to EOF. With both FINs seen and nothing queued, the stream
+    // used to keep its slot (and its resource scope) for ever.
+    test('both sides closeWrite without reading to EOF frees the slot',
+        () async {
+      final handled = Completer<P2PStream>();
+      server.setStreamHandler((P2PStream stream) async {
+        await stream.read();
+        await stream.write(Uint8List.fromList([1]));
+        await stream.closeWrite();
+        handled.complete(stream);
+      });
+
+      final stream = await client.openStream(core_context.Context())
+          as P2PStream<Uint8List>;
+      await stream.write(Uint8List.fromList([0]));
+      await stream.closeWrite();
+      expect(await stream.read(), [1]);
+      final serverStream = await handled.future;
+
+      await _until(() => server.numStreams == 0, 'the server slot to free');
+      // A late read still sees a clean EOF, not an error.
+      expect(await serverStream.read(), isEmpty);
+
+      expect(await stream.read(), isEmpty);
+      await _until(() => client.numStreams == 0, 'the client slot to free');
+    });
+
+    test('remote FIN before local closeWrite with nothing queued frees the slot',
+        () async {
+      final handled = Completer<void>();
+      server.setStreamHandler((P2PStream stream) async {
+        await stream.read();
+        // Let the client FIN arrive before we half-close.
+        await Future.delayed(const Duration(milliseconds: 50));
+        await stream.closeWrite();
+        handled.complete();
+      });
+
+      final stream = await client.openStream(core_context.Context())
+          as P2PStream<Uint8List>;
+      await stream.write(Uint8List.fromList([0]));
+      await stream.closeWrite();
+      await handled.future;
+
+      await _until(() => server.numStreams == 0, 'the server slot to free');
+      expect(await stream.read(), isEmpty);
+      await _until(() => client.numStreams == 0, 'the client slot to free');
+    });
   });
 
   group('Yamux session closing during openStream', () {

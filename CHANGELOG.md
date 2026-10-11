@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A yamux stream that both sides closed with `closeWrite()` kept its resource scope if it was not read to EOF** (dart-libp2p-85i). The stream was released only when `read()` returned EOF. A handler that reads one message and then calls `closeWrite()` does not read to EOF, so the stream scope was held. With the default `ConfigurableLimiter` (64 inbound streams for each protocol and peer), the 65th stream from that peer on that protocol failed with `resource limit exceeded`. Now a stream is released when both FINs are seen and no received data is left to read, as in go-yamux. A pending or later `read()` returns EOF. If received data is still queued, the stream stays open until that data is read.
+
 ## [4.7.0] - 2026-10-11
 
 ### Fixed
