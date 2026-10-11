@@ -5,7 +5,8 @@
 #   to exchange.
 # - nat_a_net: Private network behind NAT-A gateway (192.168.1.0/24) 
 # - nat_b_net: Private network behind NAT-B gateway (192.168.2.0/24)
-# - control_net: Separate network for test orchestration only (172.20.0.0/16)
+# - control_net: Separate network for test orchestration only (10.247.25.0/24).
+#   An unusual subnet, so it does not collide with other Compose projects.
 #
 # CRITICAL: Peers are isolated from public_net to enforce NAT traversal!
 # - Peers ONLY have access to their private networks + control_net
@@ -47,8 +48,8 @@ networks:
     internal: false  # Allows host access for test orchestration
     ipam:
       config:
-        - subnet: 172.25.0.0/16
-          gateway: 172.25.0.1
+        - subnet: 10.247.25.0/24
+          gateway: 10.247.25.1
 
 services:
   # NAT Gateway A - MINIMAL TEST (single network only)
@@ -134,7 +135,7 @@ services:
       public_net:
         ipv4_address: 100.70.3.10
       control_net:
-        ipv4_address: 172.25.0.12
+        ipv4_address: 10.247.25.12
     environment:
       - PEER_ROLE=relay
       - PEER_NAME=relay-server
@@ -157,7 +158,7 @@ services:
       nat_a_net:
         ipv4_address: 192.168.1.100
       control_net:  # Control API only - NO direct access to public_net
-        ipv4_address: 172.25.0.10
+        ipv4_address: 10.247.25.10
     cap_add:
       - NET_ADMIN  # Needed for route manipulation
     environment:
@@ -194,7 +195,7 @@ services:
       nat_b_net:
         ipv4_address: 192.168.2.100
       control_net:  # Control API only - NO direct access to public_net
-        ipv4_address: 172.25.0.11
+        ipv4_address: 10.247.25.11
     cap_add:
       - NET_ADMIN  # Needed for route manipulation
     environment:

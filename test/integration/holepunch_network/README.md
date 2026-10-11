@@ -42,10 +42,10 @@ This directory contains comprehensive integration tests for the dart-libp2p hole
 │  │          (NAT-isolated from A)                │                 │
 │  └───────────────────────────────────────────────┘                 │
 │                                                                      │
-│  CONTROL NETWORK (172.25.0.0/16) - Test Orchestration Only          │
+│  CONTROL NETWORK (10.247.25.0/24) - Test Orchestration Only         │
 │  ┌──────────────────────────────────────────────────────┐           │
-│  │  RELAY: 172.25.0.12   PEER-A: 172.25.0.10           │           │
-│  │                       PEER-B: 172.25.0.11           │           │
+│  │  RELAY: 10.247.25.12  PEER-A: 10.247.25.10          │           │
+│  │                       PEER-B: 10.247.25.11          │           │
 │  │  (HTTP Control APIs bound to this network)          │           │
 │  └──────────────────────────────────────────────────────┘           │
 └──────────────────────────────────────────────────────────────────────┘
@@ -73,7 +73,7 @@ Key:
 - **No External STUN**: Uses internal STUN server (100.70.2.10:3478), NOT stun.google.com
 - **True NAT Isolation**: Peers ONLY have access to their private networks + control_net
 - **No Direct Peer-to-Peer**: Peers cannot reach each other directly - must use NAT traversal
-- **Separate Control Network**: Test orchestration uses dedicated control_net (172.25.0.0/16)
+- **Separate Control Network**: Test orchestration uses dedicated control_net (10.247.25.0/24)
 - **libp2p Traffic Isolation**: All libp2p communication goes through NAT gateways
 - **Host Port Mappings**: Control APIs exposed on host ports 8081-8083 for test orchestration only
 - **Deterministic Results**: Tests are immune to external services and enforce realistic NAT scenarios
@@ -218,11 +218,11 @@ docker-compose down -v --remove-orphans
 
 | Container | Host Port | Container Port | Control Network IP | Purpose |
 |-----------|-----------|----------------|-------------------|---------|
-| `peer-a` | 8081 | 8080 | 172.25.0.10 | Control API for test orchestration |
-| `peer-b` | 8082 | 8080 | 172.25.0.11 | Control API for test orchestration |
-| `relay-server` | 8083 | 8080 | 172.25.0.12 | Control API for test orchestration |
+| `peer-a` | 8081 | 8080 | 10.247.25.10 | Control API for test orchestration |
+| `peer-b` | 8082 | 8080 | 10.247.25.11 | Control API for test orchestration |
+| `relay-server` | 8083 | 8080 | 10.247.25.12 | Control API for test orchestration |
 
-**Note**: Control APIs listen on all of a container's interfaces. Docker may forward a published port to the container's address on any network it is attached to, so binding only the control_net address (172.25.0.0/16) made them intermittently unreachable. The control APIs carry no libp2p traffic, so the peers stay isolated from each other and NAT traversal is still enforced.
+**Note**: Control APIs listen on all of a container's interfaces. Docker may forward a published port to the container's address on any network it is attached to, so binding only the control_net address (10.247.25.0/24) made them intermittently unreachable. The control APIs carry no libp2p traffic, so the peers stay isolated from each other and NAT traversal is still enforced.
 
 ### NAT Types Explained
 

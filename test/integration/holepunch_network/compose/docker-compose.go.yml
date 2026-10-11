@@ -44,8 +44,8 @@ networks:
     internal: false  # Allows host access for test orchestration
     ipam:
       config:
-        - subnet: 172.26.0.0/16
-          gateway: 172.26.0.1
+        - subnet: 10.247.26.0/24
+          gateway: 10.247.26.1
 
 services:
   # NAT Gateway A - MINIMAL TEST (single network only)
@@ -131,7 +131,7 @@ services:
       public_net:
         ipv4_address: 11.70.3.10
       control_net:
-        ipv4_address: 172.26.0.12
+        ipv4_address: 10.247.26.12
     environment:
       - ROLE=relay
 
@@ -147,7 +147,7 @@ services:
       nat_a_net:
         ipv4_address: 192.168.1.100
       control_net:  # Control API only - NO direct access to public_net
-        ipv4_address: 172.26.0.10
+        ipv4_address: 10.247.26.10
     cap_add:
       - NET_ADMIN  # Needed for route manipulation
     environment:
@@ -184,7 +184,7 @@ services:
       nat_b_net:
         ipv4_address: 192.168.2.100
       control_net:
-        ipv4_address: 172.26.0.11
+        ipv4_address: 10.247.26.11
     cap_add:
       - NET_ADMIN
     environment:
