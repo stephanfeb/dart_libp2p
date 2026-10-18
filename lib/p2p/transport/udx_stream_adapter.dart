@@ -18,6 +18,7 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/p2p/transport/listener.dart';
 import 'package:logging/logging.dart';
+import 'package:meta/meta.dart';
 
 final Logger _logger = Logger('UDXStreamAdapter');
 
@@ -389,12 +390,26 @@ typedef UDXSessionConnFactory = UDXSessionConn Function({
 });
 
 class UDXListener implements Listener {
-  final UDXMultiplexer _multiplexer;
-  final MultiAddr _boundAddr;
+  UDXMultiplexer _multiplexer;
+  MultiAddr _boundAddr;
   final UDXTransport _transport;
   final ConnManager _connManager;
   final UDXSessionConnFactory _sessionConnFactory;
   final void Function()? _onClosed;
+
+  /// Binds a new socket in place of [lost], the listener's socket that
+  /// stopped by itself; null when the listener closes with its socket.
+  final Future<UDXMultiplexer> Function(UDXMultiplexer lost)? _rebind;
+
+  /// How long to wait before each try to bind again; the last repeats.
+  static const List<Duration> rebindDelays = [
+    Duration.zero,
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 30),
+  ];
 
   final StreamController<TransportConn> _incomingSessionController = StreamController<TransportConn>.broadcast();
   bool _isClosed = false;
@@ -411,38 +426,71 @@ class UDXListener implements Listener {
     required ConnManager connManager,
     UDXSessionConnFactory? sessionConnFactory,
     void Function()? onClosed,
+    Future<UDXMultiplexer> Function(UDXMultiplexer lost)? rebind,
   }) : _multiplexer = listeningSocket,
         _boundAddr = boundAddr,
         _transport = transport,
         _connManager = connManager,
         _sessionConnFactory = sessionConnFactory ?? UDXSessionConn.new,
-        _onClosed = onClosed {
+        _onClosed = onClosed,
+        _rebind = rebind {
     _logger.fine('[UDXListener $addr] Constructor: Initializing for $_boundAddr.');
-    _logger.fine('[UDXListener $addr] Constructor: Subscribing to multiplexer connections...');
+    _attach(_multiplexer);
+  }
 
-    // Note: This subscription lives for the lifetime of the listener
-    // ignore: unused_local_variable
-    final connectionSubscription = _multiplexer.connections.listen(
+  /// The multiplexer the listener receives on now.
+  @visibleForTesting
+  UDXMultiplexer get multiplexer => _multiplexer;
+
+  /// Takes the connections [multiplexer] receives. When its socket stops by
+  /// itself (Android cuts a backgrounded app's network, and Dart closes a
+  /// socket on any error), the listener binds a new one and goes on; when
+  /// it was closed, the listener closes.
+  void _attach(UDXMultiplexer multiplexer) {
+    multiplexer.connections.listen(
         (UDPSocket socket) {
           _logger.fine('[UDXListener $addr] Received new connection from multiplexer. Calling _handleIncomingConnection.');
           _handleIncomingConnection(socket);
         },
         onError: (err, stackTrace) {
           _logger.fine('[UDXListener $addr] !!! onError in connection subscription: $err');
-          _logger.fine('[UDXListener $addr] Stack trace for onError: $stackTrace');
           if (!_incomingSessionController.isClosed) {
             _incomingSessionController.addError(err, stackTrace);
           }
-          _logger.fine('[UDXListener $addr] Closing listener due to multiplexer subscription error.');
           close();
         },
         onDone: () {
-          _logger.fine('[UDXListener $addr] !!! onDone in connection subscription. Multiplexer closed.');
-          _logger.fine('[UDXListener $addr] Closing listener because multiplexer is done.');
-          close();
+          if (_isClosed || !identical(multiplexer, _multiplexer)) return;
+          if (multiplexer.lost && _rebind != null) {
+            unawaited(_rebindAfterLoss(multiplexer));
+          } else {
+            _logger.fine('[UDXListener $addr] Multiplexer closed; closing the listener.');
+            close();
+          }
+        });
+  }
+
+  Future<void> _rebindAfterLoss(UDXMultiplexer lost) async {
+    _logger.warning('[UDXListener $addr] Its socket stopped (${await lost.done ?? 'closed'}); binding a new one.');
+    for (var attempt = 0; !_isClosed; attempt++) {
+      await Future<void>.delayed(rebindDelays[attempt.clamp(0, rebindDelays.length - 1)]);
+      if (_isClosed) return;
+      try {
+        final fresh = await _rebind!(lost);
+        if (_isClosed) {
+          fresh.close();
+          return;
         }
-    );
-    _logger.fine('[UDXListener $addr] Constructor: Subscription to connections complete.');
+        _multiplexer = fresh;
+        final ip = fresh.socket.address.type == InternetAddressType.IPv6 ? 'ip6' : 'ip4';
+        _boundAddr = MultiAddr('/$ip/${fresh.socket.address.address}/udp/${fresh.socket.port}/udx');
+        _attach(fresh);
+        _logger.warning('[UDXListener] Listening again on $_boundAddr.');
+        return;
+      } catch (e) {
+        _logger.warning('[UDXListener $addr] Could not bind a new socket (attempt ${attempt + 1}): $e');
+      }
+    }
   }
 
   void _handleIncomingConnection(UDPSocket socket) {

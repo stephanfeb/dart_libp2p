@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.0] - 2026-10-18
+
+### Fixed
+
+- **A UDX listen socket that the OS closed was never bound again, and every dial reused it** (dart-libp2p-0uz). Dials leave from the listener's socket so that the peer sees the listen port. Hole punching needs this. When the OS closed that socket, the dead socket stayed in the dial list. For example, Android cuts the network of an app with its screen off, and Dart closes a socket on any error. Every dial after that sent nothing and timed out, and the host did not reconnect until the app restarted. Now the listener binds a new socket on the same port, or on any free port if that one is taken, and dials leave from the new socket. The connections on the dead socket close at once. A listener closed on purpose is not bound again.
+
+### Changed
+
+- Requires dart_udx 4.2.0 (`UDXMultiplexer.done` and `lost`).
+
 ## [4.7.1] - 2026-10-11
 
 ### Fixed

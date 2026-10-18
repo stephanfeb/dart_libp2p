@@ -394,6 +394,9 @@ class UDXTransport implements Transport {
       final isIPv6 = rawSocket.address.type == InternetAddressType.IPv6;
       final protocol = isIPv6 ? 'ip6' : 'ip4';
       final boundMa = MultiAddr('/$protocol/${rawSocket.address.address}/udp/${rawSocket.port}/udx');
+      final boundPort = rawSocket.port;
+      // The listener's socket now: another after a rebind.
+      var current = multiplexer;
       _logger.fine('[UDXTransport.listen] Creating UDXListener for $boundMa');
       final listener = UDXListener(
         listeningSocket: multiplexer,
@@ -404,10 +407,27 @@ class UDXTransport implements Transport {
         sessionConnFactory: UDXSessionConn.new,
         onClosed: () {
           final familyListeners = _listenerMultiplexers[isIPv6];
-          familyListeners?.remove(multiplexer);
+          familyListeners?.remove(current);
           if (familyListeners != null && familyListeners.isEmpty) {
             _listenerMultiplexers.remove(isIPv6);
           }
+        },
+        // A listen socket the OS took away: bind again, on the same port when
+        // it is free so the addresses this host advertised still hold, and
+        // let dials leave from the new socket instead of the dead one.
+        rebind: (lost) async {
+          final familyListeners = _listenerMultiplexers[isIPv6];
+          familyListeners?.remove(lost);
+          RawDatagramSocket fresh;
+          try {
+            fresh = await RawDatagramSocket.bind(bindAddress, boundPort);
+          } on SocketException {
+            fresh = await RawDatagramSocket.bind(bindAddress, 0);
+          }
+          final replacement = UDXMultiplexer(fresh, metricsObserver: metricsObserver);
+          current = replacement;
+          _listenerMultiplexers.putIfAbsent(isIPv6, () => []).add(replacement);
+          return replacement;
         },
       );
 
