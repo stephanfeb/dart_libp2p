@@ -58,5 +58,31 @@ void main() {
       expect(addrs, isNot(contains('/p2p-circuit')),
           reason: 'the circuit client\'s bare listen address is not dialable');
     }, timeout: const Timeout(Duration(seconds: 60)));
+
+    // A phone on a carrier's NAT loses its connection to the relay many times
+    // an hour. With one relay, an hour's backoff after each reservation left
+    // it undialable (NO_RESERVATION) until the hour was up.
+    test('reserves again at once when the connection to its relay drops and comes back', () async {
+      final relayCircuit = '/p2p/${relay.peerId.toBase58()}/p2p-circuit';
+      bool reserved() => client.host.addrs.any((a) => a.toString().contains(relayCircuit));
+      Future<bool> until(bool Function() done, Duration within) async {
+        final deadline = DateTime.now().add(within);
+        while (DateTime.now().isBefore(deadline) && !done()) {
+          await Future.delayed(const Duration(milliseconds: 250));
+        }
+        return done();
+      }
+
+      await client.host.connect(AddrInfo(relay.peerId, relay.listenAddrs));
+      expect(await until(reserved, const Duration(seconds: 30)), isTrue, reason: 'first reservation');
+
+      await client.host.network.closePeer(relay.peerId);
+      expect(await until(() => !reserved(), const Duration(seconds: 10)), isTrue,
+          reason: 'the circuit address goes with the reservation');
+
+      await client.host.connect(AddrInfo(relay.peerId, relay.listenAddrs));
+      expect(await until(reserved, const Duration(seconds: 30)), isTrue,
+          reason: 'a relay whose reservation ended with its connection is not on backoff');
+    }, timeout: const Timeout(Duration(seconds: 90)));
   });
 }

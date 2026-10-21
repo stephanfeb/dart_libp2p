@@ -172,6 +172,15 @@ class BasicHost implements Host {
   Emitter? _evtLocalProtocolsUpdated;
   Emitter? _evtLocalAddrsUpdated;
 
+  /// Emits [EvtPeerConnectednessChanged] when a peer's first connection
+  /// opens or its last one closes, as go-libp2p's swarm does. AutoRelay's
+  /// RelayFinder, the relay service and the peerstore manager listen for it.
+  late final Future<Emitter> _evtPeerConnectedness;
+
+  /// Each connected peer's connectedness as last emitted, so that a second
+  /// connection to a peer, or one of two closing, emits nothing.
+  final Map<String, Connectedness> _peerConnectedness = {};
+
   final AddrsFactory _addrsFactory;
 
   final Duration _negtimeout;
@@ -249,6 +258,12 @@ class BasicHost implements Host {
     _eventBus.emitter(EvtLocalAddressesUpdated).then((emitter) {
       _evtLocalAddrsUpdated = emitter;
     });
+
+    _evtPeerConnectedness = _eventBus.emitter(EvtPeerConnectednessChanged);
+    _network.notify(NotifyBundle(
+      connectedF: (_, conn, {dialLatency}) => _connectednessMaybeChanged(conn.remotePeer),
+      disconnectedF: (_, conn) => _connectednessMaybeChanged(conn.remotePeer),
+    ));
 
     // Initialize NAT manager if provided by config.natManagerFactory
     _natmgr = config.natManagerFactory != null ? config.natManagerFactory!(network) : null;
@@ -1542,11 +1557,32 @@ class BasicHost implements Host {
   }
 
   @override
+  /// Emits [EvtPeerConnectednessChanged] when [peer]'s connectedness, as the
+  /// network now has it, differs from what was last emitted. The swarm
+  /// removes a closed connection before it notifies, so the last one closing
+  /// reads notConnected.
+  void _connectednessMaybeChanged(PeerId peer) {
+    final key = peer.toString();
+    final now = _network.connectedness(peer);
+    final was = _peerConnectedness[key] ?? Connectedness.notConnected;
+    if (now == was) return;
+    if (now == Connectedness.notConnected) {
+      _peerConnectedness.remove(key);
+    } else {
+      _peerConnectedness[key] = now;
+    }
+    _log.fine('[BasicHost] $peer: $was -> $now');
+    unawaited(_evtPeerConnectedness
+        .then((emitter) => emitter.emit(EvtPeerConnectednessChanged(peer: peer, connectedness: now)))
+        .catchError((Object e) => _log.warning('[BasicHost] Connectedness of $peer not emitted: $e')));
+  }
+
   Future<void> close() async {
     if (_closed) return;
 
     _closeSync.complete(); // Signal that close has been initiated
     _closed = true;
+    await (await _evtPeerConnectedness).close();
 
     // Close IDService
     await _idService.close();

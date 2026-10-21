@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.1] - 2026-10-21
+
+### Fixed
+
+- **A node behind NAT stayed undialable for up to an hour after its connection to the relay dropped.** Two faults together:
+  - Nothing emitted `EvtPeerConnectednessChanged`. AutoRelay's RelayFinder, the relay service and the peerstore manager listen for it, but the swarm never sent it. So a node never learned that its reservation had ended with the connection: it kept advertising its circuit address, and peers that dialled it got `NO_RESERVATION` until the reservation's expiry (two hours). `BasicHost` now emits the event when a peer's first connection opens and when its last one closes, as go-libp2p's swarm does.
+  - A relay was put on backoff for an hour when it was booked, and the backoff stayed after the reservation ended with its connection. With a single relay, as a phone behind a carrier's NAT has, the node could not book again until the hour was up. A relay whose reservation ends with its connection is now taken off backoff, and booked again as soon as it is reachable. A failed reservation still backs off.
+- RelayFinder's disconnect handler read whether the peer was its relay before the lock it was read under had run.
+
 ## [4.8.0] - 2026-10-18
 
 ### Fixed

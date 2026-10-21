@@ -576,12 +576,12 @@ class RelayFinder {
     final eventBusSubscription = host.eventBus.subscribe(EvtPeerConnectednessChanged);
     StreamSubscription? streamSub; 
 
-    streamSub = eventBusSubscription.stream.takeUntil(stopSignal).listen((event) {
+    streamSub = eventBusSubscription.stream.takeUntil(stopSignal).listen((event) async {
       if (event is EvtPeerConnectednessChanged) {
         if (event.connectedness != Connectedness.notConnected) return;
 
         bool wasRelay = false;
-        _relayMx.synchronized(() {
+        await _relayMx.synchronized(() {
           if (_isUsingRelay(event.peer)) {
             _relays.remove(event.peer);
             host.connManager.unprotect(event.peer, autorelayTag);
@@ -589,6 +589,12 @@ class RelayFinder {
           }
         });
         if (wasRelay) {
+          // The reservation ended with its connection, not because the relay
+          // refused: it may be booked again as soon as it is reachable. The
+          // backoff set when it was booked would hold it off for an hour, and
+          // with a single relay leave this node undialable (NO_RESERVATION)
+          // for that hour, after every drop.
+          await _candidateMx.synchronized(() => _backoff.remove(event.peer));
           _notifyMaybeConnectToRelay();
           _notifyMaybeNeedNewCandidates();
           _clearCachedAddrsAndSignalAddressChange();
