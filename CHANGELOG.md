@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.0] - 2026-10-23
+
+### Added
+
+- **Transports that secure and multiplex their own connections.** A transport can return an `UpgradedTransportConn` (`core/network/transport_conn.dart`), as go-libp2p transports return a `CapableConn`; the swarm then adopts the connection on dial and accept without running the upgrader. Used by the libp2p `/webrtc` transport in [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc), whose connections are secured by DTLS and multiplexed as data channels.
+- `PushbackStream` (`core/network/mux.dart`): multistream-select puts bytes it read past its negotiation back into any stream that implements it, not only `YamuxStream`.
+- `Swarm.isRelayedRoute`: a `/p2p-circuit/webrtc` address is a direct route signaled through the relay, not a relayed one. `forceDirectDial` keeps such addresses, and circuit-address deduplication no longer drops one in favour of the plain circuit address through the same relay.
+- `BasicHost.allAddrs` no longer advertises a bare `/webrtc` listen address; when one exists, every AutoRelay address is also advertised with `/webrtc` appended (`<relay>/p2p-circuit/webrtc`).
+
+### Fixed
+
+- **A relayed connection always reported `limited: false`.** `RelayedConn` took the flag from its stream to the relay, which is never limited. It now reports whether the relay sent a limit in HOP STATUS (dialer) or STOP CONNECT (listener), as go-libp2p does; through a go-libp2p relay with its default limits (2 min, 128 KiB) both ends are limited.
+
 ## [4.8.2] - 2026-10-23
 
 ### Changed
