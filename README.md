@@ -23,7 +23,7 @@ Add `dart_libp2p` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  dart_libp2p: ^4.7.1
+  dart_libp2p: ^4.9.0
 ```
 
 Then run:
@@ -122,6 +122,11 @@ Dart Libp2p follows a layered architecture where each component provides service
 - **Protocols**: `/ip4/udp/udx`, `/ip6/udp/udx`
 - **Use Case**: Custom UDP-based transport with built-in reliability
 - **Best For**: NAT traversal, hole punching, peer-to-peer connections
+
+### WebRTC Transport (separate package)
+- **Protocols**: `/p2p-circuit/webrtc` (libp2p WebRTC private-to-private)
+- **Use Case**: Direct connections between Dart/Flutter apps and js-libp2p browsers, signaled through a circuit relay
+- **Package**: [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc) (native libdatachannel via `dart:ffi`; Android, iOS, Linux, macOS)
 
 > **Note**: This implementation does not support QUIC. Instead, we've opted for a custom `dart-udx` implementation that provides similar benefits for peer-to-peer networking.
 

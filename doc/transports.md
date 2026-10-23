@@ -31,9 +31,15 @@ The upgrade process is as follows:
 
 The final result is a fully upgraded, secure, and multiplexed `Conn` that the `Host` can use to open streams.
 
+### Transports that upgrade their own connections
+
+Some transports secure and multiplex connections themselves: a WebRTC connection is encrypted by DTLS and carries its streams as data channels. Such a transport returns an `UpgradedTransportConn` (`lib/core/network/transport_conn.dart`, like go-libp2p's `CapableConn`), which implements both `TransportConn` and `MuxedConn`. The swarm uses it as it is, on dial and on accept, without the upgrader; its `remotePeer` must already be authenticated by the transport.
+
+Streams of such connections can implement `PushbackStream` (`lib/core/network/mux.dart`), so multistream-select can return bytes it read past its negotiation to the stream.
+
 ## Available Transports
 
-This library currently provides two main transport implementations:
+This library provides two transport implementations; the libp2p WebRTC transport (`/p2p-circuit/webrtc`) is the separate [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc) package:
 
 ### TCP Transport
 
