@@ -403,10 +403,12 @@ class Swarm implements Network {
         // Upgrade the raw transport connection
         final Conn upgradedConn;
         try {
-          upgradedConn = await _upgrader.upgradeInbound(
-            connection: transportConn, 
-            config: _config,
-          );
+          upgradedConn = transportConn is UpgradedTransportConn
+              ? transportConn
+              : await _upgrader.upgradeInbound(
+                  connection: transportConn,
+                  config: _config,
+                );
         } catch (e, s) {
           _logger.warning('Inbound connection upgrade failed for ${transportConn.remoteMultiaddr}: $e\n$s');
           await transportConn.close();
@@ -1017,7 +1019,7 @@ class Swarm implements Network {
     // relayed connection, so drop circuit addresses from the dial set.
     if (context.getForceDirectDial().$1) {
       dialableAddrs = dialableAddrs
-          .where((addr) => !addr.hasProtocol('p2p-circuit'))
+          .where((addr) => !isRelayedRoute(addr))
           .toList();
     }
 
@@ -1200,7 +1202,11 @@ class Swarm implements Network {
                 simultaneousConnect: simultaneousConnect,
               );
     
-    // Upgrade the connection
+    // Upgrade the connection, unless its transport already has
+    if (transportConn is UpgradedTransportConn) {
+      _logger.fine('Swarm._dialSingleAddr: Dialed already-upgraded connection to $peerId at $addr');
+      return transportConn;
+    }
     final upgradedConn = await _upgrader.upgradeOutbound(
       connection: transportConn as TransportConn,
       remotePeerId: peerId,
@@ -1387,9 +1393,16 @@ class Swarm implements Network {
     final relays = <String>{};
     return [
       for (final addr in addrs)
-        if (!addr.hasProtocol('p2p-circuit') || relays.add(_relayOf(addr) ?? addr.toString())) addr
+        if (!isRelayedRoute(addr) || relays.add(_relayOf(addr) ?? addr.toString())) addr
     ];
   }
+
+  /// Whether a connection dialed to [addr] runs through a relay. A
+  /// `/p2p-circuit/webrtc` address does not: the relay only carries the
+  /// WebRTC signaling, and the connection is direct.
+  @visibleForTesting
+  static bool isRelayedRoute(MultiAddr addr) =>
+      addr.hasProtocol('p2p-circuit') && !addr.hasProtocol('webrtc');
 
   /// The id of the relay a circuit address goes through: the `/p2p` before
   /// `/p2p-circuit`.

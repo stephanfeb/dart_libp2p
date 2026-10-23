@@ -16,7 +16,7 @@ import 'package:logging/logging.dart'; // Added import for Logger
 
 import '../../../core/network/conn.dart'; // Added import for Conn
 import '../../transport/multiplexing/yamux/yamux_exceptions.dart'; // Import Yamux exception handling
-import '../../transport/multiplexing/yamux/stream.dart'; // For YamuxStream.pushData
+import '../../../core/network/mux.dart' show PushbackStream;
 import '../../network/swarm/swarm_stream.dart'; // For SwarmStream.incoming
 
 final _log = Logger('multistream'); // Added logger instance
@@ -250,13 +250,12 @@ class MultistreamMuxer implements ProtocolSwitch {
     }
 
     _log.fine('[multistreamMuxer] Injecting ${leftover.length} leftover bytes back into stream $streamId');
-    // Navigate through SwarmStream wrapper to get the underlying YamuxStream
+    // Navigate through SwarmStream wrapper to get the muxer's stream
     dynamic target = stream;
-    // SwarmStream wraps _underlyingMuxedStream, which delegates to YamuxStream
     if (target is SwarmStream) {
       target = target.incoming;
     }
-    if (target is YamuxStream) {
+    if (target is PushbackStream) {
       target.pushData(leftover);
       _leftoverMap.remove(streamId); // Only remove after successful injection
     } else {

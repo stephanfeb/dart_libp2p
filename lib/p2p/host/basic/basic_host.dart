@@ -880,9 +880,13 @@ class BasicHost implements Host {
     // 1. Resolve unspecified listen addresses using filtered interface addresses
     //    (obtained by _updateLocalIpAddr)
     for (final listenAddr in currentListenAddrs) {
-      // The circuit client listens on a bare /p2p-circuit, which no peer can
-      // dial; relay addresses come from AutoRelay reservations instead.
-      if (listenAddr.components.length == 1 && listenAddr.hasProtocol('p2p-circuit')) continue;
+      // The circuit client listens on a bare /p2p-circuit and a WebRTC
+      // transport on a bare /webrtc, which no peer can dial; relay addresses
+      // come from AutoRelay reservations instead.
+      if (listenAddr.components.length == 1 &&
+          (listenAddr.hasProtocol('p2p-circuit') || listenAddr.hasProtocol('webrtc'))) {
+        continue;
+      }
       final listenIp4 = listenAddr.valueForProtocol('ip4');
       final listenIp6 = listenAddr.valueForProtocol('ip6');
       final isUnspecified = (listenIp4 == '0.0.0.0' || listenIp4 == '0.0.0.0.0.0') || (listenIp6 == '::' || listenIp6 == '0:0:0:0:0:0:0:0');
@@ -1008,6 +1012,11 @@ class BasicHost implements Host {
         _log.fine('[BasicHost allAddrs]   circuit addr: $addr');
       }
       finalAddrs.addAll(_autoRelayAddrs);
+      // A WebRTC transport listening on /webrtc is reached by signaling
+      // through the relay: <relay addr>/p2p-circuit/webrtc.
+      if (currentListenAddrs.any((a) => a.components.length == 1 && a.hasProtocol('webrtc'))) {
+        finalAddrs.addAll(_autoRelayAddrs.map((a) => MultiAddr('$a/webrtc')));
+      }
     } else if (_autoRelay != null) {
       _log.fine('[BasicHost allAddrs] AutoRelay active but _autoRelayAddrs is EMPTY');
     }

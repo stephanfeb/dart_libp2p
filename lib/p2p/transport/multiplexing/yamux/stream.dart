@@ -42,7 +42,7 @@ enum YamuxStreamState {
 }
 
 /// A Yamux stream that implements the P2PStream and MuxedStream interfaces
-class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
+class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mux.PushbackStream {
   /// The stream ID
   final int streamId;
 
@@ -114,6 +114,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream {
 
   /// Pushes data to the front of the incoming queue, so the next read() returns it.
   /// Used to inject leftover bytes after multistream-select negotiation.
+  @override
   void pushData(Uint8List data) {
     if (data.isEmpty) return;
     if (_readCompleter != null && !_readCompleter!.isCompleted) {

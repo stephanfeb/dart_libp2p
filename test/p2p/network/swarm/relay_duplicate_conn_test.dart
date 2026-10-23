@@ -54,6 +54,17 @@ void main() {
 
       expect(Swarm.deduplicateCircuitAddrs(addrs), addrs);
     });
+
+    test('a /webrtc address through the same relay is its own route', () {
+      final addrs = [
+        MultiAddr('/ip4/10.0.0.1/udp/4001/udx/p2p/$relay/p2p-circuit/p2p/$dest'),
+        MultiAddr('/ip4/10.0.0.1/udp/4001/udx/p2p/$relay/p2p-circuit/webrtc/p2p/$dest'),
+      ];
+
+      expect(Swarm.deduplicateCircuitAddrs(addrs), addrs);
+      expect(Swarm.isRelayedRoute(addrs[0]), isTrue);
+      expect(Swarm.isRelayedRoute(addrs[1]), isFalse);
+    });
   });
 
   group('connections through one relay', () {

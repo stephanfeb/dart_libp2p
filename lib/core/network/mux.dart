@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'context.dart';
 import 'rcmgr.dart';
@@ -78,6 +79,12 @@ abstract class MuxedStream {
 /// transport.CapableConn interface, which represents a "raw" network
 /// connection that has been "upgraded" to support the libp2p capabilities
 /// of secure communication and stream multiplexing.
+/// A stream that can take back bytes read past the end of multistream-select,
+/// so the next read returns them first.
+abstract interface class PushbackStream {
+  void pushData(Uint8List data);
+}
+
 abstract class MuxedConn {
   /// Closes the stream muxer and the the underlying connection.
   Future<void> close();

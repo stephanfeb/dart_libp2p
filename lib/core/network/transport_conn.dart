@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'conn.dart';
+import 'mux.dart' show MuxedConn;
 import 'rcmgr.dart' show ConnManagementScope, ResourceManager, ResourceScopeSpan;
 
 /// TransportConn extends the Conn interface with methods for reading and writing raw data.
@@ -45,3 +46,12 @@ abstract class ScopedTransportConn implements TransportConn {
   /// The connection's scope, or null if it was not opened (or has failed).
   ConnManagementScope? get managementScope;
 }
+
+/// A [TransportConn] that its transport has already secured and multiplexed,
+/// like go-libp2p's `transport.CapableConn`. A WebRTC connection is one: DTLS
+/// secures it and its data channels are its streams.
+///
+/// The swarm uses such a connection as it is, without the upgrader, so
+/// [remotePeer] must already be authenticated. Its raw [read] and [write] are
+/// not used.
+abstract interface class UpgradedTransportConn implements TransportConn, MuxedConn {}
