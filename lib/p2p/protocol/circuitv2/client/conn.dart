@@ -28,11 +28,11 @@ class _RelayedConnStats implements ConnStats {
   final StreamStats _streamStats; // Stats from the underlying P2PStream to the relay
   final Stats _stats;
 
-  _RelayedConnStats(this._streamStats)
+  _RelayedConnStats(this._streamStats, {required bool limited})
       : _stats = Stats(
           direction: _streamStats.direction,
           opened: _streamStats.opened,
-          limited: _streamStats.limited,
+          limited: limited || _streamStats.limited,
           extra: _streamStats.extra,
         );
 
@@ -72,6 +72,7 @@ class RelayedConn implements TransportConn {
     required MultiAddr localMultiaddr,
     required MultiAddr remoteMultiaddr,
     void Function()? onClose,
+    bool limited = false,
     this.diagnosticSessionId,
     String? outerConnectionId,
     String? relayPeerId,
@@ -85,7 +86,7 @@ class RelayedConn implements TransportConn {
         _remoteMultiaddr = remoteMultiaddr,
         _onClose = onClose,
         // _isInitiator = isInitiator,
-        _connStats = _RelayedConnStats(stream.stat()) {
+        _connStats = _RelayedConnStats(stream.stat(), limited: limited) {
     // Generate connection context for relay inner connection
     if (outerConnectionId != null && relayPeerId != null) {
       _context = ConnectionContext.relayInner(

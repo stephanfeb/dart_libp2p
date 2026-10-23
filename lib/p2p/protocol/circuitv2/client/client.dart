@@ -239,6 +239,8 @@ class CircuitV2Client implements Transport {
         remotePeer: sourcePeerId,
         localMultiaddr: localCircuitMa, // This represents how we are reached
         remoteMultiaddr: remoteCircuitMa, // This represents how the remote is dialed
+        // The relay sends a limit only when it applies one (as go-libp2p).
+        limited: msg.hasLimit(),
         diagnosticSessionId: sessionId, // Store session ID for correlation
         onClose: () {
           // Remove from tracking map when connection closes
@@ -482,6 +484,8 @@ class CircuitV2Client implements Transport {
         remotePeer: destId,
         localMultiaddr: addr, // The address we dialed
         remoteMultiaddr: addr, // Keep the full circuit address including /p2p-circuit
+        // The relay sends a limit only when it applies one (as go-libp2p).
+        limited: statusMsg.hasLimit(),
         diagnosticSessionId: sessionId, // Store session ID for correlation
         onClose: () {
           // Track outbound connections too for proper cleanup

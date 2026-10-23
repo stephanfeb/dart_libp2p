@@ -183,6 +183,20 @@ void main() {
       await relayedConn.closeRead();
       verify(mockStream.closeRead()).called(1);
     });
+
+    test('stat reports the limit the relay sent', () {
+      RelayedConn conn({required bool limited}) => RelayedConn(
+            stream: mockStream,
+            transport: mockTransport,
+            localPeer: localPeer,
+            remotePeer: remotePeer,
+            localMultiaddr: localAddr,
+            remoteMultiaddr: remoteAddr,
+            limited: limited,
+          );
+
+      expect(conn(limited: true).stat.stats.limited, isTrue);
+      expect(conn(limited: false).stat.stats.limited, isFalse);
+    });
   });
 }
-
