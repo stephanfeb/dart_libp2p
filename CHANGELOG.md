@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.1] - 2026-10-23
+
+### Fixed
+
+- **WebSocket addresses from go-libp2p peers could not be read.** The multiaddr table had no `tls` (0x01c0), `ws` (0x01dd) or `wss` (0x01de). A go-libp2p server that listens on WebSockets, such as go-ricochet with WSS on, announces `/tcp/<port>/ws`, `/tcp/<port>/tls/ws` and `/dns4/<host>/tcp/<port>/wss` in identify, in its signed peer record and in relay reservations. Each such address failed with `Unknown protocol code: 448` (or 477, 478), and one of them was enough to drop the whole signed peer record. The three protocols are now known, with bytes that match go-multiaddr v0.16.1.
+- The TCP transport no longer treats a WebSocket address as plain TCP. Now that these addresses parse, `/ip4/<ip>/tcp/<port>/ws` (and `/tls/ws`, `/wss`) would otherwise have been dialed as raw TCP. dart_libp2p has no WebSocket transport, so such addresses are not dialable or listenable here.
+
 ## [4.9.0] - 2026-10-23
 
 ### Added

@@ -192,9 +192,17 @@ class TCPTransport implements Transport {
     if (hasCircuit) {
       return false;
     }
+    if (_isWebSocket(addr)) {
+      return false;
+    }
     
     return hasIP && hasTCP;
   }
+
+  /// A WebSocket address (`/tcp/<port>/ws`, `/tls/ws`, `/wss`) runs over TCP
+  /// but is not plain TCP; this transport has no WebSocket support.
+  static bool _isWebSocket(MultiAddr addr) =>
+      addr.hasProtocol('ws') || addr.hasProtocol('wss') || addr.hasProtocol('tls');
 
   /// Closes all connections and cleans up resources
   Future<void> dispose() async {
@@ -208,7 +216,7 @@ class TCPTransport implements Transport {
     // Check if the address has either ip4 or ip6 and tcp protocols
     final hasIP = addr.hasProtocol('ip4') || addr.hasProtocol('ip6');
     final hasTCP = addr.hasProtocol('tcp');
-    return hasIP && hasTCP;
+    return hasIP && hasTCP && !_isWebSocket(addr);
   }
 
 }

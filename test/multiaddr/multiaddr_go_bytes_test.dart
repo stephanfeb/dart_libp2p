@@ -21,6 +21,13 @@ void main() {
         '3824746573746e65742e626f6f7473747261702e746572616e6f64652e627376622e74656368',
     '/ip4/1.2.3.4/udp/4001/quic-v1/webtransport/certhash/uEiDDq4_xNyDorZBH3TlGazyJdOWSwvo4PUo5YHFMrvDE8g/sni/example.com':
         '040102030491020fa1cd03d103d203221220c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2c1030b6578616d706c652e636f6d',
+    // WebSocket listen addresses, as a go-libp2p server announces them in
+    // identify and in a relay reservation.
+    '/ip4/152.42.240.103/tcp/55223/tls/ws': '04982af06706d7b7c003dd03',
+    '/ip4/152.42.240.103/tcp/55223/ws': '04982af06706d7b7dd03',
+    '/dns4/ricochet.spiffyvault.net/tcp/55223/wss':
+        '36187269636f636865742e7370696666797661756c742e6e657406d7b7de03',
+    '/ip4/1.2.3.4/tcp/443/tls/sni/example.com/ws': '04010203040601bbc003c1030b6578616d706c652e636f6ddd03',
   };
 
   group('MultiAddr bytes match go-multiaddr', () {
@@ -41,6 +48,7 @@ void main() {
         'p2p': 0x01a5, 'unix': 0x0190, 'quic-v1': 0x01cd,
         'webtransport': 0x01d1, 'certhash': 0x01d2, 'sni': 0x01c1,
         'p2p-circuit': 0x0122, 'webrtc': 0x0119, 'webrtc-direct': 0x0118,
+        'tls': 0x01c0, 'ws': 0x01dd, 'wss': 0x01de,
       };
       goCodes.forEach((name, code) {
         expect(Protocols.byName(name)?.code, equals(code), reason: name);

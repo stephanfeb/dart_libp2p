@@ -273,6 +273,30 @@ void main() {
     });
   });
 
+  group('TCPTransport addresses', () {
+    final transport = TCPTransport(resourceManager: NullResourceManager(), connManager: NullConnMgr());
+
+    test('plain TCP addresses are dialable and listenable', () {
+      for (final a in ['/ip4/152.42.240.103/tcp/55223', '/ip6/::1/tcp/4001', '/ip4/1.2.3.4/tcp/4001/p2p/12D3KooWJfrcqqdoAcKUjAB6dGkC9KHCsTG5WKHZH8hk1wLs67it']) {
+        expect(transport.canDial(MultiAddr(a)), isTrue, reason: a);
+      }
+      expect(transport.canListen(MultiAddr('/ip4/0.0.0.0/tcp/0')), isTrue);
+    });
+
+    test('WebSocket addresses are not plain TCP', () {
+      // As a go-libp2p server announces them (dart_libp2p has no WebSocket transport).
+      for (final a in [
+        '/ip4/152.42.240.103/tcp/55223/ws',
+        '/ip4/152.42.240.103/tcp/55223/tls/ws',
+        '/ip4/1.2.3.4/tcp/443/wss',
+        '/ip4/1.2.3.4/tcp/443/tls/sni/example.com/ws',
+      ]) {
+        expect(transport.canDial(MultiAddr(a)), isFalse, reason: a);
+        expect(transport.canListen(MultiAddr(a)), isFalse, reason: a);
+      }
+    });
+  });
+
   group('TCPTransport dial errors', () {
     // GitHub #14: a refused connect's SocketException names the local
     // ephemeral port, which read as if the dial had gone to a random port.

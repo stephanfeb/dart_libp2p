@@ -129,6 +129,29 @@ class Protocols {
     size: -1,
   );
 
+  // WebSocket addresses: /tcp/<port>/ws, /tcp/<port>/tls/ws (written /wss
+  // by some peers), /tcp/<port>/tls/sni/<host>/ws. dart_libp2p has no
+  // WebSocket transport, but a go-libp2p peer announces these in identify,
+  // its signed peer record and relay reservations, and an unknown code makes
+  // the whole address (and the whole signed record) unreadable.
+  static const tls = Protocol(
+    name: 'tls',
+    code: 0x01C0,
+    size: 0,
+  );
+
+  static const ws = Protocol(
+    name: 'ws',
+    code: 0x01DD,
+    size: 0,
+  );
+
+  static const wss = Protocol(
+    name: 'wss',
+    code: 0x01DE,
+    size: 0,
+  );
+
   static const circuit = Protocol(
     name: 'p2p-circuit',
     code: 0x0122,
@@ -168,6 +191,9 @@ class Protocols {
     'webtransport': webtransport,
     'certhash': certhash,
     'sni': sni,
+    'tls': tls,
+    'ws': ws,
+    'wss': wss,
     'p2p-circuit': circuit,
     'webrtc': webrtc,
     'webrtc-direct': webrtcDirect,
