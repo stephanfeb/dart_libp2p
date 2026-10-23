@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.2] - 2026-10-23
+
+### Changed
+
+- **dart_udx 4.3.0.** The transport now requires the UDX release with QUIC-style loss recovery: ACK-driven loss detection and one PTO per connection instead of a retransmission timer per packet, ACKs that carry ranges so a go-udx sender sees loss, pacing by the window and the smoothed RTT, slow start until the first loss, the RFC 9002 initial RTT with no PTO floor, a monotonic clock for every timer, and path-MTU discovery that grows datagrams from 1200 bytes to what the path carries and falls back when it stops. Nothing changes in this package's API; a phone on a lossy carrier keeps its yamux sessions through radio gaps instead of flooding a dead path and being closed by the peer.
+
 ## [4.8.1] - 2026-10-21
 
 ### Fixed

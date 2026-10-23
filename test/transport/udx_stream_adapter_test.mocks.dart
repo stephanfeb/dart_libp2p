@@ -4,32 +4,32 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:async' as _i22;
-import 'dart:io' as _i8;
+import 'dart:io' as _i9;
 import 'dart:typed_data' as _i23;
 
-import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as _i17;
+import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as _i18;
 import 'package:dart_libp2p/core/crypto/keys.dart' as _i27;
-import 'package:dart_libp2p/core/multiaddr.dart' as _i4;
-import 'package:dart_libp2p/core/network/conn.dart' as _i6;
+import 'package:dart_libp2p/core/multiaddr.dart' as _i5;
+import 'package:dart_libp2p/core/network/conn.dart' as _i7;
 import 'package:dart_libp2p/core/network/context.dart' as _i28;
-import 'package:dart_libp2p/core/network/mux.dart' as _i10;
-import 'package:dart_libp2p/core/network/notifiee.dart' as _i20;
-import 'package:dart_libp2p/core/network/rcmgr.dart' as _i7;
-import 'package:dart_libp2p/core/network/stream.dart' as _i11;
-import 'package:dart_libp2p/core/network/transport_conn.dart' as _i18;
-import 'package:dart_libp2p/core/peer/peer_id.dart' as _i5;
+import 'package:dart_libp2p/core/network/mux.dart' as _i11;
+import 'package:dart_libp2p/core/network/notifiee.dart' as _i21;
+import 'package:dart_libp2p/core/network/rcmgr.dart' as _i8;
+import 'package:dart_libp2p/core/network/stream.dart' as _i12;
+import 'package:dart_libp2p/core/network/transport_conn.dart' as _i19;
+import 'package:dart_libp2p/core/peer/peer_id.dart' as _i6;
 import 'package:dart_libp2p/p2p/transport/connection_state.dart' as _i29;
-import 'package:dart_libp2p/p2p/transport/listener.dart' as _i19;
-import 'package:dart_libp2p/p2p/transport/transport.dart' as _i9;
-import 'package:dart_libp2p/p2p/transport/transport_config.dart' as _i16;
+import 'package:dart_libp2p/p2p/transport/listener.dart' as _i20;
+import 'package:dart_libp2p/p2p/transport/transport.dart' as _i10;
+import 'package:dart_libp2p/p2p/transport/transport_config.dart' as _i17;
 import 'package:dart_libp2p/p2p/transport/udx_stream_adapter.dart' as _i3;
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart' as _i25;
-import 'package:dart_udx/dart_udx.dart' as _i12;
-import 'package:dart_udx/src/cid.dart' as _i13;
+import 'package:dart_udx/dart_udx.dart' as _i13;
+import 'package:dart_udx/src/cid.dart' as _i14;
 import 'package:dart_udx/src/events.dart' as _i24;
-import 'package:dart_udx/src/packet.dart' as _i14;
-import 'package:dart_udx/src/socket.dart' as _i21;
-import 'package:dart_udx/src/stream.dart' as _i15;
+import 'package:dart_udx/src/packet.dart' as _i15;
+import 'package:dart_udx/src/socket.dart' as _i4;
+import 'package:dart_udx/src/stream.dart' as _i16;
 import 'package:dart_udx/src/udx.dart' as _i2;
 import 'package:mockito/mockito.dart' as _i1;
 import 'package:mockito/src/dummies.dart' as _i26;
@@ -79,8 +79,8 @@ class _FakeUDXP2PStreamAdapter_2 extends _i1.SmartFake
         );
 }
 
-class _FakeMultiAddr_3 extends _i1.SmartFake implements _i4.MultiAddr {
-  _FakeMultiAddr_3(
+class _FakeUDPSocket_3 extends _i1.SmartFake implements _i4.UDPSocket {
+  _FakeUDPSocket_3(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -89,8 +89,8 @@ class _FakeMultiAddr_3 extends _i1.SmartFake implements _i4.MultiAddr {
         );
 }
 
-class _FakePeerId_4 extends _i1.SmartFake implements _i5.PeerId {
-  _FakePeerId_4(
+class _FakeMultiAddr_4 extends _i1.SmartFake implements _i5.MultiAddr {
+  _FakeMultiAddr_4(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -99,8 +99,8 @@ class _FakePeerId_4 extends _i1.SmartFake implements _i5.PeerId {
         );
 }
 
-class _FakeConnState_5 extends _i1.SmartFake implements _i6.ConnState {
-  _FakeConnState_5(
+class _FakePeerId_5 extends _i1.SmartFake implements _i6.PeerId {
+  _FakePeerId_5(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -109,8 +109,8 @@ class _FakeConnState_5 extends _i1.SmartFake implements _i6.ConnState {
         );
 }
 
-class _FakeConnStats_6 extends _i1.SmartFake implements _i6.ConnStats {
-  _FakeConnStats_6(
+class _FakeConnState_6 extends _i1.SmartFake implements _i7.ConnState {
+  _FakeConnState_6(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -119,8 +119,8 @@ class _FakeConnStats_6 extends _i1.SmartFake implements _i6.ConnStats {
         );
 }
 
-class _FakeConnScope_7 extends _i1.SmartFake implements _i7.ConnScope {
-  _FakeConnScope_7(
+class _FakeConnStats_7 extends _i1.SmartFake implements _i7.ConnStats {
+  _FakeConnStats_7(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -129,8 +129,8 @@ class _FakeConnScope_7 extends _i1.SmartFake implements _i7.ConnScope {
         );
 }
 
-class _FakeSocket_8 extends _i1.SmartFake implements _i8.Socket {
-  _FakeSocket_8(
+class _FakeConnScope_8 extends _i1.SmartFake implements _i8.ConnScope {
+  _FakeConnScope_8(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -139,8 +139,8 @@ class _FakeSocket_8 extends _i1.SmartFake implements _i8.Socket {
         );
 }
 
-class _FakeTransport_9 extends _i1.SmartFake implements _i9.Transport {
-  _FakeTransport_9(
+class _FakeSocket_9 extends _i1.SmartFake implements _i9.Socket {
+  _FakeSocket_9(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -149,8 +149,8 @@ class _FakeTransport_9 extends _i1.SmartFake implements _i9.Transport {
         );
 }
 
-class _FakeMuxedStream_10 extends _i1.SmartFake implements _i10.MuxedStream {
-  _FakeMuxedStream_10(
+class _FakeTransport_10 extends _i1.SmartFake implements _i10.Transport {
+  _FakeTransport_10(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -159,8 +159,8 @@ class _FakeMuxedStream_10 extends _i1.SmartFake implements _i10.MuxedStream {
         );
 }
 
-class _FakeP2PStream_11<T> extends _i1.SmartFake implements _i11.P2PStream<T> {
-  _FakeP2PStream_11(
+class _FakeMuxedStream_11 extends _i1.SmartFake implements _i11.MuxedStream {
+  _FakeMuxedStream_11(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -169,9 +169,8 @@ class _FakeP2PStream_11<T> extends _i1.SmartFake implements _i11.P2PStream<T> {
         );
 }
 
-class _FakeUDXMultiplexer_12 extends _i1.SmartFake
-    implements _i12.UDXMultiplexer {
-  _FakeUDXMultiplexer_12(
+class _FakeP2PStream_12<T> extends _i1.SmartFake implements _i12.P2PStream<T> {
+  _FakeP2PStream_12(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -180,9 +179,9 @@ class _FakeUDXMultiplexer_12 extends _i1.SmartFake
         );
 }
 
-class _FakeInternetAddress_13 extends _i1.SmartFake
-    implements _i8.InternetAddress {
-  _FakeInternetAddress_13(
+class _FakeUDXMultiplexer_13 extends _i1.SmartFake
+    implements _i13.UDXMultiplexer {
+  _FakeUDXMultiplexer_13(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -191,9 +190,9 @@ class _FakeInternetAddress_13 extends _i1.SmartFake
         );
 }
 
-class _FakeConnectionCids_14 extends _i1.SmartFake
-    implements _i13.ConnectionCids {
-  _FakeConnectionCids_14(
+class _FakeInternetAddress_14 extends _i1.SmartFake
+    implements _i9.InternetAddress {
+  _FakeInternetAddress_14(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -202,9 +201,9 @@ class _FakeConnectionCids_14 extends _i1.SmartFake
         );
 }
 
-class _FakeCongestionController_15 extends _i1.SmartFake
-    implements _i12.CongestionController {
-  _FakeCongestionController_15(
+class _FakeConnectionCids_15 extends _i1.SmartFake
+    implements _i14.ConnectionCids {
+  _FakeConnectionCids_15(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -213,9 +212,8 @@ class _FakeCongestionController_15 extends _i1.SmartFake
         );
 }
 
-class _FakePacketManager_16 extends _i1.SmartFake
-    implements _i14.PacketManager {
-  _FakePacketManager_16(
+class _FakeClock_16 extends _i1.SmartFake implements _i13.Clock {
+  _FakeClock_16(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -224,8 +222,9 @@ class _FakePacketManager_16 extends _i1.SmartFake
         );
 }
 
-class _FakeUDXStream_17 extends _i1.SmartFake implements _i15.UDXStream {
-  _FakeUDXStream_17(
+class _FakeCongestionController_17 extends _i1.SmartFake
+    implements _i13.CongestionController {
+  _FakeCongestionController_17(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -234,9 +233,9 @@ class _FakeUDXStream_17 extends _i1.SmartFake implements _i15.UDXStream {
         );
 }
 
-class _FakeTransportConfig_18 extends _i1.SmartFake
-    implements _i16.TransportConfig {
-  _FakeTransportConfig_18(
+class _FakePacketManager_18 extends _i1.SmartFake
+    implements _i15.PacketManager {
+  _FakePacketManager_18(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -245,8 +244,8 @@ class _FakeTransportConfig_18 extends _i1.SmartFake
         );
 }
 
-class _FakeConnManager_19 extends _i1.SmartFake implements _i17.ConnManager {
-  _FakeConnManager_19(
+class _FakeUDXStream_19 extends _i1.SmartFake implements _i16.UDXStream {
+  _FakeUDXStream_19(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -255,9 +254,9 @@ class _FakeConnManager_19 extends _i1.SmartFake implements _i17.ConnManager {
         );
 }
 
-class _FakeTransportConn_20 extends _i1.SmartFake
-    implements _i18.TransportConn {
-  _FakeTransportConn_20(
+class _FakeTransportConfig_20 extends _i1.SmartFake
+    implements _i17.TransportConfig {
+  _FakeTransportConfig_20(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -266,8 +265,8 @@ class _FakeTransportConn_20 extends _i1.SmartFake
         );
 }
 
-class _FakeListener_21 extends _i1.SmartFake implements _i19.Listener {
-  _FakeListener_21(
+class _FakeConnManager_21 extends _i1.SmartFake implements _i18.ConnManager {
+  _FakeConnManager_21(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -276,8 +275,9 @@ class _FakeListener_21 extends _i1.SmartFake implements _i19.Listener {
         );
 }
 
-class _FakeNotifiee_22 extends _i1.SmartFake implements _i20.Notifiee {
-  _FakeNotifiee_22(
+class _FakeTransportConn_22 extends _i1.SmartFake
+    implements _i19.TransportConn {
+  _FakeTransportConn_22(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -286,9 +286,8 @@ class _FakeNotifiee_22 extends _i1.SmartFake implements _i20.Notifiee {
         );
 }
 
-class _FakeRawDatagramSocket_23 extends _i1.SmartFake
-    implements _i8.RawDatagramSocket {
-  _FakeRawDatagramSocket_23(
+class _FakeListener_23 extends _i1.SmartFake implements _i20.Listener {
+  _FakeListener_23(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -297,8 +296,19 @@ class _FakeRawDatagramSocket_23 extends _i1.SmartFake
         );
 }
 
-class _FakeUDPSocket_24 extends _i1.SmartFake implements _i21.UDPSocket {
-  _FakeUDPSocket_24(
+class _FakeNotifiee_24 extends _i1.SmartFake implements _i21.Notifiee {
+  _FakeNotifiee_24(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeRawDatagramSocket_25 extends _i1.SmartFake
+    implements _i9.RawDatagramSocket {
+  _FakeRawDatagramSocket_25(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -310,7 +320,7 @@ class _FakeUDPSocket_24 extends _i1.SmartFake implements _i21.UDPSocket {
 /// A class which mocks [UDXStream].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
+class MockUDXStream extends _i1.Mock implements _i16.UDXStream {
   MockUDXStream() {
     _i1.throwOnMissingStub(this);
   }
@@ -331,10 +341,10 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       ) as int);
 
   @override
-  _i15.StreamType get streamType => (super.noSuchMethod(
+  _i16.StreamType get streamType => (super.noSuchMethod(
         Invocation.getter(#streamType),
-        returnValue: _i15.StreamType.bidirectional,
-      ) as _i15.StreamType);
+        returnValue: _i16.StreamType.bidirectional,
+      ) as _i16.StreamType);
 
   @override
   int get priority => (super.noSuchMethod(
@@ -359,12 +369,6 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
         Invocation.getter(#isInitiator),
         returnValue: false,
       ) as bool);
-
-  @override
-  int get maxRetransmissionAttempts => (super.noSuchMethod(
-        Invocation.getter(#maxRetransmissionAttempts),
-        returnValue: 0,
-      ) as int);
 
   @override
   int get packetTimeoutTolerance => (super.noSuchMethod(
@@ -550,16 +554,6 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       );
 
   @override
-  set maxRetransmissionAttempts(int? _maxRetransmissionAttempts) =>
-      super.noSuchMethod(
-        Invocation.setter(
-          #maxRetransmissionAttempts,
-          _maxRetransmissionAttempts,
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
   set packetTimeoutTolerance(int? _packetTimeoutTolerance) =>
       super.noSuchMethod(
         Invocation.setter(
@@ -571,7 +565,7 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
 
   @override
   _i22.Future<void> connect(
-    _i21.UDPSocket? socket,
+    _i4.UDPSocket? socket,
     int? remoteId,
     int? port,
     String? host,
@@ -756,7 +750,7 @@ class MockUDXStream extends _i1.Mock implements _i15.UDXStream {
       ) as _i22.Future<void>);
 
   @override
-  void setSocketForTest(_i21.UDPSocket? socket) => super.noSuchMethod(
+  void setSocketForTest(_i4.UDPSocket? socket) => super.noSuchMethod(
         Invocation.method(
           #setSocketForTest,
           [socket],
@@ -835,47 +829,56 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       ) as _i3.UDXP2PStreamAdapter);
 
   @override
-  _i22.Future<List<_i11.P2PStream<dynamic>>> get streams => (super.noSuchMethod(
-        Invocation.getter(#streams),
-        returnValue: _i22.Future<List<_i11.P2PStream<dynamic>>>.value(
-            <_i11.P2PStream<dynamic>>[]),
-      ) as _i22.Future<List<_i11.P2PStream<dynamic>>>);
+  _i4.UDPSocket get udpSocket => (super.noSuchMethod(
+        Invocation.getter(#udpSocket),
+        returnValue: _FakeUDPSocket_3(
+          this,
+          Invocation.getter(#udpSocket),
+        ),
+      ) as _i4.UDPSocket);
 
   @override
-  _i4.MultiAddr get localMultiaddr => (super.noSuchMethod(
+  _i22.Future<List<_i12.P2PStream<dynamic>>> get streams => (super.noSuchMethod(
+        Invocation.getter(#streams),
+        returnValue: _i22.Future<List<_i12.P2PStream<dynamic>>>.value(
+            <_i12.P2PStream<dynamic>>[]),
+      ) as _i22.Future<List<_i12.P2PStream<dynamic>>>);
+
+  @override
+  _i5.MultiAddr get localMultiaddr => (super.noSuchMethod(
         Invocation.getter(#localMultiaddr),
-        returnValue: _FakeMultiAddr_3(
+        returnValue: _FakeMultiAddr_4(
           this,
           Invocation.getter(#localMultiaddr),
         ),
-      ) as _i4.MultiAddr);
+      ) as _i5.MultiAddr);
 
   @override
-  _i4.MultiAddr get remoteMultiaddr => (super.noSuchMethod(
+  _i5.MultiAddr get remoteMultiaddr => (super.noSuchMethod(
         Invocation.getter(#remoteMultiaddr),
-        returnValue: _FakeMultiAddr_3(
+        returnValue: _FakeMultiAddr_4(
           this,
           Invocation.getter(#remoteMultiaddr),
         ),
-      ) as _i4.MultiAddr);
+      ) as _i5.MultiAddr);
 
   @override
-  _i5.PeerId get localPeer => (super.noSuchMethod(
+  _i6.PeerId get localPeer => (super.noSuchMethod(
         Invocation.getter(#localPeer),
-        returnValue: _FakePeerId_4(
+        returnValue: _FakePeerId_5(
           this,
           Invocation.getter(#localPeer),
         ),
-      ) as _i5.PeerId);
+      ) as _i6.PeerId);
 
   @override
-  _i5.PeerId get remotePeer => (super.noSuchMethod(
+  _i6.PeerId get remotePeer => (super.noSuchMethod(
         Invocation.getter(#remotePeer),
-        returnValue: _FakePeerId_4(
+        returnValue: _FakePeerId_5(
           this,
           Invocation.getter(#remotePeer),
         ),
-      ) as _i5.PeerId);
+      ) as _i6.PeerId);
 
   @override
   _i22.Future<_i27.PublicKey?> get remotePublicKey => (super.noSuchMethod(
@@ -884,40 +887,40 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       ) as _i22.Future<_i27.PublicKey?>);
 
   @override
-  _i6.ConnState get state => (super.noSuchMethod(
+  _i7.ConnState get state => (super.noSuchMethod(
         Invocation.getter(#state),
-        returnValue: _FakeConnState_5(
+        returnValue: _FakeConnState_6(
           this,
           Invocation.getter(#state),
         ),
-      ) as _i6.ConnState);
+      ) as _i7.ConnState);
 
   @override
-  _i6.ConnStats get stat => (super.noSuchMethod(
+  _i7.ConnStats get stat => (super.noSuchMethod(
         Invocation.getter(#stat),
-        returnValue: _FakeConnStats_6(
+        returnValue: _FakeConnStats_7(
           this,
           Invocation.getter(#stat),
         ),
-      ) as _i6.ConnStats);
+      ) as _i7.ConnStats);
 
   @override
-  _i7.ConnScope get scope => (super.noSuchMethod(
+  _i8.ConnScope get scope => (super.noSuchMethod(
         Invocation.getter(#scope),
-        returnValue: _FakeConnScope_7(
+        returnValue: _FakeConnScope_8(
           this,
           Invocation.getter(#scope),
         ),
-      ) as _i7.ConnScope);
+      ) as _i8.ConnScope);
 
   @override
-  _i8.Socket get socket => (super.noSuchMethod(
+  _i9.Socket get socket => (super.noSuchMethod(
         Invocation.getter(#socket),
-        returnValue: _FakeSocket_8(
+        returnValue: _FakeSocket_9(
           this,
           Invocation.getter(#socket),
         ),
-      ) as _i8.Socket);
+      ) as _i9.Socket);
 
   @override
   bool get isClosed => (super.noSuchMethod(
@@ -932,13 +935,13 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       ) as _i22.Future<void>);
 
   @override
-  _i9.Transport get transport => (super.noSuchMethod(
+  _i10.Transport get transport => (super.noSuchMethod(
         Invocation.getter(#transport),
-        returnValue: _FakeTransport_9(
+        returnValue: _FakeTransport_10(
           this,
           Invocation.getter(#transport),
         ),
-      ) as _i9.Transport);
+      ) as _i10.Transport);
 
   @override
   set initialP2PStream(_i3.UDXP2PStreamAdapter? _initialP2PStream) =>
@@ -952,9 +955,9 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
 
   @override
   void handleRemoteOpenedStream(
-    _i14.UDXPacket? packet,
+    _i15.UDXPacket? packet,
     _i23.Uint8List? rawData,
-    _i8.InternetAddress? remoteAddress,
+    _i9.InternetAddress? remoteAddress,
     int? remotePort,
   ) =>
       super.noSuchMethod(
@@ -971,39 +974,39 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       );
 
   @override
-  _i22.Future<_i10.MuxedStream> openStream(_i28.Context? context) =>
+  _i22.Future<_i11.MuxedStream> openStream(_i28.Context? context) =>
       (super.noSuchMethod(
         Invocation.method(
           #openStream,
           [context],
         ),
-        returnValue: _i22.Future<_i10.MuxedStream>.value(_FakeMuxedStream_10(
+        returnValue: _i22.Future<_i11.MuxedStream>.value(_FakeMuxedStream_11(
           this,
           Invocation.method(
             #openStream,
             [context],
           ),
         )),
-      ) as _i22.Future<_i10.MuxedStream>);
+      ) as _i22.Future<_i11.MuxedStream>);
 
   @override
-  _i22.Future<_i10.MuxedStream> acceptStream() => (super.noSuchMethod(
+  _i22.Future<_i11.MuxedStream> acceptStream() => (super.noSuchMethod(
         Invocation.method(
           #acceptStream,
           [],
         ),
-        returnValue: _i22.Future<_i10.MuxedStream>.value(_FakeMuxedStream_10(
+        returnValue: _i22.Future<_i11.MuxedStream>.value(_FakeMuxedStream_11(
           this,
           Invocation.method(
             #acceptStream,
             [],
           ),
         )),
-      ) as _i22.Future<_i10.MuxedStream>);
+      ) as _i22.Future<_i11.MuxedStream>);
 
   @override
   void setRemotePeerDetails(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     _i27.PublicKey? pubKey,
     String? securityProto,
   ) =>
@@ -1020,7 +1023,7 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
       );
 
   @override
-  _i22.Future<_i11.P2PStream<dynamic>> newStream(
+  _i22.Future<_i12.P2PStream<dynamic>> newStream(
     _i28.Context? context, [
     int? streamId,
   ]) =>
@@ -1032,8 +1035,8 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
             streamId,
           ],
         ),
-        returnValue: _i22.Future<_i11.P2PStream<dynamic>>.value(
-            _FakeP2PStream_11<dynamic>(
+        returnValue: _i22.Future<_i12.P2PStream<dynamic>>.value(
+            _FakeP2PStream_12<dynamic>(
           this,
           Invocation.method(
             #newStream,
@@ -1043,7 +1046,7 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
             ],
           ),
         )),
-      ) as _i22.Future<_i11.P2PStream<dynamic>>);
+      ) as _i22.Future<_i12.P2PStream<dynamic>>);
 
   @override
   void setReadTimeout(Duration? timeout) => super.noSuchMethod(
@@ -1151,7 +1154,7 @@ class MockUDXSessionConn extends _i1.Mock implements _i25.UDXSessionConn {
 /// A class which mocks [UDPSocket].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
+class MockUDPSocket extends _i1.Mock implements _i4.UDPSocket {
   MockUDPSocket() {
     _i1.throwOnMissingStub(this);
   }
@@ -1166,22 +1169,22 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as _i2.UDX);
 
   @override
-  _i12.UDXMultiplexer get multiplexer => (super.noSuchMethod(
+  _i13.UDXMultiplexer get multiplexer => (super.noSuchMethod(
         Invocation.getter(#multiplexer),
-        returnValue: _FakeUDXMultiplexer_12(
+        returnValue: _FakeUDXMultiplexer_13(
           this,
           Invocation.getter(#multiplexer),
         ),
-      ) as _i12.UDXMultiplexer);
+      ) as _i13.UDXMultiplexer);
 
   @override
-  _i8.InternetAddress get remoteAddress => (super.noSuchMethod(
+  _i9.InternetAddress get remoteAddress => (super.noSuchMethod(
         Invocation.getter(#remoteAddress),
-        returnValue: _FakeInternetAddress_13(
+        returnValue: _FakeInternetAddress_14(
           this,
           Invocation.getter(#remoteAddress),
         ),
-      ) as _i8.InternetAddress);
+      ) as _i9.InternetAddress);
 
   @override
   int get remotePort => (super.noSuchMethod(
@@ -1190,13 +1193,22 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as int);
 
   @override
-  _i13.ConnectionCids get cids => (super.noSuchMethod(
+  _i14.ConnectionCids get cids => (super.noSuchMethod(
         Invocation.getter(#cids),
-        returnValue: _FakeConnectionCids_14(
+        returnValue: _FakeConnectionCids_15(
           this,
           Invocation.getter(#cids),
         ),
-      ) as _i13.ConnectionCids);
+      ) as _i14.ConnectionCids);
+
+  @override
+  _i13.Clock get clock => (super.noSuchMethod(
+        Invocation.getter(#clock),
+        returnValue: _FakeClock_16(
+          this,
+          Invocation.getter(#clock),
+        ),
+      ) as _i13.Clock);
 
   @override
   bool get isServer => (super.noSuchMethod(
@@ -1217,6 +1229,18 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as bool);
 
   @override
+  int get maxDatagram => (super.noSuchMethod(
+        Invocation.getter(#maxDatagram),
+        returnValue: 0,
+      ) as int);
+
+  @override
+  _i22.Future<void> get sendCreditChanged => (super.noSuchMethod(
+        Invocation.getter(#sendCreditChanged),
+        returnValue: _i22.Future<void>.value(),
+      ) as _i22.Future<void>);
+
+  @override
   bool get closing => (super.noSuchMethod(
         Invocation.getter(#closing),
         returnValue: false,
@@ -1235,25 +1259,37 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as bool);
 
   @override
-  _i12.CongestionController get congestionController => (super.noSuchMethod(
+  int get lostQueueLength => (super.noSuchMethod(
+        Invocation.getter(#lostQueueLength),
+        returnValue: 0,
+      ) as int);
+
+  @override
+  _i13.CongestionController get congestionController => (super.noSuchMethod(
         Invocation.getter(#congestionController),
-        returnValue: _FakeCongestionController_15(
+        returnValue: _FakeCongestionController_17(
           this,
           Invocation.getter(#congestionController),
         ),
-      ) as _i12.CongestionController);
+      ) as _i13.CongestionController);
 
   @override
-  _i14.PacketManager get packetManager => (super.noSuchMethod(
+  _i15.PacketManager get packetManager => (super.noSuchMethod(
         Invocation.getter(#packetManager),
-        returnValue: _FakePacketManager_16(
+        returnValue: _FakePacketManager_18(
           this,
           Invocation.getter(#packetManager),
         ),
-      ) as _i14.PacketManager);
+      ) as _i15.PacketManager);
 
   @override
-  set multiplexer(_i12.UDXMultiplexer? _multiplexer) => super.noSuchMethod(
+  int get remoteConnectionMaxData => (super.noSuchMethod(
+        Invocation.getter(#remoteConnectionMaxData),
+        returnValue: 0,
+      ) as int);
+
+  @override
+  set multiplexer(_i13.UDXMultiplexer? _multiplexer) => super.noSuchMethod(
         Invocation.setter(
           #multiplexer,
           _multiplexer,
@@ -1262,7 +1298,7 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       );
 
   @override
-  set remoteAddress(_i8.InternetAddress? _remoteAddress) => super.noSuchMethod(
+  set remoteAddress(_i9.InternetAddress? _remoteAddress) => super.noSuchMethod(
         Invocation.setter(
           #remoteAddress,
           _remoteAddress,
@@ -1280,7 +1316,7 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       );
 
   @override
-  set cids(_i13.ConnectionCids? _cids) => super.noSuchMethod(
+  set cids(_i14.ConnectionCids? _cids) => super.noSuchMethod(
         Invocation.setter(
           #cids,
           _cids,
@@ -1289,7 +1325,7 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       );
 
   @override
-  set metricsObserver(_i12.UdxMetricsObserver? _metricsObserver) =>
+  set metricsObserver(_i13.UdxMetricsObserver? _metricsObserver) =>
       super.noSuchMethod(
         Invocation.setter(
           #metricsObserver,
@@ -1299,18 +1335,27 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       );
 
   @override
-  List<_i15.UDXStream> getStreamBuffer() => (super.noSuchMethod(
+  void notifySendCredit() => super.noSuchMethod(
+        Invocation.method(
+          #notifySendCredit,
+          [],
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
+  List<_i16.UDXStream> getStreamBuffer() => (super.noSuchMethod(
         Invocation.method(
           #getStreamBuffer,
           [],
         ),
-        returnValue: <_i15.UDXStream>[],
-      ) as List<_i15.UDXStream>);
+        returnValue: <_i16.UDXStream>[],
+      ) as List<_i16.UDXStream>);
 
   @override
   _i22.Future<void> handleIncomingDatagram(
     _i23.Uint8List? data,
-    _i8.InternetAddress? fromAddress,
+    _i9.InternetAddress? fromAddress,
     int? fromPort,
   ) =>
       (super.noSuchMethod(
@@ -1330,7 +1375,7 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
   void sendStreamPacket(
     int? dstStreamId,
     int? srcStreamId,
-    List<_i14.Frame>? frames, {
+    List<_i15.Frame>? frames, {
     bool? trackForRetransmit = true,
   }) =>
       super.noSuchMethod(
@@ -1439,7 +1484,7 @@ class MockUDPSocket extends _i1.Mock implements _i21.UDPSocket {
       ) as int);
 
   @override
-  void registerStream(_i15.UDXStream? stream) => super.noSuchMethod(
+  void registerStream(_i16.UDXStream? stream) => super.noSuchMethod(
         Invocation.method(
           #registerStream,
           [stream],
@@ -1651,7 +1696,7 @@ class MockUDX extends _i1.Mock implements _i2.UDX {
   }
 
   @override
-  _i15.UDXStream createStream(
+  _i16.UDXStream createStream(
     int? id, {
     bool? framed = false,
     int? initialSeq = 0,
@@ -1665,7 +1710,7 @@ class MockUDX extends _i1.Mock implements _i2.UDX {
             #initialSeq: initialSeq,
           },
         ),
-        returnValue: _FakeUDXStream_17(
+        returnValue: _FakeUDXStream_19(
           this,
           Invocation.method(
             #createStream,
@@ -1676,7 +1721,7 @@ class MockUDX extends _i1.Mock implements _i2.UDX {
             },
           ),
         ),
-      ) as _i15.UDXStream);
+      ) as _i16.UDXStream);
 }
 
 /// A class which mocks [UDXTransport].
@@ -1688,22 +1733,28 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
   }
 
   @override
-  _i16.TransportConfig get config => (super.noSuchMethod(
+  _i17.TransportConfig get config => (super.noSuchMethod(
         Invocation.getter(#config),
-        returnValue: _FakeTransportConfig_18(
+        returnValue: _FakeTransportConfig_20(
           this,
           Invocation.getter(#config),
         ),
-      ) as _i16.TransportConfig);
+      ) as _i17.TransportConfig);
 
   @override
-  _i17.ConnManager get connectionManager => (super.noSuchMethod(
+  _i18.ConnManager get connectionManager => (super.noSuchMethod(
         Invocation.getter(#connectionManager),
-        returnValue: _FakeConnManager_19(
+        returnValue: _FakeConnManager_21(
           this,
           Invocation.getter(#connectionManager),
         ),
-      ) as _i17.ConnManager);
+      ) as _i18.ConnManager);
+
+  @override
+  Iterable<_i25.UDXSessionConn> get dialerSessions => (super.noSuchMethod(
+        Invocation.getter(#dialerSessions),
+        returnValue: <_i25.UDXSessionConn>[],
+      ) as Iterable<_i25.UDXSessionConn>);
 
   @override
   List<String> get protocols => (super.noSuchMethod(
@@ -1712,7 +1763,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
       ) as List<String>);
 
   @override
-  set metricsObserver(_i12.UdxMetricsObserver? _metricsObserver) =>
+  set metricsObserver(_i13.UdxMetricsObserver? _metricsObserver) =>
       super.noSuchMethod(
         Invocation.setter(
           #metricsObserver,
@@ -1724,8 +1775,8 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
   @override
   set onConnectionEstablished(
           void Function(
-            _i13.ConnectionId,
-            _i5.PeerId,
+            _i14.ConnectionId,
+            _i6.PeerId,
           )? _onConnectionEstablished) =>
       super.noSuchMethod(
         Invocation.setter(
@@ -1736,8 +1787,8 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
       );
 
   @override
-  _i22.Future<_i18.TransportConn> dial(
-    _i4.MultiAddr? addr, {
+  _i22.Future<_i19.TransportConn> dial(
+    _i5.MultiAddr? addr, {
     Duration? timeout,
     bool? simultaneousConnect = false,
     _i22.Future<void>? cancel,
@@ -1753,7 +1804,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
           },
         ),
         returnValue:
-            _i22.Future<_i18.TransportConn>.value(_FakeTransportConn_20(
+            _i22.Future<_i19.TransportConn>.value(_FakeTransportConn_22(
           this,
           Invocation.method(
             #dial,
@@ -1761,29 +1812,58 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
             {
               #timeout: timeout,
               #simultaneousConnect: simultaneousConnect,
-            #cancel: cancel,
+              #cancel: cancel,
             },
           ),
         )),
-      ) as _i22.Future<_i18.TransportConn>);
+      ) as _i22.Future<_i19.TransportConn>);
 
   @override
-  _i22.Future<_i19.Listener> listen(_i4.MultiAddr? addr) => (super.noSuchMethod(
+  _i22.Future<_i19.TransportConn> dialFromEphemeralSocket(
+    _i5.MultiAddr? addr, {
+    Duration? timeout,
+    _i22.Future<void>? cancel,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #dialFromEphemeralSocket,
+          [addr],
+          {
+            #timeout: timeout,
+            #cancel: cancel,
+          },
+        ),
+        returnValue:
+            _i22.Future<_i19.TransportConn>.value(_FakeTransportConn_22(
+          this,
+          Invocation.method(
+            #dialFromEphemeralSocket,
+            [addr],
+            {
+              #timeout: timeout,
+              #cancel: cancel,
+            },
+          ),
+        )),
+      ) as _i22.Future<_i19.TransportConn>);
+
+  @override
+  _i22.Future<_i20.Listener> listen(_i5.MultiAddr? addr) => (super.noSuchMethod(
         Invocation.method(
           #listen,
           [addr],
         ),
-        returnValue: _i22.Future<_i19.Listener>.value(_FakeListener_21(
+        returnValue: _i22.Future<_i20.Listener>.value(_FakeListener_23(
           this,
           Invocation.method(
             #listen,
             [addr],
           ),
         )),
-      ) as _i22.Future<_i19.Listener>);
+      ) as _i22.Future<_i20.Listener>);
 
   @override
-  bool canDial(_i4.MultiAddr? addr) => (super.noSuchMethod(
+  bool canDial(_i5.MultiAddr? addr) => (super.noSuchMethod(
         Invocation.method(
           #canDial,
           [addr],
@@ -1792,7 +1872,7 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
       ) as bool);
 
   @override
-  bool canListen(_i4.MultiAddr? addr) => (super.noSuchMethod(
+  bool canListen(_i5.MultiAddr? addr) => (super.noSuchMethod(
         Invocation.method(
           #canListen,
           [addr],
@@ -1814,23 +1894,23 @@ class MockUDXTransport extends _i1.Mock implements _i25.UDXTransport {
 /// A class which mocks [ConnManager].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockConnManager extends _i1.Mock implements _i17.ConnManager {
+class MockConnManager extends _i1.Mock implements _i18.ConnManager {
   MockConnManager() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  _i20.Notifiee get notifiee => (super.noSuchMethod(
+  _i21.Notifiee get notifiee => (super.noSuchMethod(
         Invocation.getter(#notifiee),
-        returnValue: _FakeNotifiee_22(
+        returnValue: _FakeNotifiee_24(
           this,
           Invocation.getter(#notifiee),
         ),
-      ) as _i20.Notifiee);
+      ) as _i21.Notifiee);
 
   @override
   void tagPeer(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
     int? value,
   ) =>
@@ -1848,7 +1928,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   void untagPeer(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
   ) =>
       super.noSuchMethod(
@@ -1864,7 +1944,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   void upsertTag(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
     int Function(int)? upsert,
   ) =>
@@ -1881,11 +1961,11 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
       );
 
   @override
-  _i17.TagInfo? getTagInfo(_i5.PeerId? peerId) =>
+  _i18.TagInfo? getTagInfo(_i6.PeerId? peerId) =>
       (super.noSuchMethod(Invocation.method(
         #getTagInfo,
         [peerId],
-      )) as _i17.TagInfo?);
+      )) as _i18.TagInfo?);
 
   @override
   _i22.Future<void> trimOpenConns() => (super.noSuchMethod(
@@ -1899,7 +1979,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   void protect(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
   ) =>
       super.noSuchMethod(
@@ -1915,7 +1995,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   bool unprotect(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
   ) =>
       (super.noSuchMethod(
@@ -1931,7 +2011,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   bool isProtected(
-    _i5.PeerId? peerId,
+    _i6.PeerId? peerId,
     String? tag,
   ) =>
       (super.noSuchMethod(
@@ -1946,7 +2026,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
       ) as bool);
 
   @override
-  String? checkLimit(_i17.GetConnLimiter? limiter) =>
+  String? checkLimit(_i18.GetConnLimiter? limiter) =>
       (super.noSuchMethod(Invocation.method(
         #checkLimit,
         [limiter],
@@ -1963,7 +2043,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
       ) as _i22.Future<void>);
 
   @override
-  void registerConnection(_i18.TransportConn? conn) => super.noSuchMethod(
+  void registerConnection(_i19.TransportConn? conn) => super.noSuchMethod(
         Invocation.method(
           #registerConnection,
           [conn],
@@ -1973,7 +2053,7 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   void updateState(
-    _i18.TransportConn? conn,
+    _i19.TransportConn? conn,
     _i29.ConnectionState? state, {
     required Object? error,
   }) =>
@@ -1990,14 +2070,14 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
       );
 
   @override
-  _i29.ConnectionState? getState(_i18.TransportConn? conn) =>
+  _i29.ConnectionState? getState(_i19.TransportConn? conn) =>
       (super.noSuchMethod(Invocation.method(
         #getState,
         [conn],
       )) as _i29.ConnectionState?);
 
   @override
-  void recordActivity(_i18.TransportConn? tcpConnection) => super.noSuchMethod(
+  void recordActivity(_i19.TransportConn? tcpConnection) => super.noSuchMethod(
         Invocation.method(
           #recordActivity,
           [tcpConnection],
@@ -2017,14 +2097,14 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 
   @override
   _i22.Stream<_i29.ConnectionStateChange>? getStateStream(
-          _i18.TransportConn? conn) =>
+          _i19.TransportConn? conn) =>
       (super.noSuchMethod(Invocation.method(
         #getStateStream,
         [conn],
       )) as _i22.Stream<_i29.ConnectionStateChange>?);
 
   @override
-  _i22.Future<void> closeConnection(_i18.TransportConn? conn) =>
+  _i22.Future<void> closeConnection(_i19.TransportConn? conn) =>
       (super.noSuchMethod(
         Invocation.method(
           #closeConnection,
@@ -2038,38 +2118,58 @@ class MockConnManager extends _i1.Mock implements _i17.ConnManager {
 /// A class which mocks [UDXMultiplexer].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
+class MockUDXMultiplexer extends _i1.Mock implements _i13.UDXMultiplexer {
   MockUDXMultiplexer() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  _i8.RawDatagramSocket get socket => (super.noSuchMethod(
+  _i9.RawDatagramSocket get socket => (super.noSuchMethod(
         Invocation.getter(#socket),
-        returnValue: _FakeRawDatagramSocket_23(
+        returnValue: _FakeRawDatagramSocket_25(
           this,
           Invocation.getter(#socket),
         ),
-      ) as _i8.RawDatagramSocket);
+      ) as _i9.RawDatagramSocket);
 
   @override
-  Map<_i13.ConnectionId, _i21.UDPSocket> get socketsByCid =>
-      (super.noSuchMethod(
+  _i13.Clock get clock => (super.noSuchMethod(
+        Invocation.getter(#clock),
+        returnValue: _FakeClock_16(
+          this,
+          Invocation.getter(#clock),
+        ),
+      ) as _i13.Clock);
+
+  @override
+  Map<_i14.ConnectionId, _i4.UDPSocket> get socketsByCid => (super.noSuchMethod(
         Invocation.getter(#socketsByCid),
-        returnValue: <_i13.ConnectionId, _i21.UDPSocket>{},
-      ) as Map<_i13.ConnectionId, _i21.UDPSocket>);
+        returnValue: <_i14.ConnectionId, _i4.UDPSocket>{},
+      ) as Map<_i14.ConnectionId, _i4.UDPSocket>);
 
   @override
-  Map<String, _i21.UDPSocket> get socketsByPeer => (super.noSuchMethod(
+  Map<String, _i4.UDPSocket> get socketsByPeer => (super.noSuchMethod(
         Invocation.getter(#socketsByPeer),
-        returnValue: <String, _i21.UDPSocket>{},
-      ) as Map<String, _i21.UDPSocket>);
+        returnValue: <String, _i4.UDPSocket>{},
+      ) as Map<String, _i4.UDPSocket>);
 
   @override
-  _i22.Stream<_i21.UDPSocket> get connections => (super.noSuchMethod(
+  _i22.Future<Object?> get done => (super.noSuchMethod(
+        Invocation.getter(#done),
+        returnValue: _i22.Future<Object?>.value(),
+      ) as _i22.Future<Object?>);
+
+  @override
+  bool get lost => (super.noSuchMethod(
+        Invocation.getter(#lost),
+        returnValue: false,
+      ) as bool);
+
+  @override
+  _i22.Stream<_i4.UDPSocket> get connections => (super.noSuchMethod(
         Invocation.getter(#connections),
-        returnValue: _i22.Stream<_i21.UDPSocket>.empty(),
-      ) as _i22.Stream<_i21.UDPSocket>);
+        returnValue: _i22.Stream<_i4.UDPSocket>.empty(),
+      ) as _i22.Stream<_i4.UDPSocket>);
 
   @override
   void close() => super.noSuchMethod(
@@ -2083,7 +2183,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
   @override
   void send(
     _i23.Uint8List? data,
-    _i8.InternetAddress? address,
+    _i9.InternetAddress? address,
     int? port,
   ) =>
       super.noSuchMethod(
@@ -2099,7 +2199,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
       );
 
   @override
-  void removeSocket(_i13.ConnectionId? localCid) => super.noSuchMethod(
+  void removeSocket(_i14.ConnectionId? localCid) => super.noSuchMethod(
         Invocation.method(
           #removeSocket,
           [localCid],
@@ -2108,7 +2208,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
       );
 
   @override
-  void addSocket(_i21.UDPSocket? socket) => super.noSuchMethod(
+  void addSocket(_i4.UDPSocket? socket) => super.noSuchMethod(
         Invocation.method(
           #addSocket,
           [socket],
@@ -2117,12 +2217,12 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
       );
 
   @override
-  _i21.UDPSocket createSocket(
+  _i4.UDPSocket createSocket(
     _i2.UDX? udx,
     String? host,
     int? port, {
-    _i13.ConnectionId? localCid,
-    _i13.ConnectionId? remoteCid,
+    _i14.ConnectionId? localCid,
+    _i14.ConnectionId? remoteCid,
     bool? isServer = false,
     bool? shared = true,
   }) =>
@@ -2141,7 +2241,7 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
             #shared: shared,
           },
         ),
-        returnValue: _FakeUDPSocket_24(
+        returnValue: _FakeUDPSocket_3(
           this,
           Invocation.method(
             #createSocket,
@@ -2154,17 +2254,17 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
               #localCid: localCid,
               #remoteCid: remoteCid,
               #isServer: isServer,
-            #shared: shared,
+              #shared: shared,
             },
           ),
         ),
-      ) as _i21.UDPSocket);
+      ) as _i4.UDPSocket);
 
   @override
   void sendStatelessReset(
-    _i8.InternetAddress? address,
+    _i9.InternetAddress? address,
     int? port,
-    _i13.ConnectionId? connectionId,
+    _i14.ConnectionId? connectionId,
   ) =>
       super.noSuchMethod(
         Invocation.method(
@@ -2180,8 +2280,8 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
 
   @override
   void registerResetToken(
-    _i13.ConnectionId? cid,
-    _i14.StatelessResetToken? token,
+    _i14.ConnectionId? cid,
+    _i15.StatelessResetToken? token,
   ) =>
       super.noSuchMethod(
         Invocation.method(
@@ -2195,19 +2295,19 @@ class MockUDXMultiplexer extends _i1.Mock implements _i12.UDXMultiplexer {
       );
 
   @override
-  Map<_i13.ConnectionId, _i21.UDPSocket> getSocketsForTest() =>
+  Map<_i14.ConnectionId, _i4.UDPSocket> getSocketsForTest() =>
       (super.noSuchMethod(
         Invocation.method(
           #getSocketsForTest,
           [],
         ),
-        returnValue: <_i13.ConnectionId, _i21.UDPSocket>{},
-      ) as Map<_i13.ConnectionId, _i21.UDPSocket>);
+        returnValue: <_i14.ConnectionId, _i4.UDPSocket>{},
+      ) as Map<_i14.ConnectionId, _i4.UDPSocket>);
 
   @override
   void handleIncomingDatagramForTest(
     _i23.Uint8List? data,
-    _i8.InternetAddress? address,
+    _i9.InternetAddress? address,
     int? port,
   ) =>
       super.noSuchMethod(

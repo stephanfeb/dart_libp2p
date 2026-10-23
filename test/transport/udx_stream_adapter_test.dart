@@ -253,6 +253,7 @@ void main() {
 
       when(mockMultiplexer.connections).thenAnswer((_) => connectionsController.stream);
       when(mockMultiplexer.close()).thenAnswer((_) async {});
+      when(mockMultiplexer.lost).thenReturn(false);
       when(mockConnManager.registerConnection(any)).thenReturn(true);
       when(mockSocket.getStreamBuffer()).thenReturn(<UDXStream>[]);
       when(mockSocket.flushStreamBuffer()).thenAnswer((_) {});
