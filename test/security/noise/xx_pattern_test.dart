@@ -153,7 +153,7 @@ void main() {
       );
 
       // Try to send initiator's second message before first
-      final message1 = await initiator.writeMessage(Uint8List(0));
+      await initiator.writeMessage(Uint8List(0));
       expect(
         () => initiator.writeMessage(Uint8List(0)),
         throwsA(isA<StateError>()),
@@ -242,7 +242,7 @@ void main() {
       // Complete first message exchange to get into a state where we can decrypt
       final message1 = await initiator.writeMessage(Uint8List(0));
       await responder.readMessage(message1);
-      final message2 = await responder.writeMessage(Uint8List(0));
+      await responder.writeMessage(Uint8List(0));
 
       // Try to process a message that's too short to contain ephemeral key
       final shortMessage = Uint8List(8); // Need 32 bytes for ephemeral key
@@ -259,7 +259,7 @@ void main() {
       // Complete first message exchange to get into a state where we can decrypt
       final message1 = await initiator.writeMessage(Uint8List(0));
       await responder.readMessage(message1);
-      final message2 = await responder.writeMessage(Uint8List(0));
+      await responder.writeMessage(Uint8List(0));
 
       // Create a message that's long enough for ephemeral key but not static key
       final shortMessage = Uint8List(40); // Has 32 bytes for ephemeral key
@@ -432,7 +432,7 @@ void main() {
       await responder2.readMessage(msg1b);
 
       // Generate second messages
-      final msg2a = await responder1.writeMessage(Uint8List(0));
+      await responder1.writeMessage(Uint8List(0));
       final msg2b = await responder2.writeMessage(Uint8List(0));
 
       // Try to mix second messages - should fail due to different static keys
@@ -651,6 +651,12 @@ void main() {
       // Keys should be different
       expect(initiatorSendKey, isNot(equals(responderSendKey)),
           reason: 'Send keys should be different');
+
+      // Each side receives with the key the other side sends with
+      expect(initiatorSendKey, equals(responderRecvKey),
+          reason: 'Initiator send key must be the responder receive key');
+      expect(initiatorRecvKey, equals(responderSendKey),
+          reason: 'Initiator receive key must be the responder send key');
     });
 
     test('minimal key derivation test', () async {
@@ -727,13 +733,6 @@ void main() {
         fail('Remote static key should not be null after handshake');
       }
 
-      final algorithm = X25519();
-      final shared = await algorithm.sharedSecretKey(
-        keyPair: initiator.debugEphemeralKeys,
-        remotePublicKey: SimplePublicKey(remoteStatic, type: KeyPairType.x25519),
-      );
-      final sharedBytes = await shared.extractBytes();
-
       // Verify chain key state after se operation
       expect(initiator.debugChainKey, equals(responder.debugChainKey),
           reason: 'Chain keys should match after se operation');
@@ -755,8 +754,7 @@ void main() {
       // Get final keys
       final initiatorSend = await initiator.sendKey.extractBytes();
       final responderRecv = await responder.recvKey.extractBytes();
-      // print('Initiator send key: ${initiatorSend}');
-      // print('Responder recv key: ${responderRecv}');
+      expect(initiatorSend, equals(responderRecv));
     });
 
     test('proves hash mixing order issue', () async {
@@ -806,7 +804,6 @@ void main() {
       await initiator.readMessage(message2);
       
       // Get the static public key that will be encrypted
-      final staticPubKey = await initiator.getStaticPublicKey();
       // print('\nStatic public key to encrypt: ${staticPubKey}');
       
       // Write final message
@@ -1584,13 +1581,6 @@ void main() {
       if (remoteStatic == null) {
         fail('Remote static key should not be null after handshake');
       }
-
-      final algorithm = X25519();
-      final shared = await algorithm.sharedSecretKey(
-        keyPair: responderStatic,
-        remotePublicKey: SimplePublicKey(remoteStatic, type: KeyPairType.x25519),
-      );
-      final sharedBytes = await shared.extractBytes();
 
       // Verify chain keys match
       expect(initiator.debugChainKey, equals(responder.debugChainKey));

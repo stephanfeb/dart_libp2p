@@ -105,7 +105,6 @@ class MockStreamStats implements StreamStats {
 
 class MockP2PStream implements P2PStream<Uint8List> {
   final String _id_internal = 'mock-stream-${Random().nextInt(1 << 32)}';
-  final StreamController<Uint8List> _incomingDataController = StreamController<Uint8List>.broadcast();
   final StreamController<Uint8List> _outgoingDataController;
 
   final BytesBuilder _readBuffer = BytesBuilder();

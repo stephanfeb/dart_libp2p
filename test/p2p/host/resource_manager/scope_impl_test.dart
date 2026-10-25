@@ -277,7 +277,6 @@ void main() {
       expect(mockParent.stat.numStreamsOutbound, 1);
       expect(mockParent.decRefCalls, 0);
       
-      final childStatBeforeDone = childScope.stat;
 
       childScope.done();
 

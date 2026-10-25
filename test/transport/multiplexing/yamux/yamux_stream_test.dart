@@ -9,7 +9,7 @@ import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/multiaddr.dart' hide Protocol; // Hide core Protocol if it exists to avoid conflict
+import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // Import the Protocol class for Multiaddr
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';

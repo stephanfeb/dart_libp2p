@@ -11,7 +11,7 @@ import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnStats, Stats;
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // For P2PStream
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope;
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 
 /// A mock implementation of Connection for testing
 class MockConnection implements Conn {
@@ -152,24 +152,4 @@ class MockConnScope implements ConnScope {
   Future<ResourceScopeSpan> beginSpan() async { // ResourceScopeSpan from rcmgr.dart
     throw UnimplementedError('beginSpan not implemented in MockConnScope');
   }
-}
-
-/// Mock implementation of ResourceScopeSpan
-class _MockResourceScopeSpan implements ResourceScopeSpan { // ResourceScopeSpan from rcmgr.dart
-  @override
-  Future<ResourceScopeSpan> beginSpan() async { // ResourceScopeSpan from rcmgr.dart
-    return this;
-  }
-
-  @override
-  void done() {}
-
-  @override
-  void releaseMemory(int size) {}
-
-  @override
-  Future<void> reserveMemory(int size, int priority) async {}
-
-  @override
-  ScopeStat get stat => const ScopeStat(); // Renamed scopeStat to stat. ScopeStat from rcmgr.dart
 }

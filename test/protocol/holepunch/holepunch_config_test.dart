@@ -1,7 +1,4 @@
 
-import 'package:dart_libp2p/core/crypto/ed25519.dart';
-import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/config/config.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart';
 import 'package:test/test.dart';
@@ -28,14 +25,6 @@ void main() {
     });
 
     group('Host Integration', () {
-      late KeyPair keyPair;
-      late PeerId peerId;
-      
-      setUp(() async {
-        keyPair = await generateEd25519KeyPair();
-        peerId = await PeerId.fromPublicKey(keyPair.publicKey);
-      });
-
       test('should support holepunch configuration setting', () async {
         // Test that the configuration setting works as expected
         final enabledConfig = Config()..enableHolePunching = true;

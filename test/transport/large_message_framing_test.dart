@@ -58,7 +58,6 @@ void main() {
       // Create client and server peers
       final clientKeyPair = await crypto_ed25519.generateEd25519KeyPair();
       final serverKeyPair = await crypto_ed25519.generateEd25519KeyPair();
-      final clientPeerId = await PeerId.fromPublicKey(clientKeyPair.publicKey);
       final serverPeerId = await PeerId.fromPublicKey(serverKeyPair.publicKey);
 
       // Configure Yamux with standard settings (no frame size limits!)

@@ -344,11 +344,10 @@ class MockSecuredConn extends MockConnBase implements p2p_secured_conn.SecuredCo
 }
 
 class MockMuxerInstance implements p2p_muxer.Multiplexer {
-  final Conn _connection; 
   final bool _isClient;
   final Map<String, Future<P2PStream> Function()> _specificStreamProviders;
 
-  MockMuxerInstance(this._connection, this._isClient, this._specificStreamProviders);
+  MockMuxerInstance(Conn connection, this._isClient, this._specificStreamProviders);
 
   String get id => protocolId;
   @override
@@ -540,7 +539,6 @@ void main() {
   group('BasicHost Identify Mocked Read Hang Test', () {
     late BasicHost hostA;
     late BasicHost hostB;
-    late PeerId peerIdA;
     late PeerId peerIdB;
     late KeyPair keyPairA;
     late KeyPair keyPairB;
@@ -552,7 +550,6 @@ void main() {
     setUp(() async {
       keyPairA = MockKeyPair();
       keyPairB = MockKeyPair();
-      peerIdA = await PeerId.fromPublicKey(keyPairA.publicKey);
       peerIdB = await PeerId.fromPublicKey(keyPairB.publicKey);
 
       readOnHangingStreamWasCalled = false;

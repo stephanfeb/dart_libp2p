@@ -10,10 +10,9 @@ import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/common.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope;
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 // Import the abstract PeerId directly
 // Import the concrete PeerId implementation
-import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer_id;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/crypto/key_generator.dart';
 import 'package:dart_libp2p/core/crypto/rsa.dart' as rsa;
@@ -425,84 +424,6 @@ class _MockResourceScopeSpan implements ResourceScopeSpan { // Implements Resour
   ScopeStat get stat => const ScopeStat(); // Renamed scopeStat to stat. ScopeStat from rcmgr
 }
 
-/// A connection wrapper that monitors reads
-class _MonitoredConnection implements TransportConn {
-  final TransportConn _inner;
-  final void Function(int readNum, int? length, Uint8List result) onRead;
-  int _readCount = 0;
-
-  _MonitoredConnection(this._inner, {required this.onRead});
-
-  @override
-  Future<Uint8List> read([int? length]) async {
-    _readCount++;
-    final result = await _inner.read(length);
-    onRead(_readCount, length, result);
-    return result;
-  }
-
-  @override
-  Future<void> write(Uint8List data) => _inner.write(data);
-
-  @override
-  Future<void> close() => _inner.close();
-
-  @override
-  bool get isClosed => _inner.isClosed;
-
-  // Deprecated methods
-  MultiAddr get localAddr => _inner.localMultiaddr;
-
-  MultiAddr get remoteAddr => _inner.remoteMultiaddr;
-
-  @override
-  MultiAddr get localMultiaddr => _inner.localMultiaddr;
-
-  @override
-  MultiAddr get remoteMultiaddr => _inner.remoteMultiaddr;
-
-  @override
-  Socket get socket => _inner.socket;
-
-  @override
-  void setReadTimeout(Duration timeout) => _inner.setReadTimeout(timeout);
-
-  @override
-  void setWriteTimeout(Duration timeout) => _inner.setWriteTimeout(timeout);
-
-  @override
-  String get id => _inner.id;
-
-  @override
-  Future<P2PStream> newStream(Context context) => _inner.newStream(context);
-
-  @override
-  Future<List<P2PStream>> get streams => _inner.streams;
-
-  @override
-  PeerId get localPeer => _inner.localPeer; // Use direct PeerId type
-
-  @override
-  PeerId get remotePeer => _inner.remotePeer; // Use direct PeerId type
-
-  @override
-  Future<libp2p_keys.PublicKey?> get remotePublicKey => _inner.remotePublicKey;
-
-  @override
-  ConnState get state => _inner.state;
-
-  @override
-  ConnStats get stat => _inner.stat;
-
-  @override
-  ConnScope get scope => _inner.scope;
-
-  @override
-  void notifyActivity() {
-    _inner.notifyActivity();
-  }
-}
-
 /// A connection wrapper that tracks reads
 class _TrackedConnection implements TransportConn {
   final TransportConn _inner;
@@ -749,10 +670,6 @@ void main() {
       final noiseInitiator = await NoiseSecurity.create(identityKey); // Use the setUp identityKey
       final responderIdentityKey = await generateEd25519KeyPair(); // Different key for responder
       final noiseResponder = await NoiseSecurity.create(responderIdentityKey);
-      // Use the concrete PeerId class for instantiation
-      final responderPeerId = await concrete_peer_id.PeerId.fromPublicKey(responderIdentityKey.publicKey);
-      final initiatorPeerId = await concrete_peer_id.PeerId.fromPublicKey(identityKey.publicKey);
-
 
       SecuredConnection securedInitiator;
       SecuredConnection securedResponder;

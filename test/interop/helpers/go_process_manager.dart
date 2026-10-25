@@ -14,7 +14,6 @@ class GoProcessManager {
   String? _circuitAddr;
   final List<String> _output = [];
   final _outputController = StreamController<String>.broadcast();
-  bool _ready = false;
   File? _configFile;
 
   GoProcessManager({required this.binaryPath});
@@ -124,8 +123,6 @@ class GoProcessManager {
         _listenAddr = MultiAddr(line.substring('Listening: '.length).trim());
       } else if (line.startsWith('CircuitAddr: ')) {
         _circuitAddr = line.substring('CircuitAddr: '.length).trim();
-      } else if (line == 'Ready') {
-        _ready = true;
       }
     });
 
@@ -326,7 +323,7 @@ class GoProcessManager {
     if (_process != null) {
       _process!.stdin.writeln('quit');
       // Give it a moment to exit gracefully
-      final exitCode = await _process!.exitCode.timeout(
+      await _process!.exitCode.timeout(
         const Duration(seconds: 5),
         onTimeout: () {
           _process!.kill(ProcessSignal.sigterm);
@@ -344,7 +341,6 @@ class GoProcessManager {
     _peerId = null;
     _listenAddr = null;
     _circuitAddr = null;
-    _ready = false;
     _output.clear();
 
     if (_configFile != null) {

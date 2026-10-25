@@ -701,39 +701,6 @@ class IntegrationTestPeer {
     await request.response.close();
   }
 
-  /// Attempts to discover a peer via relay connection
-  Future<void> _discoverPeerViaRelay(PeerId targetPeerId) async {
-    print('🔍 Attempting to discover peer $targetPeerId via relay...');
-    
-    // Check if we already have addresses for this peer
-    final existingAddrs = await host.peerStore.addrBook.addrs(targetPeerId);
-    if (existingAddrs.isNotEmpty) {
-      print('✅ Peer $targetPeerId already known with ${existingAddrs.length} addresses');
-      return;
-    }
-    
-    // Try to connect to the relay first to ensure we have a communication path
-    final relayServers = Platform.environment['RELAY_SERVERS'];
-    if (relayServers != null && relayServers.isNotEmpty) {
-      final relayAddrs = relayServers.split(',').map((s) => MultiAddr(s.trim())).toList();
-      
-      for (final relayAddr in relayAddrs) {
-        try {
-          await _connectToRelay(relayAddr);
-          print('✅ Connected to relay for peer discovery: $relayAddr');
-          break; // Exit after first successful connection
-        } catch (e) {
-          print('⚠️ Failed to connect to relay $relayAddr: $e');
-          continue;
-        }
-      }
-    }
-    
-    // For now, we'll rely on the relay and identify protocol to discover peers
-    // In a more sophisticated setup, we could implement active peer discovery
-    print('🔍 Waiting for peer discovery via identify protocol...');
-  }
-
   Future<void> shutdown() async {
     print('🛑 Shutting down $role peer $peerName...');
     await host.close();

@@ -42,7 +42,6 @@ void main() {
   // Late initialized variables for mocks and common test setup
   // These will now use the generated mock types, e.g., MockSocket from the .mocks.dart file
   late MockSocket mockSocketClient;
-  late MockSocket mockSocketServer;
   late MockResourceManager mockResourceManager;
   late MockConnManagementScope sharedMockScope; // Moved here for wider access
   // MockResourceScopeSpan will also be from generated file
@@ -58,7 +57,6 @@ void main() {
     // Initialize mocks and common objects for each test
     clientSocketStreamController = StreamController<Uint8List>.broadcast(); // Initialize here
     mockSocketClient = MockSocket();
-    mockSocketServer = MockSocket(); // For simulating the other end
     mockResourceManager = MockResourceManager();
     localPeerId = await concrete_peer_id.PeerId.random(); // Use aliased concrete class
     remotePeerId = await concrete_peer_id.PeerId.random(); // Use aliased concrete class
@@ -532,6 +530,8 @@ void main() {
       
       // Adding to the test's controller should not cause issues if TCPConnection's listener is gone.
       expect(() => clientSocketStreamController.add(Uint8List(1)), returnsNormally);
+
+      await closeFuture;
     });
 
     test('close should be idempotent and call scope.done() only once', () async {
