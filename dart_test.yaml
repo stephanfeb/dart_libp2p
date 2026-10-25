@@ -1,0 +1,13 @@
+tags:
+  # Needs Docker: builds NAT topologies with Docker Compose.
+  docker:
+  # Needs the go-libp2p interop peer, built from the sibling checkout.
+  interop:
+
+presets:
+  # GitHub Actions (.github/workflows/ci.yml). Leaves out the suites that need
+  # outside setup. Some network tests depend on timing and can fail once on a
+  # slow runner, so a failed test runs again before it counts as a failure.
+  ci:
+    exclude_tags: docker || interop
+    retry: 2
