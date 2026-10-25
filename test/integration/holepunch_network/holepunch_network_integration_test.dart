@@ -1,3 +1,6 @@
+@Tags(['docker'])
+library;
+
 import 'dart:io';
 import 'package:test/test.dart';
 import 'utils/container_orchestrator.dart';

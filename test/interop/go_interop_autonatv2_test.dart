@@ -1,5 +1,6 @@
 // Each test starts a go-libp2p process; under a busy full-suite run the
 // default 30 s was not always enough.
+@Tags(['interop'])
 @Timeout(Duration(seconds: 90))
 library;
 

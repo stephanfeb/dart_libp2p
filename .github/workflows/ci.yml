@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: analyze + test (Dart ${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.6: the lowest SDK the dev dependencies resolve on (mockito 5.4.5).
+        sdk: ['3.6', stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      # Errors fail the build. The existing warnings are not cleaned up yet.
+      - run: dart analyze --no-fatal-warnings
+      # The `ci` preset in dart_test.yaml leaves out the Docker and Go interop
+      # suites and retries timing-sensitive tests.
+      - run: dart test -P ci
+
+  min-sdk:
+    # pubspec.yaml allows SDK 3.5 for users of the package. The dev
+    # dependencies need 3.6, so remove them and analyze the library alone.
+    name: analyze lib (Dart 3.5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.5'
+      - run: sed -i '/^dev_dependencies:/,$d' pubspec.yaml
+      - run: dart pub get
+      - run: dart analyze --no-fatal-warnings lib

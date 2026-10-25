@@ -1,45 +1,25 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:dart_libp2p/p2p/nat/network_interface_monitor.dart';
 import 'package:test/test.dart';
 
-/// A mock implementation of NetworkInterface for testing
-class MockNetworkInterface implements NetworkInterface {
-  @override
-  final String name;
-
-  @override
-  final List<InternetAddress> addresses;
-
-  @override
-  final int index;
-
-  MockNetworkInterface({
-    required this.name,
-    required this.addresses,
-    required this.index,
-  });
-}
-
+// The monitor gets plain addresses through addressesProvider. A mock
+// NetworkInterface cannot compile on both sides of Dart 3.13, where
+// NetworkInterface.addresses became List<InterfaceAddress>.
 void main() {
   group('NetworkInterfaceMonitor', () {
     late NetworkInterfaceMonitor monitor;
-    late List<NetworkInterface> mockInterfaces;
+    late Map<String, Set<String>> mockAddresses;
 
     setUp(() {
       // Initial mock interfaces
-      mockInterfaces = [
-        MockNetworkInterface(
-          name: 'eth0',
-          addresses: [InternetAddress('192.168.1.1')],
-          index: 1,
-        ),
-      ];
+      mockAddresses = {
+        'eth0': {'192.168.1.1'},
+      };
 
-      // Create monitor with mock interface provider
+      // Create monitor with mock addresses provider
       monitor = NetworkInterfaceMonitor(
         checkInterval: Duration(milliseconds: 100), // Short interval for testing
-        interfaceProvider: () async => mockInterfaces,
+        addressesProvider: () async => mockAddresses,
       );
     });
 
@@ -52,13 +32,9 @@ void main() {
       await monitor.initialize();
 
       // Change the mock interfaces
-      mockInterfaces = [
-        MockNetworkInterface(
-          name: 'eth0',
-          addresses: [InternetAddress('192.168.1.2')], // Changed address
-          index: 1,
-        ),
-      ];
+      mockAddresses = {
+        'eth0': {'192.168.1.2'}, // Changed address
+      };
 
       // Check for changes
       final hasChanged = await monitor.checkForChanges();
@@ -78,13 +54,9 @@ void main() {
       });
 
       // Change the mock interfaces
-      mockInterfaces = [
-        MockNetworkInterface(
-          name: 'eth0',
-          addresses: [InternetAddress('192.168.1.2')], // Changed address
-          index: 1,
-        ),
-      ];
+      mockAddresses = {
+        'eth0': {'192.168.1.2'}, // Changed address
+      };
 
       // Check for changes
       await monitor.checkForChanges();
@@ -117,24 +89,27 @@ void main() {
       await monitor.initialize();
 
       // Change the mock interfaces to add an interface
-      mockInterfaces = [
-        MockNetworkInterface(
-          name: 'eth0',
-          addresses: [InternetAddress('192.168.1.1')],
-          index: 1,
-        ),
-        MockNetworkInterface(
-          name: 'wlan0',
-          addresses: [InternetAddress('10.0.0.1')],
-          index: 2,
-        ),
-      ];
+      mockAddresses = {
+        'eth0': {'192.168.1.1'},
+        'wlan0': {'10.0.0.1'},
+      };
 
       // Check for changes
       final hasChanged = await monitor.checkForChanges();
 
       // Verify that changes were detected
       expect(hasChanged, isTrue);
+    });
+
+    test('addressesOf keys the addresses of real interfaces by name', () async {
+      final interfaces = await NetworkInterface.list();
+
+      final addresses = NetworkInterfaceMonitor.addressesOf(interfaces);
+
+      expect(addresses.keys, unorderedEquals(interfaces.map((i) => i.name).toSet()));
+      for (final i in interfaces) {
+        expect(addresses[i.name], containsAll(i.addresses.map((a) => a.address)));
+      }
     });
   });
 }
