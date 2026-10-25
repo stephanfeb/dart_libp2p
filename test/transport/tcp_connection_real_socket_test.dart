@@ -248,7 +248,30 @@ void main() {
       expect(thrownError, isA<TimeoutException>(), reason: "The thrown error should be a TimeoutException.");
       
       // Reset timeout for subsequent tests if any or for teardown
-      clientConnection.setReadTimeout(Duration.zero); 
+      clientConnection.setReadTimeout(Duration.zero);
+    });
+
+    test('Client write times out and closes if server stops reading', () async {
+      // The server stops reading, so the socket buffers fill and flush() stalls.
+      serverSubscription.pause();
+      clientConnection.setWriteTimeout(Duration(milliseconds: 500));
+
+      final chunk = Uint8List(1024 * 1024);
+      Object? thrownError;
+      final sw = Stopwatch()..start();
+      try {
+        for (var i = 0; i < 256; i++) {
+          await clientConnection.write(chunk);
+        }
+      } catch (e) {
+        thrownError = e;
+      }
+      sw.stop();
+
+      expect(thrownError, isA<TimeoutException>());
+      expect(sw.elapsed, lessThan(Duration(seconds: 10)));
+      expect(clientConnection.isClosed, isTrue);
+      await expectLater(clientConnection.write(chunk), throwsA(isA<StateError>()));
     });
   }); // End of group
 }
