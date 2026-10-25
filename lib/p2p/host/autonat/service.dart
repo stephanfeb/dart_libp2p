@@ -25,7 +25,6 @@ const Duration streamTimeout = Duration(seconds: 60);
 class AutoNATService {
   final AutoNATConfig _config;
   bool _isEnabled = false;
-  StreamSubscription? _backgroundSubscription;
   Timer? _throttleResetTimer;
 
   // Rate limiter state

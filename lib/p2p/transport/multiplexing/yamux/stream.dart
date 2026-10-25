@@ -702,9 +702,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
             
             try {
 
-              final completerAwaitStart = DateTime.now();
               final data = await _readCompleter!.future;
-              final completerAwaitDuration = DateTime.now().difference(completerAwaitStart);
               
               _readCompleter = null;
 
@@ -798,7 +796,6 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
   }
 
   Future<void> handleFrame(YamuxFrame frame) async {
-    final handleStartTime = DateTime.now();
 
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');

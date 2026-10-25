@@ -283,10 +283,7 @@ class MdnsDiscovery implements Discovery {
       
       final stream = await MDNSClient.query(params);
       
-      var serviceCount = 0;
-      
       await for (final serviceEntry in stream) {
-        serviceCount++;
         _processDiscoveredService(serviceEntry);
       }
       
@@ -374,12 +371,6 @@ class MdnsDiscovery implements Discovery {
   /// Test helper: inject a discovered peer into the notifee/stream pipeline.
   void debugInjectPeer(AddrInfo peer) {
     _notifee?.handlePeerFound(peer);
-  }
-
-  /// Truncate peer ID for display
-  String _truncatePeerId(PeerId peerId) {
-    final str = peerId.toString();
-    return str.length > 8 ? str.substring(str.length - 8) : str;
   }
 
   /// Generates a random string of the specified length

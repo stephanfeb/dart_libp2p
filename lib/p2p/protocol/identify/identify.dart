@@ -877,7 +877,6 @@ class IdentifyService implements IDService {
     try {
 
       await stream.scope().setService(serviceName);
-      final serviceScopeTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
       _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-1-ERROR] ($side) Error attaching stream to identify service for peer=$peer: $e. Resetting stream.');
@@ -888,7 +887,6 @@ class IdentifyService implements IDService {
     try {
 
       await stream.scope().reserveMemory(signedIDSize, ReservationPriority.always);
-      final memoryReserveTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
       _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-2-ERROR] ($side) Error reserving memory for identify stream for peer=$peer: $e. Resetting stream.');
@@ -911,7 +909,6 @@ class IdentifyService implements IDService {
       final mes = received ?? Identify();
 
       await _consumeMessage(mes, conn, isPush);
-      final consumeMessageTime = DateTime.now().difference(handleStart);
 
 
       if (metricsTracer != null) {
@@ -938,12 +935,10 @@ class IdentifyService implements IDService {
           metricsTracer!.connPushSupport(e.pushSupport);
         }
       });
-      final pushSupportTime = DateTime.now().difference(handleStart);
 
 
 
       await stream.closeWrite();
-      final totalTime = DateTime.now().difference(handleStart);
 
     } catch (e, st) {
       final errorTime = DateTime.now().difference(handleStart);
@@ -1022,28 +1017,6 @@ class IdentifyService implements IDService {
         rethrow;
       }
     }
-  }
-
-  void _mergeIdentify(Identify target, Identify source) {
-    _log.finer('IdentifyService._mergeIdentify: Merging source into target. Target (before): P:${target.protocols.length},LA:${target.listenAddrs.length},SR:${target.signedPeerRecord.isNotEmpty}. Source: P:${source.protocols.length},LA:${source.listenAddrs.length},SR:${source.signedPeerRecord.isNotEmpty}');
-    target.protocols.addAll(source.protocols);
-    target.listenAddrs.addAll(source.listenAddrs);
-    if (source.hasObservedAddr() && source.observedAddr.isNotEmpty) { // Check if not empty
-      target.observedAddr = source.observedAddr;
-    }
-    if (source.hasPublicKey() && source.publicKey.isNotEmpty) { // Check if not empty
-      target.publicKey = source.publicKey;
-    }
-    if (source.hasProtocolVersion()) {
-      target.protocolVersion = source.protocolVersion;
-    }
-    if (source.hasAgentVersion()) {
-      target.agentVersion = source.agentVersion;
-    }
-    if (source.hasSignedPeerRecord() && source.signedPeerRecord.isNotEmpty) { // Check if not empty
-      target.signedPeerRecord = source.signedPeerRecord;
-    }
-    _log.finer('IdentifyService._mergeIdentify: Target (after): P:${target.protocols.length},LA:${target.listenAddrs.length},SR:${target.signedPeerRecord.isNotEmpty}');
   }
 
   Future<void> _consumeMessage(Identify mes, Conn conn, bool isPush) async {
@@ -1390,7 +1363,6 @@ class IdentifyService implements IDService {
     bool connClosed = false;
 
     await _connsMutex.synchronized( () async {
-      final mutexAcquiredTime = DateTime.now().difference(identifyWaitStart);
 
       var entry = _conns[conn];
 
@@ -1438,7 +1410,6 @@ class IdentifyService implements IDService {
 
     try {
       await completerToAwait!.future;
-      final totalDuration = DateTime.now().difference(identifyWaitStart);
 
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
@@ -1545,7 +1516,6 @@ class IdentifyService implements IDService {
 
       await handleIdentifyResponse(stream, false);
       
-      final totalDuration = DateTime.now().difference(identifyStart);
 
     } catch (e) {
       final duration = DateTime.now().difference(identifyStart);

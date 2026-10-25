@@ -144,9 +144,8 @@ class StunClient {
     
     final buffer = ByteData.view(data.buffer, data.offsetInBytes);
     
-    // First byte is address family (0x01 for IPv4)
-    final family = buffer.getUint8(0);
-    // Skip second byte (reserved)
+    // The address family is not checked: only IPv4 is decoded (the STUN
+    // sockets bind to anyIPv4).
     // Get port (XOR with most significant 16 bits of magic cookie)
     final port = buffer.getUint16(2) ^ (StunMessage.magicCookie >> 16);
     

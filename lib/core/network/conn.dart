@@ -4,7 +4,7 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // P2PStream is used
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan; // Import new types
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope; // Import new types
 
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/network/context.dart';

@@ -527,11 +527,10 @@ class AmbientAutoNAT implements AutoNAT, Notifiee {
 
 // StaticAutoNAT implementation
 class StaticAutoNAT implements AutoNAT {
-  final Host _host;
   final Reachability _reachability;
   final AutoNATService? _service; // Can have an associated service
 
-  StaticAutoNAT(this._host, this._reachability, this._service);
+  StaticAutoNAT(Host host, this._reachability, this._service);
 
   static Future<StaticAutoNAT> create(Host h, Reachability reachability, List<AutoNATOption> options) async {
     // Similar to AmbientAutoNAT.create, setup config and optional service

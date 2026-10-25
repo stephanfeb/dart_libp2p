@@ -73,9 +73,6 @@ class Swarm implements Network {
   /// Map of protocol IDs to stream handlers
   final Map<String, Future<void> Function(dynamic stream, PeerId remotePeer)> _protocolHandlers = {};
 
-  /// Default stream handler for backward compatibility
-  StreamHandler? _defaultStreamHandler;
-
   /// List of notifiees
   final List<Notifiee> _notifiees = [];
 
@@ -220,12 +217,6 @@ class Swarm implements Network {
   @override
   void setStreamHandler(String protocol, Future<void> Function(dynamic stream, PeerId remotePeer) handler) {
     _protocolHandlers[protocol] = handler;
-
-    // For backward compatibility, set the default stream handler to use the protocol handler
-    _defaultStreamHandler = (stream, remotePeer) async {
-      // Call the protocol handler with the stream and remote peer
-      await handler(stream, remotePeer);
-    };
   }
 
   @override
@@ -1639,61 +1630,6 @@ class Swarm implements Network {
         _logger.fine('Swarm: Connection ${conn.id} probe failed ($failures/3): $e');
         // Don't mark as failed yet - allow recovery
       }
-    }
-  }
-
-  /// Proactively cleans up stale connections
-  Future<void> _cleanupStaleConnections() async {
-    if (_isClosed) return;
-
-    final staleConnections = <SwarmConn>[];
-    int totalConnections = 0;
-    int healthyConnections = 0;
-
-    // Collect stale connections
-    await _connLock.synchronized(() async {
-      for (final entry in _connections.entries) {
-        final peerIdStr = entry.key;
-        final conns = entry.value;
-        
-        for (final conn in conns) {
-          totalConnections++;
-          
-          if (conn.isClosed || !_isConnectionHealthy(conn)) {
-            staleConnections.add(conn);
-            _logger.fine('Swarm._cleanupStaleConnections: Found stale connection ${conn.id} to peer $peerIdStr');
-          } else {
-            healthyConnections++;
-          }
-        }
-      }
-    });
-
-    // Clean up stale connections (validate protected ones by testing if still usable)
-    if (staleConnections.isNotEmpty) {
-      _logger.info('Swarm._cleanupStaleConnections: Processing ${staleConnections.length} stale connections (${healthyConnections}/${totalConnections} healthy)');
-      
-      for (final staleConn in staleConnections) {
-        // For protected connections, validate by trying to create a test stream
-        if (_host?.connManager.isProtected(staleConn.remotePeer, '') ?? false) {
-          _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} appears stale, validating...');
-          try {
-            // Try to create a new stream - if connection is alive, this will succeed
-            final testStream = await staleConn.newStream(Context()).timeout(const Duration(seconds: 5));
-            // Connection is alive - close test stream and keep the connection
-            await testStream.reset();
-            _logger.info('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} validated, keeping');
-            continue;  // Skip cleanup - connection is actually healthy
-          } catch (e) {
-            _logger.warning('Swarm._cleanupStaleConnections: Protected connection ${staleConn.id} failed validation: $e');
-            // Continue to cleanup
-          }
-        }
-        
-        await _dropConnection(staleConn, 'Swarm._cleanupStaleConnections');
-      }
-    } else if (totalConnections > 0) {
-      _logger.fine('Swarm._cleanupStaleConnections: All $totalConnections connections are healthy');
     }
   }
 

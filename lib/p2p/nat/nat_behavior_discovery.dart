@@ -25,6 +25,9 @@ class NatBehaviorDiscovery {
     try {
       // First, send a normal binding request to get our mapped address
       final socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      // Read the port now: _sendRequestToServer cancels its subscription,
+      // which closes the socket, and the port of a closed socket can only be
+      // read if it was read before.
       final localPort = socket1.port;
 
       try {
@@ -50,7 +53,7 @@ class NatBehaviorDiscovery {
         final alternateServer = otherAddress.address;
 
         // Create a new socket with the same local port
-        final socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+        final socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
         try {
           final request2 = StunMessage.createBindingRequest();
           final response2 = await _sendRequestToServer(socket2, request2, alternateServer, otherAddress.port);
@@ -72,7 +75,7 @@ class NatBehaviorDiscovery {
           }
 
           // Test 3: Send to primary IP but different port
-          final socket3 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+          final socket3 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
           try {
             final request3 = StunMessage.createBindingRequest();
             // Use a different port on the primary server
@@ -156,7 +159,6 @@ class NatBehaviorDiscovery {
           // Create a new socket for the third request
           RawDatagramSocket socket3 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
           try {
-            final server = await stunClient.stunServer;
             final alternateServer = otherAddress.address;
 
             final request3 = StunMessage.createBindingRequest();
@@ -377,9 +379,8 @@ class NatBehaviorDiscovery {
 
     final buffer = ByteData.view(data.buffer, data.offsetInBytes);
 
-    // First byte is address family (0x01 for IPv4)
-    final family = buffer.getUint8(0);
-    // Skip second byte (reserved)
+    // The address family is not checked: only IPv4 is decoded (the STUN
+    // sockets bind to anyIPv4).
     // Get port (XOR with most significant 16 bits of magic cookie)
     final port = buffer.getUint16(2) ^ (StunMessage.magicCookie >> 16);
 

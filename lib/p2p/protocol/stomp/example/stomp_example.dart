@@ -92,7 +92,7 @@ Future<Host> createHost(String name) async {
 Future<void> demonstrateSimpleMessaging(StompClient client) async {
   
   // Send a simple message to a destination
-  final receiptId = await client.send(
+  await client.send(
     destination: '/queue/example',
     body: 'Hello, STOMP World!',
     contentType: 'text/plain',

@@ -12,7 +12,7 @@ import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../../../core/network/common.dart';
-import '../../../core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope, ConnManagementScope, StreamManagementScope;
+import '../../../core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ConnManagementScope, StreamManagementScope;
 import '../../transport/basic_upgrader.dart'; // For UpgradedConnectionImpl
 import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm.dart';
@@ -63,7 +63,6 @@ class SwarmConn implements Conn {
   /// Timestamp when this SwarmConn was established
   final DateTime _openedTime;
 
-  final _closeLock = Lock();
 
   /// Event-driven health monitor for this connection
   late final ConnectionHealthMonitor _healthMonitor;
@@ -152,16 +151,6 @@ class SwarmConn implements Conn {
   /// Checks if the connection is healthy using event-driven state
   bool get isHealthy => _healthMonitor.metrics.isHealthy;
   
-  /// Records a successful operation for health tracking
-  void _recordHealthSuccess() {
-    _healthMonitor.metrics.recordSuccess();
-  }
-  
-  /// Records an error for health tracking
-  void _recordHealthError(dynamic error) {
-    _healthMonitor.metrics.recordError(error);
-  }
-
   /// Gets the connection context for event correlation
   ConnectionContext? get context => _context;
 

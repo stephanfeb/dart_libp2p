@@ -670,14 +670,13 @@ class CircuitV2Client implements Transport {
 /// CircuitListener implements the Listener interface for circuit relay transport.
 /// It listens for incoming relayed connections from the CircuitV2Client.
 class CircuitListener implements Listener {
-  final CircuitV2Client _client;
   final MultiAddr _listenAddr;
   final Stream<TransportConn> _connStream;
   StreamSubscription<TransportConn>? _subscription;
   final StreamController<TransportConn> _acceptedConnController = StreamController();
   bool _isClosed = false;
 
-  CircuitListener(this._client, this._listenAddr, this._connStream) {
+  CircuitListener(CircuitV2Client client, this._listenAddr, this._connStream) {
     // Filter the client's global incoming connections for this specific listener.
     // This is a simplified model. A more robust one might involve matching
     // the incoming connection's target address if available.

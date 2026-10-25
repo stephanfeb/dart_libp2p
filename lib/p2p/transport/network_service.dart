@@ -29,7 +29,6 @@ class NetworkService {
       
       _tcpSocket?.listen(
         (Uint8List data) {
-          final message = String.fromCharCodes(data);
         },
         onError: (error) {
           _isConnected = false;
@@ -79,7 +78,6 @@ class NetworkService {
           if (event == RawSocketEvent.read) {
             final datagram = _udpSocket?.receive();
             if (datagram != null) {
-              final message = String.fromCharCodes(datagram.data);
             }
           }
         },

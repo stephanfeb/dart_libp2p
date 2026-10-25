@@ -284,7 +284,6 @@ class MultistreamMuxer implements ProtocolSwitch {
   ///
   /// Returns the selected [ProtocolID] or `null` if no protocol could be agreed upon.
   Future<ProtocolID?> selectOneOf(P2PStream<dynamic> stream, List<ProtocolID> protocolsToSelect) async {
-    final startTime = DateTime.now();
     final streamId = stream.id();
     
     // Safely get peer ID - during negotiation, conn might not be available
@@ -315,14 +314,12 @@ class MultistreamMuxer implements ProtocolSwitch {
       // 3. Iterate through the protocols we want to select
       for (int i = 0; i < protocolsToSelect.length; i++) {
         final p = protocolsToSelect[i];
-        final protocolStart = DateTime.now();
 
         await _writeDelimited(stream, utf8.encode(p));
         final response = await _readNextToken(stream);
 
         if (response == p) {
           // Protocol selected
-          final totalDuration = DateTime.now().difference(startTime);
 
           return p;
         } else if (response == 'na') {
@@ -337,12 +334,10 @@ class MultistreamMuxer implements ProtocolSwitch {
       }
 
       // No protocol was selected
-      final totalDuration = DateTime.now().difference(startTime);
 
       await stream.reset(); // Ensure stream is reset if no protocol is selected
       return null;
     } catch (e) {
-      final totalDuration = DateTime.now().difference(startTime);
 
       await stream.reset();
       rethrow;

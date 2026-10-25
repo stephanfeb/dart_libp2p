@@ -10,10 +10,6 @@ class BackoffDiscovery implements Discovery {
   final Discovery _disc;
   final BackoffFactory _stratFactory;
   final Map<String, BackoffCache> _peerCache = {};
-  
-  final int _parallelBufSz;
-  final int _returnedBufSz;
-  
   final Clock _clock;
   
   /// Creates a new BackoffDiscovery
@@ -23,9 +19,7 @@ class BackoffDiscovery implements Discovery {
     int parallelBufferSize = 32,
     int returnedBufferSize = 32,
     Clock? clock,
-  })  : _parallelBufSz = parallelBufferSize,
-        _returnedBufSz = returnedBufferSize,
-        _clock = clock ?? RealClock();
+  })  : _clock = clock ?? RealClock();
   
   @override
   Future<Duration> advertise(String ns, [List<DiscoveryOption> options = const []]) {

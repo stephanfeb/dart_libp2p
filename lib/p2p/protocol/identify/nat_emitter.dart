@@ -14,11 +14,8 @@ import 'package:dart_libp2p/core/event/nattype.dart';
 import 'package:dart_libp2p/core/event/reachability.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/network/network.dart';
-import 'package:logging/logging.dart';
 
 import 'observed_addr_manager.dart';
-
-final _log = Logger('identify.nat_emitter');
 
 /// NATEmitter emits events when the NAT type changes.
 class NATEmitter {
@@ -35,9 +32,6 @@ class NATEmitter {
   bool _closed = false;
   final _completer = Completer<void>();
 
-  // For tracking update state
-  bool _pendingUpdate = false;
-  bool _enoughTimeSinceLastUpdate = true;
   Timer? _timer;
 
   /// Creates a new NAT emitter.
@@ -69,11 +63,8 @@ class NATEmitter {
     // Set up timer for periodic checks
     // We use the timer to periodically check for NAT type changes
     _timer = Timer.periodic(_eventInterval, (_) {
-      _enoughTimeSinceLastUpdate = true;
       // Always check for updates on timer tick
       _maybeNotify();
-      _pendingUpdate = false;
-      _enoughTimeSinceLastUpdate = false;
     });
   }
 

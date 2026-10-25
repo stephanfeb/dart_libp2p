@@ -9,13 +9,9 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:dart_libp2p/core/record/envelope.dart';
-import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
 
-
-/// Logger for the address book.
-final _log = Logger('peerstore');
 
 
 class PeerRecordState {

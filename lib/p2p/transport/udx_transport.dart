@@ -15,10 +15,10 @@ import '../../core/connmgr/conn_manager.dart'; // For ConnManager class
 import '../../p2p/transport/connection_state.dart'; // Correct import for ConnectionState enum
 
 import '../../core/multiaddr.dart';
-import '../../core/network/conn.dart' show Conn, ConnStats, ConnState, Stats; // Added Stats
+import '../../core/network/conn.dart' show ConnStats, ConnState, Stats; // Added Stats
 import '../../core/network/transport_conn.dart';
-import '../../core/network/stream.dart' show P2PStream, StreamStats;
-import '../../core/network/rcmgr.dart' show ConnScope, StreamScope;
+import '../../core/network/stream.dart' show P2PStream;
+import '../../core/network/rcmgr.dart' show ConnScope;
 import '../../core/network/context.dart' show Context;
 import '../../core/network/mux.dart' show MuxedConn, MuxedStream;
 import '../../core/peer/peer_id.dart' show PeerId;

@@ -178,26 +178,9 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     var buffer = Uint8List(0); 
     int frameCount = 0;
     int framesInCurrentBatch = 0;
-    final startTime = DateTime.now();
     
     // Session-level performance tracking for adaptive behavior
     final List<Duration> _recentFrameProcessingTimes = [];
-
-    // High-volume mode detection to reduce logging overhead
-    bool _isHighVolumeMode = false;
-    int _recentFrameCount = 0;
-    DateTime _lastFrameCountReset = DateTime.now();
-
-    void _updateVolumeMode() {
-      final now = DateTime.now();
-      if (now.difference(_lastFrameCountReset) > Duration(seconds: 1)) {
-        _isHighVolumeMode = _recentFrameCount > 50; // 50+ frames/sec = high volume
-        _recentFrameCount = 0;
-        _lastFrameCountReset = now;
-        
-      }
-    }
-
 
     void _recordFrameProcessingTime(Duration duration) {
       _recentFrameProcessingTimes.add(duration);
@@ -226,14 +209,8 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
 
     try {
       while (!_closed) {
-        final loopStartTime = DateTime.now();
         frameCount++;
         framesInCurrentBatch++;
-        _recentFrameCount++;
-
-        // Update volume mode detection
-        _updateVolumeMode();
-
 
         // Adaptive yielding based on batch processing and session stress
         if (framesInCurrentBatch >= _maxFramesPerBatch) {
@@ -312,7 +289,6 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         }
 
         buffer = buffer.sublist(expectedTotalFrameLength);
-        final loopDuration = DateTime.now().difference(loopStartTime);
       }
     } catch (e, st) {
       final bool connIsClosed = _connection.isClosed; // Capture current state
@@ -410,9 +386,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
     final streamData = _streams[frame.streamId];
     if (streamData != null) {
 
-      final streamHandleStart = DateTime.now();
       await streamData.handleFrame(frame);
-      final streamHandleDuration = DateTime.now().difference(streamHandleStart);
     } else if (_isFinishedStream(frame.streamId)) {
       // Normal after a local close or reset: the remote's FIN, or data it
       // sent before it saw our FIN, arrives after the stream was released.
@@ -433,10 +407,6 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
   }
 
   Future<void> _handleNewStream(YamuxFrame frame) async { 
-    // DEBUG: Add detailed inbound stream creation logging
-    final caller = StackTrace.current.toString().split('\n').length > 1 
-        ? StackTrace.current.toString().split('\n')[1].trim() 
-        : 'unknown_caller';
 
     
     if (frame.flags & YamuxFlags.syn == 0) { // Should be redundant due to earlier check in _handleFrame
@@ -696,10 +666,6 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
       throw StateError('Yamux protocol violation: Server cannot create odd stream ID: $streamId');
     }
     
-    // DEBUG: Add detailed stream creation logging with caller info
-    final caller = StackTrace.current.toString().split('\n').length > 1 
-        ? StackTrace.current.toString().split('\n')[1].trim() 
-        : 'unknown_caller';
 
 
     

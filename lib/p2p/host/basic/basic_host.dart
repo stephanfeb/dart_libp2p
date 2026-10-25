@@ -35,7 +35,6 @@ import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'internal/backoff/backoff.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart'; // For real ConnectionManager
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
@@ -186,8 +185,6 @@ class BasicHost implements Host {
   late final StreamController<void> _addrChangeChan;
 
   final _addrMu = Lock();
-  final ExpBackoff _updateLocalIPv4Backoff = ExpBackoff();
-  final ExpBackoff _updateLocalIPv6Backoff = ExpBackoff();
   List<MultiAddr> _filteredInterfaceAddrs = [];
   List<MultiAddr> _allInterfaceAddrs = [];
   Timer? _addressMonitorTimer; // Added to store the timer
@@ -1122,7 +1119,6 @@ class BasicHost implements Host {
 
     // Phase 1: Address Filtering and Peerstore Update
 
-    final filterStartTime = DateTime.now();
     
     // _addrsFactory transforms how THIS host presents its OWN addresses to
     // others (see `get addrs => _addrsFactory(allAddrs)` above) — it must
@@ -1138,7 +1134,6 @@ class BasicHost implements Host {
     
     await peerStore.addrBook.addAddrs(pi.id, filteredAddrs, Duration(minutes: 5));
     
-    final filterTime = DateTime.now().difference(filterStartTime);
 
 
     // Phase 2: Connection Check
@@ -1154,7 +1149,6 @@ class BasicHost implements Host {
     // it was already checked.
     final skipEarlyReturn = context?.getForceDirectDial().$1 ?? false;
     if (connectedness == Connectedness.connected && !skipEarlyReturn) {
-      final totalTime = DateTime.now().difference(startTime);
 
       return;
     }
@@ -1171,8 +1165,6 @@ class BasicHost implements Host {
     try {
       await _dialPeer(pi.id, ctx);
       
-      final dialTime = DateTime.now().difference(dialStartTime);
-      final totalTime = DateTime.now().difference(startTime);
 
 
     } on IdentifyTimeoutException catch (e) {
@@ -1210,11 +1202,9 @@ class BasicHost implements Host {
       final conn = await _network.dialPeer(context, p);
 
       // Phase 2: Identify Wait
-      final identifyStartTime = DateTime.now();
 
       await _idService.identifyWait(conn);
 
-      final identifyTime = DateTime.now().difference(identifyStartTime);
 
     } on IdentifyTimeoutException catch (e) {
       // Handle identify timeout gracefully - this is not a critical error,
@@ -1315,7 +1305,6 @@ class BasicHost implements Host {
 
     // Phase 1: Connection
 
-    final connectStartTime = DateTime.now();
     _log.fine('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
     try {
@@ -1331,18 +1320,15 @@ class BasicHost implements Host {
     }
     _log.fine('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
-    final connectTime = DateTime.now().difference(connectStartTime);
 
 
     // Phase 2: Stream Creation
 
-    final streamCreateStartTime = DateTime.now();
     _log.fine('🎯 [newStream Phase 2] Creating stream to peer ${p.toBase58()}...');
     
     final stream = await _network.newStream(context, p);
     _log.fine('✅ [newStream Phase 2] Stream ${stream.id()} created to peer ${p.toBase58()}');
     
-    final streamCreateTime = DateTime.now().difference(streamCreateStartTime);
 
 
     // DEBUG: Add protocol assignment tracking
@@ -1353,7 +1339,6 @@ class BasicHost implements Host {
     // Identify has its own internal timeout handling (30s)
     // Setting deadline here causes it to expire during identify, breaking protocol negotiation
 
-    final identifyStartTime = DateTime.now();
 
     _log.fine('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
 
@@ -1383,7 +1368,6 @@ class BasicHost implements Host {
     }
     _log.fine('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
 
-    final identifyTime = DateTime.now().difference(identifyStartTime);
 
 
     // Phase 4: Protocol Negotiation
@@ -1402,7 +1386,6 @@ class BasicHost implements Host {
 
       // DEBUG: Add detailed protocol negotiation tracking
 
-      final selectStartTime = DateTime.now();
       _log.fine('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
       
       // The stream deadline bounds reads only; a write that waits behind a
@@ -1415,7 +1398,6 @@ class BasicHost implements Host {
           : await select;
       _log.fine('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
       
-      final selectTime = DateTime.now().difference(selectStartTime);
 
       
       // DEBUG: Add protocol selection result tracking
@@ -1434,7 +1416,6 @@ class BasicHost implements Host {
 
       // Phase 5: Protocol Setup
 
-      final setupStartTime = DateTime.now();
       _log.fine('🎯 [newStream Phase 5] Setting up protocol $selectedProtocol on stream ${stream.id()}...');
       
       // DEBUG: Add protocol assignment tracking
@@ -1452,9 +1433,6 @@ class BasicHost implements Host {
       // This ensures that even if the handler has issues, we've recorded the protocol.
       await peerStore.protoBook.addProtocols(p, [selectedProtocol]);
       
-      final setupTime = DateTime.now().difference(setupStartTime);
-      final negotiationTime = DateTime.now().difference(negotiationStartTime);
-      final totalTime = DateTime.now().difference(startTime);
       
       _log.fine('✅ [newStream Phase 5] Protocol setup complete for stream ${stream.id()}');
       _log.fine('✅ [newStream] COMPLETE - Returning stream ${stream.id()} with protocol $selectedProtocol');

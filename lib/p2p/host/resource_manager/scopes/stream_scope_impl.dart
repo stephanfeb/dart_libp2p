@@ -29,7 +29,6 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
   // which are sub-scopes under protocol/service for that specific peer.
   // This adds another layer of granularity.
   ResourceScopeImpl? _peerProtoScope;
-  ResourceScopeImpl? _peerSvcScope;
 
   final ResourceManagerImpl _rcmgr; // Added ResourceManagerImpl reference
 
@@ -132,7 +131,6 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
       rethrow;
     }
     _serviceScopeImpl = newServiceScope;
-    _peerSvcScope = newPeerSvcScope;
     _logger.fine('$name: Successfully set service to $serviceName. Edges updated.');
   }
 

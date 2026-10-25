@@ -22,15 +22,14 @@ final _log = Logger('RelayedConn');
 
 /// _RelayedConnStats implements ConnStats for a RelayedConn.
 class _RelayedConnStats implements ConnStats {
-  final StreamStats _streamStats; // Stats from the underlying P2PStream to the relay
   final Stats _stats;
 
-  _RelayedConnStats(this._streamStats, {required bool limited})
+  _RelayedConnStats(StreamStats streamStats, {required bool limited})
       : _stats = Stats(
-          direction: _streamStats.direction,
-          opened: _streamStats.opened,
-          limited: limited || _streamStats.limited,
-          extra: _streamStats.extra,
+          direction: streamStats.direction,
+          opened: streamStats.opened,
+          limited: limited || streamStats.limited,
+          extra: streamStats.extra,
         );
 
   @override
@@ -46,7 +45,6 @@ class _RelayedConnStats implements ConnStats {
 /// It implements the [TransportConn] interface.
 class RelayedConn implements TransportConn {
   final P2PStream<Uint8List> _stream; // Stream to the relay
-  final CircuitV2Client _transport; // The transport that created this connection
   final PeerId _localPeer;
   final PeerId _remotePeer; // The actual remote peer, not the relay
   final MultiAddr _localMultiaddr;
@@ -76,7 +74,6 @@ class RelayedConn implements TransportConn {
     int? hopStreamId,
     // required bool isInitiator, // isInitiator can be derived from stream.stat().direction
   })  : _stream = stream,
-        _transport = transport,
         _localPeer = localPeer,
         _remotePeer = remotePeer,
         _localMultiaddr = localMultiaddr,

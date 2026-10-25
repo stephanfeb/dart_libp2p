@@ -31,9 +31,6 @@ class StunClientPool {
   /// Health check interval
   final Duration healthCheckInterval;
 
-  /// Random number generator for server selection
-  final Random _random = Random();
-
   /// Timer for periodic health checks
   Timer? _healthCheckTimer;
 

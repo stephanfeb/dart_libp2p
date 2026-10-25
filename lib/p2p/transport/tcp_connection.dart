@@ -8,10 +8,10 @@ import 'package:convert/convert.dart';
 
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnStats, Stats;
+import 'package:dart_libp2p/core/network/conn.dart' show ConnState, ConnStats, Stats;
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/context.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, PeerScope, ScopeStat, ResourceScopeSpan, ResourceManager, ConnManagementScope, StreamManagementScope;
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, PeerScope, ScopeStat, ResourceScopeSpan, ResourceManager, ConnManagementScope;
 import 'package:dart_libp2p/core/network/stream.dart' show P2PStream; // P2PStream might not be directly relevant if this is raw
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart';
@@ -27,7 +27,6 @@ import 'package:dart_libp2p/core/crypto/keys.dart';
 // If it's in a different top-level part of 'p2p', then package path is better.
 // Let's assume these are local enough for now.
 import 'connection_state.dart' as transport_state; // For ConnManager interaction
-import 'p2p_stream_adapter.dart';
 import 'package:logging/logging.dart'; // Added for logging
 
 final _log = Logger('TCPConnection');
@@ -62,7 +61,6 @@ class TCPConnection implements ScopedTransportConn {
   Completer<void>? _pendingReadCompleter; // Used to signal read() when data arrives
   bool _socketIsDone = false; // Tracks if the socket's onDone/onError has been called
 
-  final List<P2PStreamAdapter> _streams = [];
 
   final PeerId _localPeerId;
   PeerId? _remotePeerId; // Made nullable as it might not be known for raw incoming
@@ -296,7 +294,6 @@ class TCPConnection implements ScopedTransportConn {
 
     _legacyConnManager?.updateState(this, transport_state.ConnectionState.closing, error: null);
 
-    // _streams.clear(); // No streams to clear
 
     // _muxedConn = null; // No muxedConn
 
