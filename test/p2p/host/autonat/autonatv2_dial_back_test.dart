@@ -177,6 +177,53 @@ void main() {
   // go-libp2p resets the stream when the first message is not a DialRequest.
   // The port compared the protobuf getter with null, which is never true, so
   // it answered such a message as an empty request.
+  // A server may send its DialResponse before the dial-back arrives. The
+  // client returned _processDialResponse without await inside try/finally,
+  // so the finally removed the dial-back nonce while the client still
+  // waited for it, and the late dial-back was refused.
+  group('a dial-back that arrives after the DialResponse', () {
+    late BasicHost server;
+    late BasicHost client;
+    late AutoNATv2Impl clientAutoNAT;
+
+    setUp(() async {
+      server = await _newHost(autoNATServer: false);
+      client = await _newHost(autoNATServer: false);
+      clientAutoNAT = AutoNATv2Impl(client, client, options: [allowPrivateAddrs()]);
+      await clientAutoNAT.start();
+      server.setStreamHandler(AutoNATv2Protocols.dialProtocol, (stream, peer) async {
+        final request = await readDelimited(stream, Message.fromBuffer);
+        await writeDelimited(
+            stream,
+            Message(
+                dialResponse: DialResponse(
+                    status: DialResponse_ResponseStatus.OK, addrIdx: 0, dialStatus: DialStatus.OK)));
+        await Future.delayed(const Duration(milliseconds: 200));
+        final back =
+            await server.newStream(peer, [AutoNATv2Protocols.dialBackProtocol], Context());
+        await writeDelimited(back, DialBack(nonce: request.dialRequest.nonce));
+        await back.close();
+      });
+    });
+
+    tearDown(() async {
+      await clientAutoNAT.close();
+      await client.close();
+      await server.close();
+    });
+
+    test('still counts', () async {
+      await client.connect(AddrInfo(server.id, server.network.listenAddresses));
+      // Let identify record the server's protocols on the client.
+      await Future.delayed(const Duration(milliseconds: 500));
+      final clientAddr = client.network.listenAddresses.first;
+
+      final result = await clientAutoNAT.getReachability([Request(addr: clientAddr)]);
+
+      expect(result.reachability, Reachability.public);
+    });
+  });
+
   group('a first message that is not a DialRequest', () {
     late BasicHost server;
     late BasicHost client;

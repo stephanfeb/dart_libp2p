@@ -7,7 +7,7 @@ import '../../core/multiaddr.dart';
 import '../../core/network/connection_context.dart';
 import '../../core/network/transport_conn.dart';
 import '../../core/network/conn.dart';
-import '../../core/network/errors.dart' show PeerIdMismatchException;
+import '../../core/network/errors.dart' show GaterDisallowedConnectionException, PeerIdMismatchException;
 // core_peer_id.dart is usually aliased or PeerId is directly from core/peer_id.dart
 // For now, assuming PeerId and PeerId are available from this import.
 import '../../core/peer/peer_id.dart';
@@ -289,6 +289,17 @@ class BasicUpgrader implements Upgrader {
     }
   }
 
+  /// Asks the connection gater of [config], if any, whether to keep the newly
+  /// secured [securedConn]. On no, closes it and throws, as go-libp2p's
+  /// upgrader does.
+  Future<void> _interceptSecured(Config config, bool isInitiator, SecuredConnection securedConn) async {
+    final gater = config.connGater;
+    if (gater == null || gater.interceptSecured(isInitiator, securedConn.remotePeer, securedConn)) return;
+    await securedConn.close();
+    throw GaterDisallowedConnectionException(
+        peer: securedConn.remotePeer.toBase58(), check: 'interceptSecured');
+  }
+
   @override
   Future<Conn> upgradeOutbound({
     required TransportConn connection,
@@ -337,6 +348,7 @@ class BasicUpgrader implements Upgrader {
         throw PeerIdMismatchException(
             expected: remotePeerId.toBase58(), actual: securedConn.remotePeer.toBase58());
       }
+      await _interceptSecured(config, true, securedConn);
 
       final mssForMuxers = MultistreamMuxer();
       final muxerProtoIDs = config.muxers.map((m) => m.id).toList();
@@ -444,6 +456,7 @@ class BasicUpgrader implements Upgrader {
         orElse: () => throw Exception("Client proposed security protocol $chosenSecurityId not found/supported"),
       );
       final SecuredConnection securedConn = await securityModule.secureInbound(connection);
+      await _interceptSecured(config, false, securedConn);
 
       final mssForMuxers = MultistreamMuxer();
       final negotiationMuxStream = NegotiationStreamWrapper(securedConn, '/mux-negotiator-in');

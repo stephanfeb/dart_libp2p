@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:dart_libp2p/p2p/network/conn_gater.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
@@ -22,10 +20,6 @@ void main() {
       );
       mockPeerId = PeerId.fromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC');
       mockAddr = MultiAddr('/ip4/127.0.0.1/tcp/1234');
-    });
-
-    tearDown(() {
-      gater.close();
     });
 
     group('Peer blocking', () {
@@ -116,114 +110,63 @@ void main() {
       });
     });
 
-    group('Connection metrics', () {
-      test('records and updates connection metrics', () {
-        expect(gater.getConnectionMetrics(mockConn.id), isNull);
-        
-        gater.interceptAccept(mockConn);
-        final metrics = gater.getConnectionMetrics(mockConn.id);
-        expect(metrics, isNotNull);
-        expect(metrics?.peerId, equals(mockConn.remotePeer));
-        expect(metrics?.bytesIn, equals(0));
-        expect(metrics?.bytesOut, equals(0));
-        
-        // Update metrics
-        gater.updateConnectionMetrics(mockConn.id, bytesIn: 100, bytesOut: 200);
-        expect(metrics?.bytesIn, equals(100));
-        expect(metrics?.bytesOut, equals(200));
-        expect(metrics?.totalBytes, equals(300));
+    group('Address prefixes', () {
+      test('an address with only an IP blocks every port of that IP', () {
+        gater.blockAddr(MultiAddr('/ip4/127.0.0.1'));
+        expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.1/tcp/4001')), isFalse);
+        expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.1/udp/4001/udx')), isFalse);
+        expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.2/tcp/4001')), isTrue);
+      });
+
+      test('a full address blocks only that address', () {
+        gater.blockAddr(MultiAddr('/ip4/127.0.0.1/tcp/4001'));
+        expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.1/tcp/4001')), isFalse);
+        expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.1/tcp/4002')), isTrue);
+        // A dial address can carry the peer ID.
+        expect(
+            gater.interceptAddrDial(mockPeerId, MultiAddr('/ip4/127.0.0.1/tcp/4001/p2p/$mockPeerId')),
+            isFalse);
       });
     });
 
-    group('Connection timeouts', () {
-      test('sets up connection timeout', () async {
-        gater = BasicConnGater(connectionTimeout: Duration(milliseconds: 100));
-        gater.interceptAccept(mockConn);
-        
-        // Wait for timeout
-        await Future.delayed(Duration(milliseconds: 150));
-        
-        expect(gater.isConnBlocked(mockConn.id), isTrue);
+    group('interceptAccept', () {
+      test('rejects a remote address whose IP is blocked', () {
+        gater.blockAddr(MultiAddr('/ip4/127.0.0.1'));
+        expect(gater.interceptAccept(mockConn), isFalse);
       });
 
-      test('cleans up connection timeout', () {
-        gater.interceptAccept(mockConn);
+      test('rejects a remote address in a blocked subnet', () {
+        gater.blockSubnet('127.0.0.0/8');
+        expect(gater.interceptAccept(mockConn), isFalse);
+      });
 
-        // Connection should not be blocked after cleanup
-        expect(gater.isConnBlocked(mockConn.id), isFalse);
+      test('does not decide on the remote peer, which is not known yet', () {
+        gater.blockPeer(mockConn.remotePeer);
+        expect(gater.interceptAccept(mockConn), isTrue);
       });
     });
 
-    group('Resource limits', () {
-      test('respects maximum connections limit', () {
-        gater = BasicConnGater(maxConnections: 2);
-        
-        final conn1 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: PeerId.fromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC'),
-          id: 'conn1',
-        );
-        
-        final conn2 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: PeerId.fromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC'),
-          id: 'conn2',
-        );
-        
-        final conn3 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: PeerId.fromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC'),
-          id: 'conn3',
-        );
-        
-        expect(gater.interceptAccept(conn1), isTrue);
-        expect(gater.interceptAccept(conn2), isTrue);
-        expect(gater.interceptAccept(conn3), isFalse);
-      });
-
-      test('respects maximum connections per peer limit', () {
-        gater = BasicConnGater(maxConnectionsPerPeer: 2);
-        
-        final peerId = PeerId.fromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC');
-        
-        final conn1 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: peerId,
-          id: 'conn1',
-        );
-        
-        final conn2 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: peerId,
-          id: 'conn2',
-        );
-        
-        final conn3 = MockConnection(
-          localAddr: MultiAddr('/ip4/127.0.0.1/tcp/1234'),
-          remoteAddr: MultiAddr('/ip4/127.0.0.1/tcp/5678'),
-          remotePeer: peerId,
-          id: 'conn3',
-        );
-        
-        expect(gater.interceptAccept(conn1), isTrue);
-        expect(gater.interceptAccept(conn2), isTrue);
-        expect(gater.interceptAccept(conn3), isFalse);
+    group('Blocked peers after the handshake', () {
+      test('interceptSecured and interceptUpgraded reject a blocked peer', () {
+        gater.blockPeer(mockPeerId);
+        expect(gater.interceptSecured(false, mockPeerId, mockConn), isFalse);
+        final (allow, reason) = gater.interceptUpgraded(mockConn);
+        expect(allow, isFalse);
+        expect(reason?.message, equals('Peer is blocked'));
       });
     });
 
-    group('Cleanup', () {
-      test('cleans up resources on close', () {
-        gater.interceptAccept(mockConn);
-        expect(gater.getConnectionMetrics(mockConn.id), isNotNull);
-        
-        gater.close();
-        expect(gater.getConnectionMetrics(mockConn.id), isNull);
-      });
+    test('an IPv6 subnet matches a compressed address', () {
+      gater.blockSubnet('2001:db8::/32');
+      expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip6/2001:db8::1/tcp/4001')), isFalse);
+      expect(gater.interceptAddrDial(mockPeerId, MultiAddr('/ip6/2001:db9::1/tcp/4001')), isTrue);
+    });
+
+    test('the deprecated limits have no effect', () {
+      // ignore: deprecated_member_use_from_same_package
+      gater = BasicConnGater(maxConnections: 1, maxConnectionsPerPeer: 1);
+      expect(gater.interceptAccept(mockConn), isTrue);
+      expect(gater.interceptAccept(mockConn), isTrue);
     });
   });
 } 

@@ -111,10 +111,11 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
         throw Exception('Dial message read failed: $e');
       }
 
-      // Handle the response
+      // Handle the response. Await it: the finally below must not remove the
+      // dial-back completer while _processDialResponse still waits on it.
       if (response.hasDialResponse()) {
         // Process the dial response
-        return _processDialResponse(response.dialResponse, requests, completer);
+        return await _processDialResponse(response.dialResponse, requests, completer);
       } else if (response.hasDialDataRequest()) {
         // Handle dial data request
         try {
@@ -138,7 +139,7 @@ class AutoNATv2ClientImpl implements AutoNATv2Client {
         }
 
         // Process the dial response
-        return _processDialResponse(response.dialResponse, requests, completer);
+        return await _processDialResponse(response.dialResponse, requests, completer);
       } else {
         stream.reset();
         throw Exception('Invalid message type: ${response.whichMsg()}');

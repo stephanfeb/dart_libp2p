@@ -1,13 +1,17 @@
+import 'dart:io';
+
 import 'package:dart_libp2p/core/connmgr/conn_gater.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'dart:async';
 import 'package:logging/logging.dart';
 
-/// BasicConnGater is a simple implementation of the ConnGater interface that
-/// allows all connections by default but can be configured to block specific
-/// peers or addresses.
+/// BasicConnGater is a ConnGater that allows all connections except those to
+/// blocked peers, addresses or subnets, like go-libp2p's
+/// BasicConnectionGater. Give it to a host with `Libp2p.connectionGater`.
+///
+/// It keeps no state for each connection. Connection limits belong to the
+/// resource manager (`Libp2p.resourceLimiter`) and the connection manager.
 class BasicConnGater implements ConnGater {
   final Logger _logger = Logger('BasicConnGater');
 
@@ -23,36 +27,15 @@ class BasicConnGater implements ConnGater {
   /// Set of blocked subnets
   final Set<String> _blockedSubnets = {};
 
-  /// Map of connection timeouts
-  final Map<String, Timer> _connectionTimeouts = {};
-
-  /// Map of connection metrics
-  final Map<String, ConnectionMetrics> _connectionMetrics = {};
-
-  /// Map of active connections by peer ID
-  final Map<String, Set<String>> _peerConnections = {};
-
-  /// Set of active connections
-  final Set<String> _activeConnections = {};
-
-  /// Maximum number of connections allowed
-  final int _maxConnections;
-
-  /// Maximum number of connections per peer
-  final int _maxConnectionsPerPeer;
-
-  /// Connection timeout duration
-  final Duration _connectionTimeout;
-
-  /// Creates a new BasicConnGater with the specified limits
+  /// Creates a new BasicConnGater with no blocks.
+  ///
+  /// The parameters have no effect: nothing told this gater when a
+  /// connection closed, so its limits counted connections that were gone.
   BasicConnGater({
-    int maxConnections = 1000,
-    int maxConnectionsPerPeer = 10,
-    Duration connectionTimeout = const Duration(minutes: 5),
-  }) : 
-    _maxConnections = maxConnections,
-    _maxConnectionsPerPeer = maxConnectionsPerPeer,
-    _connectionTimeout = connectionTimeout;
+    @Deprecated('No effect. Use the resource manager limits. Removed in 5.0.') int maxConnections = 1000,
+    @Deprecated('No effect. Use the resource manager limits. Removed in 5.0.') int maxConnectionsPerPeer = 10,
+    @Deprecated('No effect. Removed in 5.0.') Duration connectionTimeout = const Duration(minutes: 5),
+  });
 
   /// BlockPeer blocks a peer by its ID
   void blockPeer(PeerId peerId) {
@@ -66,7 +49,9 @@ class BasicConnGater implements ConnGater {
     _logger.fine('Unblocked peer: $peerId');
   }
 
-  /// BlockAddr blocks a specific multiaddress
+  /// BlockAddr blocks [addr] and every address that starts with it. Thus
+  /// `/ip4/1.2.3.4` blocks all ports of that IP, as go-libp2p's BlockAddr
+  /// does, and `/ip4/1.2.3.4/tcp/4001` blocks only that address.
   void blockAddr(MultiAddr addr) {
     _blockedAddrs.add(addr);
     _logger.fine('Blocked address: $addr');
@@ -107,9 +92,10 @@ class BasicConnGater implements ConnGater {
     return _blockedPeers.contains(peerId);
   }
 
-  /// IsAddrBlocked returns whether an address is blocked
+  /// IsAddrBlocked returns whether [addr] is a blocked address or starts
+  /// with one (see [blockAddr]).
   bool isAddrBlocked(MultiAddr addr) {
-    return _blockedAddrs.contains(addr);
+    return _blockedAddrs.any((blocked) => _startsWith(addr, blocked));
   }
 
   /// IsConnBlocked returns whether a connection is blocked
@@ -132,6 +118,17 @@ class BasicConnGater implements ConnGater {
     return false;
   }
 
+  /// Whether the components of [addr] begin with all components of [prefix].
+  static bool _startsWith(MultiAddr addr, MultiAddr prefix) {
+    final a = addr.components;
+    final p = prefix.components;
+    if (p.isEmpty || p.length > a.length) return false;
+    for (var i = 0; i < p.length; i++) {
+      if (a[i].$1.code != p[i].$1.code || a[i].$2 != p[i].$2) return false;
+    }
+    return true;
+  }
+
   /// Helper method to check if an address is in a subnet
   bool _isAddrInSubnet(MultiAddr addr, String subnet) {
     try {
@@ -147,8 +144,9 @@ class BasicConnGater implements ConnGater {
       final prefixLen = int.parse(parts[1]);
 
       // Convert IP addresses to binary form
-      final ipBytes = _ipToBytes(ipAddr);
-      final subnetBytes = _ipToBytes(subnetAddr);
+      final ipBytes = InternetAddress.tryParse(ipAddr)?.rawAddress;
+      final subnetBytes = InternetAddress.tryParse(subnetAddr)?.rawAddress;
+      if (ipBytes == null || subnetBytes == null) return false;
 
       if (ipBytes.length != subnetBytes.length) return false;
 
@@ -162,25 +160,6 @@ class BasicConnGater implements ConnGater {
       return true;
     } catch (e) {
       return false;
-    }
-  }
-
-  /// Helper method to convert IP address to bytes
-  List<int> _ipToBytes(String ip) {
-    if (ip.contains(':')) {
-      // IPv6
-      final parts = ip.split(':');
-      final bytes = <int>[];
-      for (final part in parts) {
-        if (part.isEmpty) continue;
-        final value = int.parse(part, radix: 16);
-        bytes.add((value >> 8) & 0xFF);
-        bytes.add(value & 0xFF);
-      }
-      return bytes;
-    } else {
-      // IPv4
-      return ip.split('.').map((part) => int.parse(part)).toList();
     }
   }
 
@@ -199,56 +178,19 @@ class BasicConnGater implements ConnGater {
     return mask;
   }
 
-  /// Records connection metrics
-  void _recordConnectionMetrics(String connId, PeerId peerId) {
-    _connectionMetrics[connId] = ConnectionMetrics(
-      peerId: peerId,
-      startTime: DateTime.now(),
-    );
+  /// Whether [addr] is blocked as an address or by a subnet.
+  bool _isAddrDisallowed(MultiAddr addr) {
+    return isAddrBlocked(addr) || isAddrInBlockedSubnet(addr);
   }
 
-  /// Updates connection metrics
-  void updateConnectionMetrics(String connId, {int? bytesIn, int? bytesOut}) {
-    final metrics = _connectionMetrics[connId];
-    if (metrics != null) {
-      if (bytesIn != null) metrics.bytesIn += bytesIn;
-      if (bytesOut != null) metrics.bytesOut += bytesOut;
-    }
-  }
+  /// No effect: the gater keeps no connection metrics.
+  @Deprecated('No effect. Removed in 5.0.')
+  void updateConnectionMetrics(String connId, {int? bytesIn, int? bytesOut}) {}
 
-  /// Gets connection metrics
-  ConnectionMetrics? getConnectionMetrics(String connId) {
-    return _connectionMetrics[connId];
-  }
-
-  /// Sets up connection timeout
-  void _setupConnectionTimeout(String connId) {
-    _connectionTimeouts[connId] = Timer(_connectionTimeout, () {
-      _logger.warning('Connection timeout: $connId');
-      blockConn(connId);
-    });
-  }
-
-  /// Cleans up connection timeout
-  void _cleanupConnectionTimeout(String connId) {
-    _connectionTimeouts[connId]?.cancel();
-    _connectionTimeouts.remove(connId);
-  }
-
-  /// Cleans up connection metrics
-  void _cleanupConnectionMetrics(String connId) {
-    _connectionMetrics.remove(connId);
-  }
-
-  /// Cleans up connection tracking
-  void _cleanupConnectionTracking(String connId, PeerId peerId) {
-    _activeConnections.remove(connId);
-    final peerIdStr = peerId.toString();
-    _peerConnections[peerIdStr]?.remove(connId);
-    if (_peerConnections[peerIdStr]?.isEmpty ?? false) {
-      _peerConnections.remove(peerIdStr);
-    }
-  }
+  /// Returns null: the gater keeps no connection metrics.
+  @Deprecated('Always null. Removed in 5.0.')
+  // ignore: deprecated_member_use_from_same_package
+  ConnectionMetrics? getConnectionMetrics(String connId) => null;
 
   @override
   bool interceptPeerDial(PeerId peerId) {
@@ -284,30 +226,16 @@ class BasicConnGater implements ConnGater {
 
   @override
   bool interceptAccept(Conn conn) {
+    // The remote peer is not known before the security handshake: decide on
+    // the remote address, as go-libp2p does.
+    if (_isAddrDisallowed(conn.remoteMultiaddr)) {
+      _logger.fine('Blocked connection accept from: ${conn.remoteMultiaddr}');
+      return false;
+    }
     if (isConnBlocked(conn.id)) {
       _logger.fine('Blocked connection accept: ${conn.id}');
       return false;
     }
-
-    // Check total connection limit
-    if (_activeConnections.length >= _maxConnections) {
-      _logger.fine('Connection limit reached: ${_activeConnections.length} connections');
-      return false;
-    }
-
-    // Check per-peer connection limit
-    final peerIdStr = conn.remotePeer.toString();
-    final peerConns = _peerConnections[peerIdStr] ?? {};
-    if (peerConns.length >= _maxConnectionsPerPeer) {
-      _logger.fine('Per-peer connection limit reached for peer $peerIdStr: ${peerConns.length} connections');
-      return false;
-    }
-
-    // Track the connection
-    _activeConnections.add(conn.id);
-    _peerConnections[peerIdStr] = peerConns..add(conn.id);
-    _setupConnectionTimeout(conn.id);
-    _recordConnectionMetrics(conn.id, conn.remotePeer);
     return true;
   }
 
@@ -349,19 +277,13 @@ class BasicConnGater implements ConnGater {
     return (true, null);
   }
 
-  /// Closes the connection gater and cleans up resources
-  void close() {
-    for (final timer in _connectionTimeouts.values) {
-      timer.cancel();
-    }
-    _connectionTimeouts.clear();
-    _connectionMetrics.clear();
-    _activeConnections.clear();
-    _peerConnections.clear();
-  }
+  /// No effect: the gater holds no resources.
+  @Deprecated('No effect. Removed in 5.0.')
+  void close() {}
 }
 
-/// Connection metrics
+/// Connection metrics. BasicConnGater no longer records them.
+@Deprecated('BasicConnGater keeps no connection metrics. Removed in 5.0.')
 class ConnectionMetrics {
   final PeerId peerId;
   final DateTime startTime;
@@ -378,4 +300,4 @@ class ConnectionMetrics {
 
   /// Gets the total bytes transferred
   int get totalBytes => bytesIn + bytesOut;
-} 
+}

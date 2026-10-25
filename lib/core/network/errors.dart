@@ -75,3 +75,19 @@ class PeerIdMismatchException implements Exception {
   @override
   String toString() => 'PeerIdMismatchException: dialed $expected, but the remote peer is $actual';
 }
+
+/// Exception thrown when the connection gater (`Config.connGater`) rejects a
+/// dial or a connection (go-libp2p's ErrGaterDisallowedConnection). [check]
+/// names the gater method that said no. A connection, if one was made, is
+/// closed.
+class GaterDisallowedConnectionException implements Exception {
+  /// The remote peer, if known.
+  final String? peer;
+  final String check;
+
+  const GaterDisallowedConnectionException({this.peer, required this.check});
+
+  @override
+  String toString() =>
+      'GaterDisallowedConnectionException: gater disallows connection to peer ${peer ?? '(unknown)'} ($check)';
+}
