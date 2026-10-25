@@ -39,7 +39,7 @@ Streams of such connections can implement `PushbackStream` (`lib/core/network/mu
 
 ## Available Transports
 
-This library provides two transport implementations; the libp2p WebRTC transport (`/p2p-circuit/webrtc`) is the separate [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc) package:
+This library provides two transport implementations. Two more are separate packages: the libp2p WebRTC transport (`/p2p-circuit/webrtc`) is [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc), and the Bluetooth LE transport (`/ble`) is [dart_libp2p_ble](https://github.com/stephanfeb/dart-libp2p-ble):
 
 ### TCP Transport
 
@@ -76,5 +76,26 @@ final config = [
   // ... other options
 ];
 ```
+
+### Bluetooth LE Transport (separate package)
+
+-   **Class**: `BleTransport`, in [dart_libp2p_ble](https://github.com/stephanfeb/dart-libp2p-ble)
+-   **Protocols**: `/ble/<token>`
+-   **Description**: Connects phones and Macs near each other without a network (Android, iOS, macOS). Each connection is one GATT link that the upgrader secures with Noise and multiplexes with yamux, as on TCP. `BleDiscovery` connects the nodes in range, and gossipsub relays across the partial mesh.
+
+**Usage:**
+
+```dart
+import 'package:dart_libp2p_ble/dart_libp2p_ble.dart';
+
+final ble = BleTransport(radio: BluetoothLowEnergyRadio(), localPeer: peerId);
+final config = [
+  Libp2p.transport(ble),
+  Libp2p.listenAddrs([ble.listenAddr]), // /ble/<token>
+  // ... other options
+];
+```
+
+The transport uses the `/ble` multiaddr protocol (code `0x300b1e`, private-use range), which this library registers since 4.10.0. Another package can register its own protocol with `Protocols.register`.
 
 You can configure your host to use multiple transports simultaneously. Libp2p will automatically choose the best available transport when connecting to a peer based on the addresses stored in the `Peerstore`.

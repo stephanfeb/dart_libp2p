@@ -128,6 +128,11 @@ Dart Libp2p follows a layered architecture where each component provides service
 - **Use Case**: Direct connections between Dart/Flutter apps and js-libp2p browsers, signaled through a circuit relay
 - **Package**: [dart_libp2p_webrtc](https://github.com/stephanfeb/dart-libp2p-webrtc) (native libdatachannel via `dart:ffi`; Android, iOS, Linux, macOS)
 
+### Bluetooth LE Transport (separate package)
+- **Protocols**: `/ble/<token>`
+- **Use Case**: Phones and Macs near each other connect without a network; nearby discovery and a gossipsub mesh over GATT links
+- **Package**: [dart_libp2p_ble](https://github.com/stephanfeb/dart-libp2p-ble) (Flutter; Android, iOS, macOS)
+
 > **Note**: This implementation does not support QUIC. Instead, we've opted for a custom `dart-udx` implementation that provides similar benefits for peer-to-peer networking.
 
 ## 🔐 Security
