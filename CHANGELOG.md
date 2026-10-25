@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Transports in other packages can add multiaddr protocols.** `Protocols.register(Protocol)` adds a protocol with no value (size 0) or a variable-length string value (size -1), so that `MultiAddr` can parse, print and encode it. Registering an equal protocol again does nothing; a different protocol with the same name or code is rejected with `ArgumentError`.
+- **`/ble` multiaddr protocol** (code 0x300b1e, multicodec private-use range) for the Bluetooth LE transport in dart_libp2p_ble: `/ble/<token>/p2p/<peer id>`. It is built in, so that a peer without the BLE transport can still read a signed peer record that lists a `/ble` address.
+
+### Fixed
+
+- The upgrader puts bytes that multistream-select read past its negotiation back into any connection that implements `PushbackStream`, not only TCP and UDX connections. A transport in another package (BLE) no longer loses the first bytes of the Noise handshake when they arrive in the same chunk as the negotiation.
+- `Protocols.byCode` returns `null` for an unknown code, as its type says, instead of throwing `ArgumentError`. `MultiAddr.fromBytes` now throws its intended `FormatException('Unknown protocol code: ...')`.
+
 ## [4.9.1] - 2026-10-23
 
 ### Fixed

@@ -176,7 +176,19 @@ class Protocols {
     size: 0,
   );
 
-  static const _protocols = {
+  // Bluetooth LE: /ble/<token>/p2p/<peer id>. The token names a nearby
+  // device that the BLE transport (package dart_libp2p_ble) has discovered;
+  // it has meaning only on the device that discovered it. The code is in the
+  // multicodec private-use range (0x300000-0x3fffff). It is built in, so
+  // that a peer without the BLE transport can still read a signed peer
+  // record that lists a /ble address.
+  static const ble = Protocol(
+    name: 'ble',
+    code: 0x300b1e,
+    size: -1,
+  );
+
+  static final Map<String, Protocol> _protocols = {
     'ip4': ip4,
     'tcp': tcp,
     'udp': udp,
@@ -198,17 +210,49 @@ class Protocols {
     'webrtc': webrtc,
     'webrtc-direct': webrtcDirect,
     'udx': udx,
+    'ble': ble,
   };
+
+  /// Adds [protocol] to the registry, so that [MultiAddr] can parse, print
+  /// and encode addresses that use it.
+  ///
+  /// A transport in another package calls this for a protocol that
+  /// dart_libp2p does not know. The protocol must have no value (size 0) or a
+  /// variable-length string value (size -1); a fixed-size value needs a codec
+  /// that only dart_libp2p can supply.
+  ///
+  /// Registering an equal protocol again does nothing. Throws [ArgumentError]
+  /// if a different protocol already has the same name or code, or if the
+  /// protocol has a fixed-size value.
+  static void register(Protocol protocol) {
+    if (protocol.size > 0) {
+      throw ArgumentError('Cannot register ${protocol.name}: fixed-size values are not supported');
+    }
+    final byNameMatch = _protocols[protocol.name];
+    if (byNameMatch != null) {
+      if (byNameMatch.code == protocol.code &&
+          byNameMatch.size == protocol.size &&
+          byNameMatch.path == protocol.path) {
+        return;
+      }
+      throw ArgumentError('Protocol name ${protocol.name} is already registered with code ${byNameMatch.code}');
+    }
+    final byCodeMatch = byCode(protocol.code);
+    if (byCodeMatch != null) {
+      throw ArgumentError('Protocol code ${protocol.code} is already registered as ${byCodeMatch.name}');
+    }
+    _protocols[protocol.name] = protocol;
+  }
 
   /// Returns the protocol for the given name
   static Protocol? byName(String name) => _protocols[name];
 
-  /// Returns the protocol for the given code
+  /// Returns the protocol for the given code, or null if no protocol has it
   static Protocol? byCode(int code) {
-    return _protocols.values.firstWhere(
-      (p) => p.code == code,
-      orElse: () => throw ArgumentError('Unknown protocol code: $code'),
-    );
+    for (final p in _protocols.values) {
+      if (p.code == code) return p;
+    }
+    return null;
   }
 
   /// Returns true if the protocol is supported

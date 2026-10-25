@@ -282,6 +282,9 @@ class BasicUpgrader implements Upgrader {
       connection.pushBack(leftover);
     } else if (connection is TCPConnection) {
       connection.pushBack(leftover);
+    } else if (connection is core_mux.PushbackStream) {
+      // Transports in other packages (BLE) put the bytes back themselves.
+      connection.pushData(leftover);
     } else {
       _log.warning('[BasicUpgrader] Cannot push back ${leftover.length} leftover bytes to connection type ${connection.runtimeType}');
     }
