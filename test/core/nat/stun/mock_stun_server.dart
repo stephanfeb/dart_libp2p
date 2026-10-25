@@ -119,7 +119,11 @@ class MockStunServer {
       return;
     }
 
-    // Create a standard response
+    _sendStandardResponse(request, datagram);
+  }
+
+  /// Answers [request] with XOR-MAPPED-ADDRESS, and OTHER-ADDRESS if set.
+  void _sendStandardResponse(StunMessage request, Datagram datagram) {
     final attributes = <int, Uint8List>{};
 
     // Add XOR-MAPPED-ADDRESS attribute
@@ -184,8 +188,9 @@ class MockStunServer {
     // Look up the response configuration for these flags
     final responseConfig = _changeRequestResponses[flags];
     if (responseConfig == null) {
-      // No specific configuration, use default behavior
-      _handleRequest(datagram);
+      // No specific configuration: answer as to a plain request. (Passing
+      // the datagram to _handleRequest again would come back here.)
+      _sendStandardResponse(request, datagram);
       return;
     }
 
