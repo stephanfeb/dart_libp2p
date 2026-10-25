@@ -435,7 +435,19 @@ class TCPConnection implements ScopedTransportConn {
         final dataHex = hex.encode(data); // Encode once for logging
         _log.finer('TCPConnection.write (id: $id): Writing ${data.length} bytes: $dataHex');
         _socket.add(data);
-        await _socket.flush();
+        final writeTimeout = _currentWriteTimeout;
+        if (writeTimeout != null && writeTimeout > Duration.zero) {
+          // A peer that stops reading fills the send buffer and flush() never
+          // completes. Destroy the socket on timeout: close() alone waits for
+          // the same pending data.
+          await _socket.flush().timeout(writeTimeout, onTimeout: () {
+            _log.warning('TCPConnection($id) - Write TIMEOUT after $writeTimeout.');
+            _socket.destroy();
+            throw TimeoutException('Raw write timed out after $writeTimeout', writeTimeout);
+          });
+        } else {
+          await _socket.flush();
+        }
         _log.finest('TCPConnection.write (id: $id): Flushed ${data.length} bytes successfully. Data preview (hex): ${dataHex.substring(0, dataHex.length > 40 ? 40 : dataHex.length)}...');
       } catch (e) {
         _log.finer('TCPConnection($id) - Error during socket write/flush: $e. Closing connection.');
