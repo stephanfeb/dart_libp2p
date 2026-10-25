@@ -31,9 +31,6 @@ class MockPeerId extends PeerId {
   Uint8List toBytes() => Uint8List.fromList(_idString.codeUnits); // Simple mock
 
   @override
-  bool equals(other) => other is MockPeerId && other._idString == _idString;
-
-  @override
   int get hashCode => _idString.hashCode;
 
   // These methods from the original mock might need adjustment if PeerId expects specific formats
@@ -222,7 +219,6 @@ class MockConnScope implements ConnScope {
   // Methods for P2PStream interaction, if ConnScope is used in that context by YamuxStream.
   // These are not part of the defined ConnScope interface.
   Future<void> addStream(P2PStream stream) async {} // Not in ConnScope interface
-  @override
   void removeStream(P2PStream stream) {} // Not in ConnScope interface
 }
 

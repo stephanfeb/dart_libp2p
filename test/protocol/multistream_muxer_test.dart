@@ -295,7 +295,6 @@ class MockP2PStream implements P2PStream<Uint8List> {
   // For P2PStream, direct `write` is used.
   // Sink<Uint8List> get sink => _StreamSinkWrapper(_outgoingDataController, _localCloseCompleter);
   
-  @override
   Future<void> get done async {
     await Future.wait([
       _localCloseCompleter.future.catchError((_){ /* ignore errors for done check */ }), 

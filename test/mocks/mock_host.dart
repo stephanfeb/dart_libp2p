@@ -30,19 +30,16 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   Connectedness connectedness(PeerId peerId) {
     // TODO: implement connectedness
     throw UnimplementedError();
   }
 
-  @override
   List<Conn> get conns {
     // TODO: implement conns
     throw UnimplementedError();
   }
 
-  @override
   List<Conn> connsToPeer(PeerId peerId) {
     // TODO: implement connsToPeer
     throw UnimplementedError();
@@ -54,13 +51,11 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   Future<void> listen(List<MultiAddr> addrs) {
     // TODO: implement listen
     throw UnimplementedError();
   }
 
-  @override
   Future<List<MultiAddr>> get interfaceListenAddresses {
     // TODO: implement interfaceListenAddresses
     throw UnimplementedError();
@@ -84,12 +79,10 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   void notify(Notifiee notifiee) {
     // TODO: implement notify
   }
 
-  @override
   List<PeerId> get peers {
     // TODO: implement peers
     throw UnimplementedError();
@@ -101,19 +94,16 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   Future<void> removeProtocol(String protocolId) {
     // TODO: implement removeProtocol
     throw UnimplementedError();
   }
 
-  @override
   ResourceManager get resourceManager {
     // TODO: implement resourceManager
     throw UnimplementedError();
   }
 
-  @override
   Routing get routing {
     // TODO: implement routing
     throw UnimplementedError();
@@ -130,24 +120,20 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   void stopNotify(Notifiee notifiee) {
     // TODO: implement stopNotify
   }
 
-  @override
   bool canDial(PeerId peerId, MultiAddr addr) {
     // TODO: implement canDial
     throw UnimplementedError();
   }
 
-  @override
   Future<void> closePeer(PeerId peerId) {
     // TODO: implement closePeer
     throw UnimplementedError();
   }
 
-  @override
   Future<List<MultiAddr>> getListenAddrs() {
     // TODO: implement getListenAddrs
     throw UnimplementedError();
@@ -177,7 +163,6 @@ class MockHost implements Host {
     throw UnimplementedError();
   }
 
-  @override
   void removeStreamHandlerMatch(ProtocolID pid) {
     // TODO: implement removeStreamHandlerMatch
     throw UnimplementedError();

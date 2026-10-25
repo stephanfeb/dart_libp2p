@@ -178,7 +178,6 @@ class P2PStreamAdapter implements P2PStream<Uint8List> {
   @override
   P2PStream<Uint8List> get incoming => this; // The adapter itself can be the stream of incoming data
 
-  @override
   Stream<Uint8List> get stream => _incomingDataController.stream;
 
 

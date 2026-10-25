@@ -66,7 +66,6 @@ class NoiseMockConnection extends BaseMockConnection {
     print('$id connection closed');
   }
 
-  @override
   Future<Uint8List> read([int? length]) async {
     validateNotClosed();
     print('$id reading' + (length != null ? ' $length bytes' : ''));
@@ -122,7 +121,6 @@ class NoiseMockConnection extends BaseMockConnection {
     }
   }
 
-  @override
   Future<void> write(Uint8List data) async {
     validateNotClosed();
     print('$id writing ${data.length} bytes');

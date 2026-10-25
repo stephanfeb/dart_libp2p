@@ -156,7 +156,6 @@ class MockConnection implements Conn {
   @override
   Future<List<P2PStream>> get streams async => [];
 
-  @override
   Future<Uint8List> read([int? length]) async {
     if (_closed) throw StateError('Connection is closed');
     print('$_id reading' + (length != null ? ' $length bytes' : ''));
@@ -208,7 +207,6 @@ class MockConnection implements Conn {
     }
   }
 
-  @override
   Future<void> write(Uint8List data) async {
     if (_closed) throw StateError('Connection is closed');
     print('$_id writing ${data.length} bytes');
@@ -218,13 +216,10 @@ class MockConnection implements Conn {
     print('$_id wrote ${data.length} bytes to outgoing stream');
   }
 
-  @override
   Socket get socket => throw UnimplementedError('Socket is not implemented in IsolatedMockConnection');
 
-  @override
   void setReadTimeout(Duration timeout) {}
 
-  @override
   void setWriteTimeout(Duration timeout) {}
 
   /// For testing: get current buffer size

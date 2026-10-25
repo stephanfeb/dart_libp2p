@@ -70,10 +70,8 @@ class NoiseTransportAdapter implements TransportConn {
   MultiAddr get remoteMultiaddr => _conn.remoteMultiaddr;
 
   // Deprecated methods
-  @override
   MultiAddr get localAddr => _conn.localAddr;
 
-  @override
   MultiAddr get remoteAddr => _conn.remoteAddr;
 
   // TransportConn specific methods
@@ -153,10 +151,8 @@ class TrackedTransportAdapter implements TransportConn {
   MultiAddr get remoteMultiaddr => _conn._inner.remoteMultiaddr;
 
   // Deprecated methods
-  @override
   MultiAddr get localAddr => _conn.localAddr;
 
-  @override
   MultiAddr get remoteAddr => _conn.remoteAddr;
 
   // TransportConn specific methods
@@ -317,10 +313,8 @@ class MockConnection implements TransportConn {
   @override
   bool get isClosed => _closed;
 
-  @override
   MultiAddr get localAddr => MultiAddr('/ip4/127.0.0.1/tcp/1234');
 
-  @override
   MultiAddr get remoteAddr => MultiAddr('/ip4/127.0.0.1/tcp/5678');
 
   @override
@@ -457,10 +451,8 @@ class _MonitoredConnection implements TransportConn {
   bool get isClosed => _inner.isClosed;
 
   // Deprecated methods
-  @override
   MultiAddr get localAddr => _inner.localMultiaddr;
 
-  @override
   MultiAddr get remoteAddr => _inner.remoteMultiaddr;
 
   @override

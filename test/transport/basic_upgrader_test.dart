@@ -59,7 +59,6 @@ class MockP2pMultiplexer implements p2p_mux.Multiplexer {
 
   @override
   String get protocolId => '/mock-muxer/1.0.0';
-  @override
   Future<P2PStream> openStream(Context context) async => throw UnimplementedError(); // Changed from newStream()
   @override
   Future<P2PStream> acceptStream() async => throw UnimplementedError();

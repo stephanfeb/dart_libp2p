@@ -234,7 +234,6 @@ class MockP2PStream implements P2PStream<Uint8List> {
   StreamManagementScope scope() => NullScope();
   @override
   P2PStream<Uint8List> get incoming => this;
-  @override
   Future<void> get done async {
     await Future.wait([
       _localCloseCompleter.future.catchError((_){}), 
@@ -314,10 +313,8 @@ class P2PStreamToTransportConnAdapter implements TransportConn {
   MultiAddr get remoteMultiaddr => _remoteMultiaddr;
   
   // Deprecated Conn methods
-  @override
   MultiAddr get localAddr => localMultiaddr;
 
-  @override
   MultiAddr get remoteAddr => remoteMultiaddr;
 
   @override

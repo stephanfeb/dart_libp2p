@@ -1036,7 +1036,6 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     return _isClosed;
   }
 
-  @override
   Future<void> get onClose => _closedCompleter.future;
 
   @override
@@ -1082,7 +1081,6 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     return initialP2PStream.write(data);
   }
 
-  @override
   Transport get transport => _transport;
 
   void notifyActivity() {

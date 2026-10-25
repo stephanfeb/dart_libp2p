@@ -24,7 +24,6 @@ class TransportMockConnection extends BaseMockConnection {
     markClosed();
   }
 
-  @override
   Future<Uint8List> read([int? length]) async {
     validateNotClosed();
     
@@ -39,7 +38,6 @@ class TransportMockConnection extends BaseMockConnection {
     return _nextReadResult!;
   }
 
-  @override
   Future<void> write(Uint8List data) async {
     validateNotClosed();
     recordWrite(data);

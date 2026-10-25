@@ -35,13 +35,10 @@ abstract class BaseMockConnection implements Conn {
   @override
   MultiAddr get remoteMultiaddr => MultiAddr('/ip4/127.0.0.1/tcp/5678');
 
-  @override
   Socket get socket => throw UnimplementedError();
 
-  @override
   void setReadTimeout(Duration timeout) {}
 
-  @override
   void setWriteTimeout(Duration timeout) {}
 
   @override

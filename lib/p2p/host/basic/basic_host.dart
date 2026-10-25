@@ -1559,7 +1559,6 @@ class BasicHost implements Host {
     _stunNatTypeTimer = Timer.periodic(const Duration(minutes: 10), (_) => run());
   }
 
-  @override
   /// Emits [EvtPeerConnectednessChanged] when [peer]'s connectedness, as the
   /// network now has it, differs from what was last emitted. The swarm
   /// removes a closed connection before it notifies, so the last one closing
@@ -1580,6 +1579,7 @@ class BasicHost implements Host {
         .catchError((Object e) => _log.warning('[BasicHost] Connectedness of $peer not emitted: $e')));
   }
 
+  @override
   Future<void> close() async {
     if (_closed) return;
 

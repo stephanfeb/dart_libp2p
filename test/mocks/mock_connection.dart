@@ -18,10 +18,8 @@ class MockConnection implements Conn {
   @override
   final String id;
   
-  @override
   final MultiAddr localAddr;
   
-  @override
   final MultiAddr remoteAddr;
   
   @override
@@ -94,30 +92,24 @@ class MockConnection implements Conn {
   @override
   ConnScope get scope => _scope;
 
-  @override
   Future<void> reset() async {
     await close();
   }
 
-  @override
   Future<Uint8List> read([int? length]) async {
     // In a real implementation, we would read from the socket
     // For testing, we'll just return an empty buffer
     return Uint8List(0);
   }
 
-  @override
   void setReadTimeout(Duration timeout) {}
 
-  @override
   void setWriteTimeout(Duration timeout) {}
 
-  @override
   Socket get socket {
     throw UnimplementedError('Socket is not implemented in MockConnection');
   }
 
-  @override
   Future<void> write(Uint8List data) async {
     // In a real implementation, we would write to the socket
     // For testing, we'll just do nothing

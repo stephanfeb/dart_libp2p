@@ -587,10 +587,8 @@ class SecuredConnection implements TransportConn {
   MultiAddr get remoteMultiaddr => _connection.remoteMultiaddr;
 
   // Deprecated methods that should be replaced with localMultiaddr/remoteMultiaddr
-  @override
   MultiAddr get localAddr => localMultiaddr;
 
-  @override
   MultiAddr get remoteAddr => remoteMultiaddr;
 
   @override
