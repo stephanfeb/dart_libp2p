@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dart_libp2p/p2p/nat/network_interface_monitor.dart';
 import 'package:test/test.dart';
 
@@ -9,7 +10,7 @@ class MockNetworkInterface implements NetworkInterface {
   final String name;
 
   @override
-  final List<InternetAddress> addresses;
+  final List<InterfaceAddress> addresses;
 
   @override
   final int index;
@@ -19,6 +20,50 @@ class MockNetworkInterface implements NetworkInterface {
     required this.addresses,
     required this.index,
   });
+}
+
+/// A test [InterfaceAddress].
+///
+/// `NetworkInterface.addresses` returns `List<InterfaceAddress>` (Dart 3.13
+/// changed the element type), and `InterfaceAddress` is an abstract interface
+/// without a public constructor, so the mock provides its own.
+class MockInterfaceAddress implements InterfaceAddress {
+  MockInterfaceAddress(InternetAddress address) : _address = address;
+
+  final InternetAddress _address;
+
+  @override
+  int get prefixLength => 24;
+
+  @override
+  InternetAddress? get broadcast => null;
+
+  @override
+  InternetAddressType get type => _address.type;
+
+  @override
+  String get address => _address.address;
+
+  @override
+  String get host => _address.host;
+
+  @override
+  Uint8List get rawAddress => _address.rawAddress;
+
+  @override
+  bool get isLoopback => _address.isLoopback;
+
+  @override
+  bool get isLinkLocal => _address.isLinkLocal;
+
+  @override
+  bool get isMulticast => _address.isMulticast;
+
+  @override
+  Future<InternetAddress> reverse() => _address.reverse();
+
+  @override
+  String toString() => _address.toString();
 }
 
 void main() {
@@ -31,7 +76,7 @@ void main() {
       mockInterfaces = [
         MockNetworkInterface(
           name: 'eth0',
-          addresses: [InternetAddress('192.168.1.1')],
+          addresses: [MockInterfaceAddress(InternetAddress('192.168.1.1'))],
           index: 1,
         ),
       ];
@@ -55,7 +100,7 @@ void main() {
       mockInterfaces = [
         MockNetworkInterface(
           name: 'eth0',
-          addresses: [InternetAddress('192.168.1.2')], // Changed address
+          addresses: [MockInterfaceAddress(InternetAddress('192.168.1.2'))], // Changed address
           index: 1,
         ),
       ];
@@ -81,7 +126,7 @@ void main() {
       mockInterfaces = [
         MockNetworkInterface(
           name: 'eth0',
-          addresses: [InternetAddress('192.168.1.2')], // Changed address
+          addresses: [MockInterfaceAddress(InternetAddress('192.168.1.2'))], // Changed address
           index: 1,
         ),
       ];
@@ -120,12 +165,12 @@ void main() {
       mockInterfaces = [
         MockNetworkInterface(
           name: 'eth0',
-          addresses: [InternetAddress('192.168.1.1')],
+          addresses: [MockInterfaceAddress(InternetAddress('192.168.1.1'))],
           index: 1,
         ),
         MockNetworkInterface(
           name: 'wlan0',
-          addresses: [InternetAddress('10.0.0.1')],
+          addresses: [MockInterfaceAddress(InternetAddress('10.0.0.1'))],
           index: 2,
         ),
       ];

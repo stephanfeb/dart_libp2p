@@ -407,12 +407,29 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
       }
 
     } catch (e, st) {
-      _log.severe('$_logPrefix Direct write: Error during write of ${data.length} bytes: $e\n$st');
+      // Writing to a stream the remote already closed is an expected
+      // condition — the peer went away mid-write — and must not be reported
+      // as a severe failure.
+      if (_isClosedStreamError(e)) {
+        _log.fine('$_logPrefix Direct write: stream closed while writing ${data.length} bytes: $e');
+      } else {
+        _log.severe('$_logPrefix Direct write: Error during write of ${data.length} bytes: $e\n$st');
+      }
       if (_state == YamuxStreamState.open || _state == YamuxStreamState.closing) {
         await reset();
       }
       rethrow;
     }
+  }
+
+  /// Whether [error] means the stream (or its transport) is already closed.
+  bool _isClosedStreamError(Object error) {
+    if (_state != YamuxStreamState.open && _state != YamuxStreamState.closing) {
+      return true;
+    }
+    final message = error.toString();
+    return message.contains('Stream is closed') ||
+        message.contains('Stream is not open');
   }
 
   /// Process the write queue with adaptive pacing
