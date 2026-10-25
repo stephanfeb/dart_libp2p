@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`NetworkInterfaceMonitor` takes an `addressesProvider`** that gives the addresses of each interface as strings, keyed by interface name. It does not depend on `NetworkInterface`, whose `addresses` became `List<InterfaceAddress>` in Dart 3.13, so code and tests that use it compile on every supported SDK. `NetworkInterfaceMonitor.addressesOf` converts a `NetworkInterface` list. `interfaceProvider` works as before. Thanks to @jxoesneon (#30).
+
 ## [4.10.0] - 2026-10-25
 
 ### Added

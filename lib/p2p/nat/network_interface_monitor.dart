@@ -7,16 +7,20 @@ typedef NetworkInterfaceChangeCallback = void Function();
 /// A function that returns a list of network interfaces
 typedef NetworkInterfaceProvider = Future<List<NetworkInterface>> Function();
 
+/// A function that returns the addresses of each network interface, keyed by
+/// interface name, as address strings
+typedef InterfaceAddressesProvider = Future<Map<String, Set<String>>> Function();
+
 /// A class that monitors network interfaces for changes
 class NetworkInterfaceMonitor {
   /// The interval between checks for network interface changes
   final Duration checkInterval;
 
-  /// The function that provides network interfaces
-  final NetworkInterfaceProvider _interfaceProvider;
+  /// The function that provides the interface addresses
+  final InterfaceAddressesProvider _addressesProvider;
 
-  /// The current network interfaces
-  List<NetworkInterface> _currentInterfaces = [];
+  /// The current interface addresses, keyed by interface name
+  Map<String, Set<String>> _currentAddresses = {};
 
   /// Timer for periodic checks
   Timer? _checkTimer;
@@ -24,16 +28,29 @@ class NetworkInterfaceMonitor {
   /// Callbacks for network interface changes
   final List<NetworkInterfaceChangeCallback> _callbacks = [];
 
-  /// Creates a new network interface monitor
+  /// Creates a new network interface monitor.
+  ///
+  /// [interfaceProvider] defaults to [NetworkInterface.list].
+  /// [addressesProvider] gives the addresses directly and is used instead of
+  /// [interfaceProvider] when set. It does not depend on the
+  /// [NetworkInterface] type, which changed in Dart 3.13 (its `addresses`
+  /// became `List<InterfaceAddress>`).
   NetworkInterfaceMonitor({
     this.checkInterval = const Duration(seconds: 30),
     NetworkInterfaceProvider? interfaceProvider,
-  }) : _interfaceProvider = interfaceProvider ?? NetworkInterface.list;
+    InterfaceAddressesProvider? addressesProvider,
+  }) : _addressesProvider = addressesProvider ??
+            (() async => addressesOf(await (interfaceProvider ?? NetworkInterface.list)()));
+
+  /// Returns the addresses of [interfaces], keyed by interface name.
+  static Map<String, Set<String>> addressesOf(List<NetworkInterface> interfaces) => {
+        for (final i in interfaces) i.name: {for (final a in i.addresses) a.address},
+      };
 
   /// Initializes the network interface monitor
   Future<void> initialize() async {
     // Get initial network interfaces
-    _currentInterfaces = await _interfaceProvider();
+    _currentAddresses = await _addressesProvider();
 
     // Start periodic checks
     _startPeriodicChecks();
@@ -41,11 +58,11 @@ class NetworkInterfaceMonitor {
 
   /// Checks for network interface changes
   Future<bool> checkForChanges() async {
-    final newInterfaces = await _interfaceProvider();
+    final newAddresses = await _addressesProvider();
 
     // Check if interfaces have changed
-    if (_interfacesHaveChanged(newInterfaces)) {
-      _currentInterfaces = newInterfaces;
+    if (_interfacesHaveChanged(newAddresses)) {
+      _currentAddresses = newAddresses;
       _notifyCallbacks();
       return true;
     }
@@ -77,49 +94,19 @@ class NetworkInterfaceMonitor {
     _checkTimer = null;
   }
 
-  /// Checks if network interfaces have changed
-  bool _interfacesHaveChanged(List<NetworkInterface> newInterfaces) {
-    // If the number of interfaces has changed, they've changed
-    if (_currentInterfaces.length != newInterfaces.length) {
+  /// Checks if network interfaces have changed: an interface was added or
+  /// removed, or the addresses of an interface changed
+  bool _interfacesHaveChanged(Map<String, Set<String>> newAddresses) {
+    if (_currentAddresses.length != newAddresses.length) {
       return true;
     }
 
-    // Check each interface
-    for (final newInterface in newInterfaces) {
-      // Try to find matching interface in current interfaces
-      final matchingInterfaceExists = _currentInterfaces.any((i) => i.name == newInterface.name);
-
-      // If interface not found, they've changed
-      if (!matchingInterfaceExists) {
+    for (final entry in newAddresses.entries) {
+      final oldAddresses = _currentAddresses[entry.key];
+      if (oldAddresses == null) {
         return true;
       }
-
-      // Get the matching interface
-      final matchingInterface = _currentInterfaces.firstWhere(
-        (i) => i.name == newInterface.name,
-      );
-
-      // Check if addresses have changed
-      if (_addressesHaveChanged(matchingInterface.addresses, newInterface.addresses)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /// Checks if addresses have changed
-  bool _addressesHaveChanged(List<InternetAddress> oldAddresses, List<InternetAddress> newAddresses) {
-    // If the number of addresses has changed, they've changed
-    if (oldAddresses.length != newAddresses.length) {
-      return true;
-    }
-
-    // Check each address
-    for (final newAddress in newAddresses) {
-      // Check if address exists in old addresses
-      final addressExists = oldAddresses.any((a) => a.address == newAddress.address);
-      if (!addressExists) {
+      if (oldAddresses.length != entry.value.length || !oldAddresses.containsAll(entry.value)) {
         return true;
       }
     }
