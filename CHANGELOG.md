@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **The AutoNAT v2 server rejects a first message that is not a DialRequest.** The check compared a protobuf getter with null, which is never true. Thus the server answered such a message as an empty request with `E_DIAL_REFUSED`. Now it resets the stream, as go-libp2p does.
+- **A UDX session closes its UDP socket even when closing one of its streams fails.** The error handler of `Future.catchError` only logged and returned nothing, so `catchError` threw an `ArgumentError`. The session then skipped the rest of its cleanup: a dialer kept its UDP socket open.
 
 ## [4.10.0] - 2026-10-25
 

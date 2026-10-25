@@ -975,9 +975,13 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     try {
       final streamCloseStart = DateTime.now();
-      await Future.wait(closeFutures).catchError((e) {
+      // Not catchError: its handler must return the future's type, so a
+      // handler that only logs throws, and the cleanup below is skipped.
+      try {
+        await Future.wait(closeFutures);
+      } catch (e) {
         _logger.warning('[UDXSessionConn $id] Error closing one or more UDX streams: $e');
-      });
+      }
       final streamCloseDuration = DateTime.now().difference(streamCloseStart);
       _logger.fine('[UDXSessionConn $id] CLEANUP_ORDER: All active streams closed in ${streamCloseDuration.inMilliseconds}ms');
       _activeStreams.clear(); 
