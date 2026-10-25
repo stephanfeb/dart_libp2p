@@ -76,10 +76,10 @@ class StunMessage {
     final xorAddressBytes = Uint8List(8);
     final xorBuffer = ByteData.view(xorAddressBytes.buffer);
 
-    // First byte is address family (0x01 for IPv4)
-    xorBuffer.setUint8(0, 0x01);
-    // Second byte is reserved (0x00)
-    xorBuffer.setUint8(1, 0x00);
+    // RFC 5389 15.2: the first byte is reserved (0x00), the second is the
+    // address family (0x01 for IPv4)
+    xorBuffer.setUint8(0, 0x00);
+    xorBuffer.setUint8(1, 0x01);
     // Port number XORed with most significant 16 bits of magic cookie
     xorBuffer.setUint16(2, port ^ (magicCookie >> 16));
     // IPv4 address XORed with magic cookie
@@ -191,23 +191,57 @@ class StunMessage {
     return null;
   }
 
-  /// Decodes an address attribute (MAPPED-ADDRESS, RESPONSE-ORIGIN, OTHER-ADDRESS)
+  /// Decodes an address attribute (MAPPED-ADDRESS, RESPONSE-ORIGIN,
+  /// OTHER-ADDRESS). Returns null for an unknown family or a short attribute.
   static ({InternetAddress address, int port})? decodeAddress(Uint8List data) {
-    if (data.length < 8) return null;
+    final length = _addressLength(data);
+    if (length == null) return null;
 
     final buffer = ByteData.view(data.buffer, data.offsetInBytes);
-
-    // Skip first byte (reserved) and get address family
-    final family = buffer.getUint8(1);
     final port = buffer.getUint16(2);
-
-    // Get IP address
-    final addressBytes = data.sublist(4, 4 + (family == 1 ? 4 : 16));
+    final addressBytes = data.sublist(4, 4 + length);
 
     return (
       address: InternetAddress.fromRawAddress(addressBytes),
       port: port,
     );
+  }
+
+  /// Decodes an XOR-MAPPED-ADDRESS attribute (RFC 5389 15.2): the port is
+  /// XORed with the top 16 bits of the magic cookie, an IPv4 address with
+  /// the magic cookie, and an IPv6 address with the magic cookie followed by
+  /// [transactionId]. Returns null for an unknown family or a short
+  /// attribute.
+  static ({InternetAddress address, int port})? decodeXorAddress(Uint8List data, List<int> transactionId) {
+    final length = _addressLength(data);
+    if (length == null) return null;
+    if (length == 16 && transactionId.length != 12) return null;
+
+    final buffer = ByteData.view(data.buffer, data.offsetInBytes);
+    final port = buffer.getUint16(2) ^ (magicCookie >> 16);
+
+    final mask = Uint8List(16);
+    ByteData.view(mask.buffer).setUint32(0, magicCookie);
+    if (length == 16) mask.setRange(4, 16, transactionId);
+    final addressBytes = Uint8List(length);
+    for (var i = 0; i < length; i++) {
+      addressBytes[i] = data[4 + i] ^ mask[i];
+    }
+
+    return (
+      address: InternetAddress.fromRawAddress(addressBytes),
+      port: port,
+    );
+  }
+
+  /// The address length of an address attribute, from its family in the
+  /// second byte (the first is reserved): 4 for IPv4, 16 for IPv6. Null for
+  /// another family or an attribute too short for its address.
+  static int? _addressLength(Uint8List data) {
+    if (data.length < 4) return null;
+    final length = switch (data[1]) { 0x01 => 4, 0x02 => 16, _ => null };
+    if (length == null || data.length < 4 + length) return null;
+    return length;
   }
 
   static final _random = Random.secure();

@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:async';
-import 'dart:typed_data';
 import 'stun/stun_message.dart';
 import 'stun/stun_client.dart';
 import 'nat_behavior.dart';
@@ -126,6 +125,9 @@ class NatBehaviorDiscovery {
     try {
       // Test 1: Get mapped address from primary address
       RawDatagramSocket socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      // Read the port now: _sendRequestToServer closes the socket (see
+      // discoverMappingBehavior).
+      final localPort = socket1.port;
       try {
         final response1 = await _sendRequest(socket1, StunMessage.createBindingRequest());
         if (response1 == null) {
@@ -140,7 +142,7 @@ class NatBehaviorDiscovery {
 
         // Test 2: Request response from alternate IP (change IP)
         // Create a new socket for the second request
-        RawDatagramSocket socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+        RawDatagramSocket socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
         try {
           final request2 = StunMessage.createBindingRequestWithChangeRequest(
             changeIP: true,
@@ -157,7 +159,7 @@ class NatBehaviorDiscovery {
 
           // Test 3: Send to alternate IP directly and request response from primary IP
           // Create a new socket for the third request
-          RawDatagramSocket socket3 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+          RawDatagramSocket socket3 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
           try {
             final alternateServer = otherAddress.address;
 
@@ -173,7 +175,7 @@ class NatBehaviorDiscovery {
             // Test 4: Now that we've sent to the alternate IP, request a response
             // from the alternate IP but different port
             // Create a new socket for the fourth request
-            RawDatagramSocket socket4 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+            RawDatagramSocket socket4 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
             try {
               final request4 = StunMessage.createBindingRequestWithChangeRequest(
                 changeIP: false,
@@ -219,6 +221,9 @@ class NatBehaviorDiscovery {
     try {
       // Test 1: Get mapped address from primary address
       final socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      // Read the port now: _sendRequestToServer closes the socket (see
+      // discoverMappingBehavior).
+      final localPort = socket1.port;
       try {
         final response1 = await _sendRequest(socket1, StunMessage.createBindingRequest());
         if (response1 == null) {
@@ -231,7 +236,7 @@ class NatBehaviorDiscovery {
         }
 
         // Test 2: Send to a different STUN server
-        final socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+        final socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
         try {
           final request2 = StunMessage.createBindingRequest();
           final response2 = await _sendRequestToServer(socket2, request2, await stunClient.stunServer, stunClient.stunPort);
@@ -267,6 +272,9 @@ class NatBehaviorDiscovery {
     try {
       // Test 1: Get mapped address from primary address
       RawDatagramSocket socket1 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      // Read the port now: _sendRequestToServer closes the socket (see
+      // discoverMappingBehavior).
+      final localPort = socket1.port;
       try {
         final response1 = await _sendRequest(socket1, StunMessage.createBindingRequest());
         if (response1 == null) {
@@ -274,7 +282,7 @@ class NatBehaviorDiscovery {
         }
 
         // Test 2: Request response from a different STUN server
-        RawDatagramSocket socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, socket1.port);
+        RawDatagramSocket socket2 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, localPort);
         try {
           final request2 = StunMessage.createBindingRequest();
           final response2 = await _sendRequestToServer(socket2, request2, await stunClient.stunServer, stunClient.stunPort);
@@ -361,7 +369,7 @@ class NatBehaviorDiscovery {
     // First try XOR-MAPPED-ADDRESS (RFC 5389)
     final xorMapped = message.attributes[StunAttribute.xorMappedAddress];
     if (xorMapped != null) {
-      return _decodeXorMappedAddress(xorMapped, message.transactionId);
+      return StunMessage.decodeXorAddress(xorMapped, message.transactionId);
     }
 
     // Fallback to MAPPED-ADDRESS (RFC 3489)
@@ -371,28 +379,5 @@ class NatBehaviorDiscovery {
     }
 
     return null;
-  }
-
-  /// Decodes an XOR-MAPPED-ADDRESS attribute
-  ({InternetAddress address, int port})? _decodeXorMappedAddress(Uint8List data, List<int> transactionId) {
-    if (data.length < 8) return null;
-
-    final buffer = ByteData.view(data.buffer, data.offsetInBytes);
-
-    // The address family is not checked: only IPv4 is decoded (the STUN
-    // sockets bind to anyIPv4).
-    // Get port (XOR with most significant 16 bits of magic cookie)
-    final port = buffer.getUint16(2) ^ (StunMessage.magicCookie >> 16);
-
-    // Get IP address (XOR with magic cookie)
-    final addressBytes = Uint8List(4); // Always 4 bytes for IPv4
-    for (var i = 0; i < 4; i++) {
-      addressBytes[i] = data[i + 4] ^ ((StunMessage.magicCookie >> (8 * (3 - i))) & 0xFF);
-    }
-
-    return (
-      address: InternetAddress.fromRawAddress(addressBytes),
-      port: port,
-    );
   }
 }

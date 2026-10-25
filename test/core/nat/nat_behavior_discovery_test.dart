@@ -188,46 +188,39 @@ void main() {
       expect(mappingBehavior, equals(NatMappingBehavior.addressAndPortDependent));
     });
 
+    // The filtering tests bind each request socket to the port of the first
+    // one. The port was read after _sendRequestToServer had closed that
+    // socket, which threw, so every method below returned unknown
+    // (dart-libp2p-cf2).
     test('should detect endpoint-independent filtering', () async {
-      // For this test, we'll create a mock implementation that returns the expected behavior
-      // This is a workaround for the socket issues in the tests
-
-      // Create a mock implementation
-      final mockDiscovery = _MockNatBehaviorDiscovery(
-        mappingBehavior: NatMappingBehavior.unknown,
-        filteringBehavior: NatFilteringBehavior.endpointIndependent,
-      );
-
-      final filteringBehavior = await mockDiscovery.discoverFilteringBehavior();
+      // The primary server answers a change-IP request.
+      final filteringBehavior = await discovery.discoverFilteringBehavior();
       expect(filteringBehavior, equals(NatFilteringBehavior.endpointIndependent));
     });
 
     test('should detect address-dependent filtering', () async {
-      // For this test, we'll create a mock implementation that returns the expected behavior
-      // This is a workaround for the socket issues in the tests
-
-      // Create a mock implementation
-      final mockDiscovery = _MockNatBehaviorDiscovery(
-        mappingBehavior: NatMappingBehavior.unknown,
-        filteringBehavior: NatFilteringBehavior.addressDependent,
-      );
-
-      final filteringBehavior = await mockDiscovery.discoverFilteringBehavior();
+      // The NAT drops the answer from the other IP, but not from the other
+      // port of an IP it sent to.
+      primaryServer.simulateChangeRequest(changeIP: true, changePort: false);
+      final filteringBehavior = await discovery.discoverFilteringBehavior();
       expect(filteringBehavior, equals(NatFilteringBehavior.addressDependent));
     });
 
     test('should detect address-and-port-dependent filtering', () async {
-      // For this test, we'll create a mock implementation that returns the expected behavior
-      // This is a workaround for the socket issues in the tests
-
-      // Create a mock implementation
-      final mockDiscovery = _MockNatBehaviorDiscovery(
-        mappingBehavior: NatMappingBehavior.unknown,
-        filteringBehavior: NatFilteringBehavior.addressAndPortDependent,
-      );
-
-      final filteringBehavior = await mockDiscovery.discoverFilteringBehavior();
+      primaryServer.simulateChangeRequest(changeIP: true, changePort: false);
+      alternateServer.simulateChangeRequest(changeIP: false, changePort: true);
+      final filteringBehavior = await discovery.discoverFilteringBehavior();
       expect(filteringBehavior, equals(NatFilteringBehavior.addressAndPortDependent));
+    });
+
+    test('basic mapping test compares two answers', () async {
+      final mappingBehavior = await discovery.discoverMappingBehaviorBasic();
+      expect(mappingBehavior, equals(NatMappingBehavior.endpointIndependent));
+    });
+
+    test('basic filtering test gets a second answer', () async {
+      final filteringBehavior = await discovery.discoverFilteringBehaviorBasic();
+      expect(filteringBehavior, equals(NatFilteringBehavior.endpointIndependent));
     });
   });
 }

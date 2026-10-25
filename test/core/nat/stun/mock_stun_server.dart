@@ -119,7 +119,11 @@ class MockStunServer {
       return;
     }
 
-    // Create a standard response
+    _sendStandardResponse(request, datagram);
+  }
+
+  /// Answers [request] with XOR-MAPPED-ADDRESS, and OTHER-ADDRESS if set.
+  void _sendStandardResponse(StunMessage request, Datagram datagram) {
     final attributes = <int, Uint8List>{};
 
     // Add XOR-MAPPED-ADDRESS attribute
@@ -130,10 +134,10 @@ class MockStunServer {
     final xorAddressBytes = Uint8List(8);
     final xorBuffer = ByteData.view(xorAddressBytes.buffer);
 
-    // First byte is address family (0x01 for IPv4)
-    xorBuffer.setUint8(0, 0x01);
-    // Second byte is reserved (0x00)
-    xorBuffer.setUint8(1, 0x00);
+    // First byte is reserved (0x00)
+    xorBuffer.setUint8(0, 0x00);
+    // Second byte is address family (0x01 for IPv4)
+    xorBuffer.setUint8(1, 0x01);
     // Port number XORed with most significant 16 bits of magic cookie
     xorBuffer.setUint16(2, mappedPort ^ (StunMessage.magicCookie >> 16));
     // IPv4 address XORed with magic cookie
@@ -184,8 +188,9 @@ class MockStunServer {
     // Look up the response configuration for these flags
     final responseConfig = _changeRequestResponses[flags];
     if (responseConfig == null) {
-      // No specific configuration, use default behavior
-      _handleRequest(datagram);
+      // No specific configuration: answer as to a plain request. (Passing
+      // the datagram to _handleRequest again would come back here.)
+      _sendStandardResponse(request, datagram);
       return;
     }
 
