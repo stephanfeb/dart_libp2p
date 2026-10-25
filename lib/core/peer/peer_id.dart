@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:bs58/bs58.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:dcid/dcid.dart' as cid_lib; // Added alias
-import 'package:dart_libp2p/core/routing/routing.dart';
 import 'package:dart_multihash/dart_multihash.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as key_generator;
 import 'package:dart_libp2p/core/crypto/keys.dart';

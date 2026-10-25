@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/security/secured_connection.dart';
 

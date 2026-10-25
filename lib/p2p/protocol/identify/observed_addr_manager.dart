@@ -7,14 +7,11 @@
 /// to Dart, using native Dart idioms.
 
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
-import 'package:dart_libp2p/core/network/network.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/event/nattype.dart';

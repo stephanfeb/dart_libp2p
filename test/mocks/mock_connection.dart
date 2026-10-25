@@ -12,7 +12,6 @@ import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnSt
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // For P2PStream
 import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope;
-import 'package:dart_libp2p/core/protocol/protocol.dart';
 
 /// A mock implementation of Connection for testing
 class MockConnection implements Conn {

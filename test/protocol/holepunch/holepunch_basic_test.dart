@@ -1,4 +1,3 @@
-import 'dart:async';
 
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';

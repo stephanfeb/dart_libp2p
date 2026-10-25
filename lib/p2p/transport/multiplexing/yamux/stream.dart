@@ -4,12 +4,9 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:logging/logging.dart'; // Added for logging
 
-import 'package:dart_libp2p/core/network/conn.dart'; // Conn is directly available
 import 'package:dart_libp2p/core/peer/peer_id.dart'; // For PeerId
 
-import '../../../../core/network/stream.dart'; // For P2PStream, StreamStats
 import '../../../../core/network/common.dart' show Direction; // For Direction
-import '../../../../core/network/rcmgr.dart' show StreamScope; // For StreamScope
 import '../../../../core/network/mux.dart' as core_mux; // For MuxedStream
 import 'frame.dart'; // Defines YamuxFrame, YamuxFrameType, YamuxFlags
 import 'yamux_exceptions.dart'; // Import Yamux exception handling

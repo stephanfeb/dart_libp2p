@@ -27,10 +27,6 @@ Future<HolePunchService> newHolePunchService(
   List<MultiAddr> Function() listenAddrs, {
   HolePunchOptions? options,
 }) async {
-  if (ids == null) {
-    throw ArgumentError('identify service can\'t be null');
-  }
-
   final service = HolePunchServiceImpl(host, ids, listenAddrs, options: options);
   await service.start();
   return service;

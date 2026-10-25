@@ -204,7 +204,7 @@ class UDXTransport implements Transport {
           ),
           'RawDatagramSocket.bind($host)',
         );
-        _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket!.port}');
+        _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket.port}');
 
         // Create multiplexer with exception handling
         multiplexer = await UDXExceptionHandler.handleUDXOperation(
@@ -290,7 +290,7 @@ class UDXTransport implements Transport {
         if (metricsObserver != null && udpSocket != null) {
           try {
             metricsObserver!.onHandshakeComplete(
-              udpSocket!.cids.localCid,
+              udpSocket.cids.localCid,
               handshakeDuration,
               false,
               handshakeError,
@@ -309,7 +309,7 @@ class UDXTransport implements Transport {
         try {
           final peerId = PeerId.fromString(peerIdStr);
           onConnectionEstablished!(udpSocket!.cids.localCid, peerId);
-          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket!.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
+          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
         } catch (e) {
           _logger.warning('[UDXTransport._performDial] Failed to register connection-peer mapping: $e');
         }
@@ -323,7 +323,7 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
       final sessionConn = UDXSessionConn(
         udpSocket: udpSocket!,
-        initialStream: initialStream!,
+        initialStream: initialStream,
         localMultiaddr: localMa,
         remoteMultiaddr: remoteMa,
         transport: this,

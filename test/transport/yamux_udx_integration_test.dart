@@ -241,29 +241,29 @@ void main() {
           
           // Provide diagnostic information
           print('\n   🔍 Diagnostic Information:');
-          if (clientSession != null) print('   - Client session closed: ${clientSession.isClosed}');
-          if (serverSession != null) print('   - Server session closed: ${serverSession.isClosed}');
-          if (clientStream != null) print('   - Client stream closed: ${clientStream.isClosed}');
-          if (serverStream != null) print('   - Server stream closed: ${serverStream.isClosed}');
+          print('   - Client session closed: ${clientSession.isClosed}');
+          print('   - Server session closed: ${serverSession.isClosed}');
+          print('   - Client stream closed: ${clientStream.isClosed}');
+          print('   - Server stream closed: ${serverStream.isClosed}');
           
           rethrow;
         } finally {
           // Cleanup
           print('   🧹 Cleaning up Layer 1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -414,10 +414,10 @@ void main() {
           
           // Provide diagnostic information
           print('\n   🔍 Diagnostic Information:');
-          if (clientUpgradedConn != null) print('   - Client upgraded conn closed: ${clientUpgradedConn.isClosed}');
-          if (serverUpgradedConn != null) print('   - Server upgraded conn closed: ${serverUpgradedConn.isClosed}');
-          if (clientStream != null) print('   - Client stream closed: ${clientStream.isClosed}');
-          if (serverStream != null) print('   - Server stream closed: ${serverStream.isClosed}');
+          print('   - Client upgraded conn closed: ${clientUpgradedConn.isClosed}');
+          print('   - Server upgraded conn closed: ${serverUpgradedConn.isClosed}');
+          print('   - Client stream closed: ${clientStream.isClosed}');
+          print('   - Server stream closed: ${serverStream.isClosed}');
           
           print('   🔍 This suggests the issue is introduced by the Noise security layer');
           rethrow;
@@ -425,19 +425,19 @@ void main() {
           // Cleanup
           print('   🧹 Cleaning up Layer 2 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -808,19 +808,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -939,19 +939,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-2 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1072,19 +1072,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-3 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1311,19 +1311,19 @@ void main() {
           // Cleanup
           print('   🧹 Cleaning up NOISE-1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1545,13 +1545,13 @@ void main() {
         } finally {
           print('   🧹 Cleaning up NOISE-2 test...');
           try {
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -2480,7 +2480,7 @@ void main() {
             final serverAcceptFuture = serverSession.acceptStream().timeout(Duration(seconds: 5));
             await Future.delayed(Duration(milliseconds: 50));
             final clientStream = await clientSession.openStream(core_context.Context()).timeout(Duration(seconds: 5)) as YamuxStream;
-            final serverStream = await serverAcceptFuture as YamuxStream;
+            final serverStream = await serverAcceptFuture;
             print('   ✅ Iteration 1: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
 
             // Quick data transfer
@@ -2533,7 +2533,7 @@ void main() {
             print('   ✅ Client stream opened: ${clientStream.id()}');
             print('   Waiting for server acceptStream...');
             
-            final serverStream = await serverAcceptFuture as YamuxStream;
+            final serverStream = await serverAcceptFuture;
             print('   ✅ Iteration 2: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
 
             // Quick data transfer
@@ -2880,9 +2880,7 @@ Future<void> _testLargePayloadEcho(
 Future<void> _testLargePayloadTransferP2P(
   core_network_stream.P2PStream clientStream,
   core_network_stream.P2PStream serverStream,
-  String testContext,
-  {bool? expectSuccess}
-) async {
+  String testContext) async {
   print('   📊 [$testContext] Creating 100KB test data...');
   
   // Create 100KB test data - same size that causes OBP test to fail

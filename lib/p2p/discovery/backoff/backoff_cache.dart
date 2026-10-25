@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import '../../../core/peer/addr_info.dart';
 import '../../../core/discovery.dart';
@@ -71,7 +70,7 @@ class BackoffDiscovery implements Discovery {
       final controller = StreamController<AddrInfo>(sync: true);
       
       for (final ai in c.prevPeers.values) {
-        if (controller.isClosed || (opts.limit != null && controller.hasListener && controller.sink is StreamSink<AddrInfo> && (controller.sink as dynamic).count >= opts.limit!)) {
+        if (controller.isClosed || (opts.limit != null && controller.hasListener && (controller.sink as dynamic).count >= opts.limit!)) {
           break;
         }
         controller.add(ai);

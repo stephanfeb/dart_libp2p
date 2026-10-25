@@ -12,7 +12,6 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/multiaddr.dart' hide Protocol; // Hide core Protocol if it exists to avoid conflict
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // Import the Protocol class for Multiaddr
 import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart' as core_protocol; // Alias to avoid conflict with multiaddr.Protocol
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/yamux_exceptions.dart';

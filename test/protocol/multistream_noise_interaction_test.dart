@@ -8,20 +8,12 @@ import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:dart_libp2p/p2p/security/secured_connection.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
-import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart'; // ProtocolID, HandlerFunc
-import 'package:dart_libp2p/p2p/multiaddr/codec.dart'; // For varint encoding
-import 'package:dart_libp2p/core/network/conn.dart'; // Conn, ConnStats, Stats, ConnState
 import 'package:dart_libp2p/core/network/common.dart'; // Direction
-import 'package:dart_libp2p/core/network/rcmgr.dart' show StreamScope, ConnScope, NullScope, ScopeStat, ResourceScopeSpan; // Using NullScope for mocks
 import 'package:dart_libp2p/core/peer/peer_id.dart' as core_peer; // PeerId, PeerId
-import 'package:dart_libp2p/core/multiaddr.dart'; // Multiaddr
 import 'package:dart_libp2p/core/crypto/keys.dart' as libp2p_keys; // PublicKey, KeyPair
 import 'package:dart_libp2p/p2p/crypto/key_generator.dart'; // generateEd25519KeyPair
-import 'package:dart_libp2p/core/network/context.dart'; // Context
 import 'package:dart_libp2p/core/network/transport_conn.dart'; // TransportConn
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart'; // NoiseSecurity, NoiseProtocolException
-import 'package:dart_libp2p/p2p/security/security_protocol.dart'; // SecuredConnection
 
 // --- Mock Dependencies (adapted from multistream_muxer_test.dart) ---
 

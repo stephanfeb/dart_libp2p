@@ -5,38 +5,28 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:dart_libp2p/core/host/host.dart'; // For Context (though we use core.Context)
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux_types; // Aliased import
-import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
-import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
-import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart'; // Corrected import
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
-import 'package:dart_libp2p/p2p/transport/listener.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart'; // Corrected import for YamuxSession
-import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart'; // Added import for YamuxStream
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart'; // For MultiplexerConfig
 import 'package:dart_libp2p/config/stream_muxer.dart'; // For StreamMuxer base class
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:dart_udx/dart_udx.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart' as p2p_transport; // Aliased for clarity
-import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as core_connmgr; // For type casting if needed
 import 'package:dart_libp2p/p2p/host/resource_manager/resource_manager_impl.dart'; // Added for ResourceManagerImpl
 import 'package:dart_libp2p/p2p/host/resource_manager/limiter.dart'; // Added for FixedLimiter
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
-import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/p2p/host/peerstore/pstoremem.dart'; // Attempting corrected path for MemoryPeerstore
 import 'package:dart_libp2p/core/event/bus.dart';
-import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/network/stream.dart' as core_network_stream;
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' as multiaddr_protocol;
 import 'package:dart_libp2p/core/peerstore.dart'; // For AddressTTL

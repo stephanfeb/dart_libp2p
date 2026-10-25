@@ -8,15 +8,12 @@ import 'package:dart_libp2p/core/network/connection_context.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../../../core/network/common.dart';
-import '../../../core/network/mux.dart' as core_mux; // ADDED for MuxedConn
 import '../../../core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope, ConnManagementScope, StreamManagementScope;
 import '../../transport/basic_upgrader.dart'; // For UpgradedConnectionImpl
-import '../../transport/multiplexing/yamux/session.dart'; // For YamuxSession
 import 'connection_health.dart'; // For event-driven health monitoring
 import 'swarm.dart';
 import 'swarm_stream.dart';

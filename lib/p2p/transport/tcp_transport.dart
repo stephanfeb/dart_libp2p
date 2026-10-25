@@ -1,16 +1,13 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import '../../core/connmgr/conn_manager.dart';
 import '../../core/multiaddr.dart';
-import '../../core/network/conn.dart';
 import '../../core/network/transport_conn.dart';
 import 'listener.dart';
 import 'transport.dart';
 import 'transport_config.dart';
 import 'connection_manager.dart'; // Re-added import for ConnectionManager
-import '../../core/network/mux.dart'; // Multiplexer no longer directly used by TCPTransport constructor
 import '../../core/network/rcmgr.dart' show NullResourceManager, ResourceManager;
 import '../../core/peer/peer_id.dart'; // For concrete PeerId class
 import 'tcp_connection.dart';

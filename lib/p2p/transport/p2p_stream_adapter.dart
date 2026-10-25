@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
-import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/mux.dart' show MuxedStream, ResetException; // Added ResetException
 import 'package:dart_libp2p/core/network/rcmgr.dart' show StreamManagementScope, StreamScope;
 import 'package:dart_libp2p/core/network/stream.dart' show P2PStream, StreamStats;

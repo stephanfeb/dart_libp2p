@@ -96,7 +96,7 @@ Future<void> main(List<String> arguments) async {
 
       // If we got a stream, connection + identify succeeded
       final protocols = await host.peerStore.protoBook.getProtocols(targetPeerId);
-      final hasProtocols = protocols != null && protocols.isNotEmpty;
+      final hasProtocols = protocols.isNotEmpty;
       report('Connect + Identify',
           hasProtocols, hasProtocols ? null : 'no protocols found');
 

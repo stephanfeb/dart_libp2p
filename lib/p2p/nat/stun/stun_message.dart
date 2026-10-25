@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:convert';
 import 'dart:math';
 
 /// STUN message types as defined in RFC 5389

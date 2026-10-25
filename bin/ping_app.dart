@@ -183,7 +183,7 @@ Future<void> main(List<String> arguments) async {
       }
 
       // Attempt hole punch once before starting the ping loop
-      final hps = host!.holePunchService; // host is not null here
+      final hps = host.holePunchService; // host is not null here
       if (hps != null) {
         print('[$currentHostLogId] Attempting initial hole punch to ${shortPeerId(targetPeerId)}...');
         try {
@@ -191,7 +191,7 @@ Future<void> main(List<String> arguments) async {
           print('[$currentHostLogId] Initial hole punch attempt to ${shortPeerId(targetPeerId)} completed.');
         } catch (e, s) {
           print('[$currentHostLogId] Initial hole punch attempt to ${shortPeerId(targetPeerId)} failed: $e');
-          if (s != null) print(s);
+          print(s);
           // Continue to try pinging anyway; direct connection might still be possible or relay might be used.
         }
       }
@@ -206,7 +206,7 @@ Future<void> main(List<String> arguments) async {
         core_network_stream.P2PStream? clientStream;
 
         try {
-          clientStream = await host!.newStream( // host is not null here
+          clientStream = await host.newStream( // host is not null here
             targetPeerId,
             [PING_PROTOCOL_ID],
             core_context.Context(),
@@ -236,7 +236,7 @@ Future<void> main(List<String> arguments) async {
 
         } catch (e,s) {
           print('[$currentHostLogId] Ping to ${shortPeerId(targetPeerId)} failed: $e');
-          if (s != null) print(s);
+          print(s);
         } finally {
           if (clientStream != null && !clientStream.isClosed) {
             await clientStream.close();
@@ -255,7 +255,7 @@ Future<void> main(List<String> arguments) async {
     if (listenAddrStr != null || targetAddrStr != null) {
         // Setup SIGINT handler
         ProcessSignal.sigint.watch().listen((signal) async {
-            final currentHostLogId = host != null ? shortPeerId(host!.id) : "Host";
+            final currentHostLogId = host != null ? shortPeerId(host.id) : "Host";
             print('\n[$currentHostLogId] SIGINT received, shutting down...');
             if (!shutdownCompleter.isCompleted) {
               shutdownCompleter.complete();
@@ -263,10 +263,10 @@ Future<void> main(List<String> arguments) async {
         });
 
         if (targetAddrStr != null && listenAddrStr == null) {
-             final currentHostLogId = shortPeerId(host!.id);
+             final currentHostLogId = shortPeerId(host.id);
              print('[$currentHostLogId] Continuously pinging target. Press Ctrl+C to exit.');
         } else if (listenAddrStr != null && targetAddrStr != null) {
-            final currentHostLogId = shortPeerId(host!.id);
+            final currentHostLogId = shortPeerId(host.id);
             print('[$currentHostLogId] Listening and continuously pinging target. Press Ctrl+C to exit.');
         }
         // If only listenAddrStr is set, the message is already printed above.

@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:dart_libp2p/dart_libp2p.dart';
-import 'package:dart_libp2p/core/network/context.dart';
 
 class EchoClient {
   final Host host;

@@ -5,9 +5,7 @@ import 'dart:typed_data';
 import 'package:logging/logging.dart';
 
 import '../../../core/interfaces.dart';
-import '../../../core/network/stream.dart';
 import '../../../core/peer/peer_id.dart';
-import '../../../core/protocol/protocol.dart';
 
 final _logger = Logger('http_protocol');
 

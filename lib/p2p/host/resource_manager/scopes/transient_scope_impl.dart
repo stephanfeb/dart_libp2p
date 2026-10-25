@@ -1,4 +1,3 @@
-import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limit.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/scope_impl.dart';
 

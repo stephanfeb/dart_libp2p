@@ -8,15 +8,11 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/multiaddr/codec.dart';
 import 'package:dart_libp2p/core/interfaces.dart';
-import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/config/multistream_config.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:logging/logging.dart'; // Added import for Logger
 
-import '../../../core/network/conn.dart'; // Added import for Conn
 import '../../transport/multiplexing/yamux/yamux_exceptions.dart'; // Import Yamux exception handling
-import '../../../core/network/mux.dart' show PushbackStream;
 import '../../network/swarm/swarm_stream.dart'; // For SwarmStream.incoming
 
 final _log = Logger('multistream'); // Added logger instance
@@ -345,7 +341,7 @@ class MultistreamMuxer implements ProtocolSwitch {
 
       await stream.reset(); // Ensure stream is reset if no protocol is selected
       return null;
-    } catch (e, st) {
+    } catch (e) {
       final totalDuration = DateTime.now().difference(startTime);
 
       await stream.reset();

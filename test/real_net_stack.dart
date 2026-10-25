@@ -195,7 +195,7 @@ Future<Libp2pNode> createLibp2pNode({
 
 
   return (
-    host: host as BasicHost,
+    host: host,
     peerId: peerId,
     listenAddrs: actualListenAddrs,
     keyPair: kp

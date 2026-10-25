@@ -4,9 +4,7 @@ import 'package:logging/logging.dart'; // Added for logging
 
 import '../../core/connmgr/conn_manager.dart';
 import '../../core/multiaddr.dart';
-import '../../core/network/conn.dart';
 import '../../core/network/transport_conn.dart';
-import '../../core/network/mux.dart' show Multiplexer;
 import '../../core/network/rcmgr.dart' show ResourceManager;
 import 'listener.dart';
 import 'transport_config.dart';

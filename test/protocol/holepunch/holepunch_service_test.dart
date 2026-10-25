@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
@@ -9,11 +7,8 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
-import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart';
-import 'package:dart_libp2p/p2p/protocol/holepunch/holepunch_service.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/service.dart';
-import 'package:dart_libp2p/p2p/protocol/holepunch/pb/holepunch.pb.dart';
 import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart';
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';

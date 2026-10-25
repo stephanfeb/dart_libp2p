@@ -166,9 +166,6 @@ class CircuitConnection implements TransportConn {
 
     try {
       final data = await _stream.read();
-      if (data == null) {
-        throw Exception('unexpected EOF');
-      }
 
       if (length != null && data.length < length) {
         throw Exception('not enough data');

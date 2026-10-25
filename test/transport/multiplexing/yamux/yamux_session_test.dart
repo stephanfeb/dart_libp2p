@@ -10,7 +10,6 @@ import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
-import 'package:logging/logging.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
 import 'package:test/test.dart';
@@ -32,8 +31,8 @@ void main() {
     setUp(() async {
       // Use fixed byte arrays for PeerIds for deterministic tests
       // Using simple generation for mock purposes, real key generation is more complex
-      clientPeerId = PeerId.fromBytes(Uint8List.fromList(List.generate(34, (i) => (i % 250) + 1)..[0]=0x12..[1]=0x20)) as PeerId; // Example Ed25519 PeerId bytes
-      serverPeerId = PeerId.fromBytes(Uint8List.fromList(List.generate(34, (i) => (i % 250) + 2)..[0]=0x12..[1]=0x20)) as PeerId; // Example Ed25519 PeerId bytes
+      clientPeerId = PeerId.fromBytes(Uint8List.fromList(List.generate(34, (i) => (i % 250) + 1)..[0]=0x12..[1]=0x20)); // Example Ed25519 PeerId bytes
+      serverPeerId = PeerId.fromBytes(Uint8List.fromList(List.generate(34, (i) => (i % 250) + 2)..[0]=0x12..[1]=0x20)); // Example Ed25519 PeerId bytes
 
 
       clientMa = MultiAddr('/ip4/127.0.0.1/tcp/12345');

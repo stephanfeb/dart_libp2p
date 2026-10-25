@@ -22,7 +22,7 @@ Future<void> main() async {
   
   try {
     await runStompExample();
-  } catch (e, stackTrace) {
+  } catch (e) {
     exit(1);
   }
 }

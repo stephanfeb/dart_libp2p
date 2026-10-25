@@ -19,7 +19,6 @@ import 'package:dart_libp2p/core/crypto/keys.dart';
 // However, if TCPConnection instantiates PeerId directly (e.g. PeerId.random()), it would need it.
 // For now, assuming PeerId is sufficient for type declarations from the interface.
 // If PeerId concrete class is needed for instantiation, it would be:
-import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer; // Alias to avoid conflict if PeerId is also in core/peer_id.dart
 
 // Local relative imports are usually fine if they don't cross major boundaries,
 // but for consistency, they can also be package imports.
@@ -502,7 +501,7 @@ class TCPConnection implements ScopedTransportConn {
     // then that's the one that should be called.
     // For now, using _legacyConnManager if available.
     if (!_closed && _legacyConnManager != null) {
-      _legacyConnManager!.recordActivity(this);
+      _legacyConnManager.recordActivity(this);
     }
   }
 

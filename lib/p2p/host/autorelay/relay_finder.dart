@@ -23,7 +23,6 @@ import 'package:dart_libp2p/p2p/protocol/holepunch/util.dart' show isRelayAddres
 
 import './autorelay_config.dart';
 import './autorelay_metrics.dart';
-import './autorelay_address_utils.dart' as address_utils;
 
 const rsvpRefreshInterval = Duration(minutes: 1);
 const rsvpExpirationSlack = Duration(minutes: 2); 
@@ -777,7 +776,7 @@ extension StreamTakeUntil<T> on Stream<T> {
         );
         signalSubscription = signal.listen(
           (_) => controller?.close(),
-          onError: controller?.addError,
+          onError: controller.addError,
         );
       },
       onPause: () => subscription?.pause(),

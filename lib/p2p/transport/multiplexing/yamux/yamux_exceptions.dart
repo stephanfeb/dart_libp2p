@@ -226,7 +226,7 @@ class YamuxExceptionHandler {
     // Handle StateError specifically (most common Yamux stream error)
     // StateError extends Error, not Exception
     if (exception is StateError) {
-      final stateError = exception as StateError;
+      final stateError = exception;
       final message = stateError.message;
       
       // Check for specific state-related errors

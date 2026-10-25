@@ -26,7 +26,6 @@ import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
-import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Import AddrsFactory
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart'; // Added import
 import 'package:dart_libp2p/p2p/protocol/identify/identify.dart';   // Added import
@@ -37,7 +36,6 @@ import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'internal/backoff/backoff.dart';
-import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart'; // For real ConnectionManager
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
@@ -351,12 +349,8 @@ class BasicHost implements Host {
 
             final envelope = await Envelope.seal(recordPayload, privKey);
 
-            if (envelope != null) {
-              await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
-              _log.fine('Successfully created and persisted self signed peer record to peerstore.');
-            } else {
-              _log.fine('Failed to create or seal self signed peer record envelope (seal returned null).');
-            }
+            await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
+            _log.fine('Successfully created and persisted self signed peer record to peerstore.');
           } catch (e, s) {
             _log.severe('Error creating or persisting self signed peer record: $e\n$s');
           }
@@ -1181,7 +1175,7 @@ class BasicHost implements Host {
       final totalTime = DateTime.now().difference(startTime);
 
 
-    } on IdentifyTimeoutException catch (e, stackTrace) {
+    } on IdentifyTimeoutException catch (e) {
       // Handle identify timeout gracefully - log warning instead of error
       final dialTime = DateTime.now().difference(dialStartTime);
       final totalTime = DateTime.now().difference(startTime);
@@ -1222,7 +1216,7 @@ class BasicHost implements Host {
 
       final identifyTime = DateTime.now().difference(identifyStartTime);
 
-    } on IdentifyTimeoutException catch (e, stackTrace) {
+    } on IdentifyTimeoutException catch (e) {
       // Handle identify timeout gracefully - this is not a critical error,
       // the peer may have gone offline or be unreachable.
       final totalTime = DateTime.now().difference(startTime);
@@ -1326,7 +1320,7 @@ class BasicHost implements Host {
     
     try {
       await connect(AddrInfo(p, []), context: context);
-    } on IdentifyTimeoutException catch (e) {
+    } on IdentifyTimeoutException {
       final totalTime = DateTime.now().difference(startTime);
       _log.fine('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
       rethrow;
@@ -1365,7 +1359,7 @@ class BasicHost implements Host {
 
     try {
       await _idService.identifyWait(stream.conn);
-    } on IdentifyTimeoutException catch (e) {
+    } on IdentifyTimeoutException {
       final totalTime = DateTime.now().difference(startTime);
       _log.fine('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
       await stream.reset();
@@ -1499,7 +1493,7 @@ class BasicHost implements Host {
   Future<Host> _newAutoNATDialerHost() async {
     // Copy the dial stack from the swarm, which may have been built from a
     // different Config than this host's.
-    final swarm = _network is Swarm ? _network as Swarm : null;
+    final swarm = _network is Swarm ? _network : null;
     final dialConfig = swarm?.config ?? _config;
     final dialerKey = await generateEd25519KeyPair();
     final dialerConfig = Config()
@@ -1724,12 +1718,8 @@ class BasicHost implements Host {
 
       final envelope = await Envelope.seal(recordPayload, privKey);
 
-      if (envelope != null) {
-        await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
-        _log.fine('[BasicHost] Successfully regenerated signed peer record with addresses: $currentAddrs');
-      } else {
-        _log.warning('[BasicHost] Failed to seal signed peer record envelope');
-      }
+      await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
+      _log.fine('[BasicHost] Successfully regenerated signed peer record with addresses: $currentAddrs');
     } catch (e, s) {
       _log.severe('[BasicHost] Error regenerating signed peer record: $e\n$s');
     }

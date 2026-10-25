@@ -7,9 +7,6 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
-import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/crypto/keys.dart';
 
 /// Mock stream that can simulate timeout scenarios
 class TimeoutMockStream implements P2PStream<Uint8List> {

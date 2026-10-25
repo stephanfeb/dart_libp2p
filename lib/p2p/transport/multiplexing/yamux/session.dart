@@ -294,7 +294,7 @@ class YamuxSession implements Multiplexer, core_mux.MuxedConn, Conn { // Added C
         final frameBytesForParser = buffer.sublist(0, expectedTotalFrameLength);
         final frame = YamuxFrame.fromBytes(frameBytesForParser);
 
-        _log.fine('$_logPrefix Frame #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data?.length ?? 0}" : ""}');
+        _log.fine('$_logPrefix Frame #$frameCount type=${frame.type} streamID=${frame.streamId} flags=0x${frame.flags.toRadixString(16)} len=${frame.length}${frame.type == YamuxFrameType.dataFrame ? " dataLen=${frame.data.length}" : ""}');
 
         final handleStartTime = DateTime.now();
 

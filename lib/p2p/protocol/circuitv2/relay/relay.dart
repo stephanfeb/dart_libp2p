@@ -105,7 +105,7 @@ class Relay {
           } catch (closeError) {
           }
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       try {
         await _writeResponse(stream, Status.MALFORMED_MESSAGE);
         await stream.close();

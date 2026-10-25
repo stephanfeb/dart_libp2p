@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:collection';
 
-import 'package:cryptography/cryptography.dart' hide PublicKey;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import '../../core/multiaddr.dart';
 import '../../core/network/conn.dart';

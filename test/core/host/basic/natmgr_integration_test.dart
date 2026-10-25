@@ -5,7 +5,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dart_libp2p/p2p/host/basic/natmgr.dart';
 import 'package:dart_libp2p/p2p/host/host.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
