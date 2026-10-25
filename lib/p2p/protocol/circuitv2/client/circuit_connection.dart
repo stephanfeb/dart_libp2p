@@ -46,7 +46,7 @@ class CircuitConnection implements TransportConn {
     _manager.registerConnection(this);
 
     // Monitor stream for closure
-    _stream.incoming.read().then((data) {
+    _stream.incoming.read().then<void>((data) {
       // Handle incoming data
       _manager.recordActivity(this);
     }).catchError(_handleError);
