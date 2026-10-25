@@ -196,6 +196,17 @@ class AutoNATv2ServerImpl implements AutoNATv2Server {
       );
     }
 
+    if (!message.hasDialRequest()) {
+      stream.reset();
+      _log.fine('Invalid message type from $peerId: expected DialRequest');
+      return EventDialRequestCompleted(
+        error: ServerErrors.badRequest,
+        responseStatus: DialResponse_ResponseStatus.E_INTERNAL_ERROR,
+        dialStatus: DialStatus.UNUSED,
+        dialDataRequired: false,
+      );
+    }
+
     // Parse peer's addresses
     MultiAddr? dialAddr;
     int addrIdx = 0;
