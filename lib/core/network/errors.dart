@@ -62,3 +62,16 @@ class ResourceScopeClosedException implements Exception {
   @override
   String toString() => 'ResourceScopeClosedException: resource scope closed';
 }
+
+/// Exception thrown when a dial reaches a different peer than the one dialed:
+/// the security handshake authenticated [actual], not [expected] (go-libp2p's
+/// "peer id mismatch"). The connection is closed.
+class PeerIdMismatchException implements Exception {
+  final String expected;
+  final String actual;
+
+  const PeerIdMismatchException({required this.expected, required this.actual});
+
+  @override
+  String toString() => 'PeerIdMismatchException: dialed $expected, but the remote peer is $actual';
+}

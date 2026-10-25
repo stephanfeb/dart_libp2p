@@ -9,6 +9,7 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart'; // Added import
 import 'package:dart_libp2p/core/network/context.dart';
+import 'package:dart_libp2p/core/network/errors.dart' show PeerIdMismatchException;
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -1194,6 +1195,10 @@ class Swarm implements Network {
     
     // Upgrade the connection, unless its transport already has
     if (transportConn is UpgradedTransportConn) {
+      if (transportConn.remotePeer != peerId) {
+        await transportConn.close();
+        throw PeerIdMismatchException(expected: peerId.toBase58(), actual: transportConn.remotePeer.toBase58());
+      }
       _logger.fine('Swarm._dialSingleAddr: Dialed already-upgraded connection to $peerId at $addr');
       return transportConn;
     }
