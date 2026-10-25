@@ -124,6 +124,20 @@ class MockContext implements Context {
   }
 
   @override
+  Context withDialCancel(Future<void> cancel) {
+    return withValue(_dialCancelKey, cancel);
+  }
+
+  @override
+  Future<void>? getDialCancel() {
+    final value = getValue(_dialCancelKey);
+    if (value != null) {
+      return value as Future<void>;
+    }
+    return null;
+  }
+
+  @override
   Context withAllowLimitedConn(String reason) {
     return withValue(_allowLimitedConnKey, reason);
   }
@@ -177,3 +191,4 @@ const _allowLimitedConnKey = 'allowLimitedConn';
 const _simConnectIsServerKey = 'simConnectIsServer';
 const _simConnectIsClientKey = 'simConnectIsClient';
 const _dialPeerTimeoutKey = 'dialPeerTimeout';
+const _dialCancelKey = 'dialCancel';
