@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A UDX session closes its UDP socket even when closing one of its streams fails.** The error handler of `Future.catchError` only logged and returned nothing, so `catchError` threw an `ArgumentError`. The session then skipped the rest of its cleanup: a dialer kept its UDP socket open.
 - **`TCPConnection.setWriteTimeout` limits the time of a write.** Before, the connection kept the value but did not use it. If the peer stopped reading, `write()` waited for all time. Now, when the timeout ends, the write throws `TimeoutException` and the connection closes. This also applies to the write deadlines that the upgrader sets during negotiation.
 
+### Security
+
+- **A dial fails when a different peer answers.** `host.connect(AddrInfo(x, addrs))` reached whichever peer answered at the address: the Noise handshake authenticated that peer, the swarm kept the connection under its real ID, and `connect` returned without error, so the caller believed it had reached `x`. The upgrader now checks the authenticated peer against the dialed one after the security handshake, as go-libp2p does, and throws `PeerIdMismatchException` (new, in `core/network/errors.dart`) after it closes the connection. The swarm makes the same check for connections from transports that upgrade themselves (`UpgradedTransportConn`). This matters most where addresses come from an unauthenticated source, such as a BLE advertisement.
+
 ## [4.10.0] - 2026-10-25
 
 ### Added

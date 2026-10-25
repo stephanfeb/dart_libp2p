@@ -7,6 +7,7 @@ import '../../core/multiaddr.dart';
 import '../../core/network/connection_context.dart';
 import '../../core/network/transport_conn.dart';
 import '../../core/network/conn.dart';
+import '../../core/network/errors.dart' show PeerIdMismatchException;
 // core_peer_id.dart is usually aliased or PeerId is directly from core/peer_id.dart
 // For now, assuming PeerId and PeerId are available from this import.
 import '../../core/peer/peer_id.dart';
@@ -330,6 +331,12 @@ class BasicUpgrader implements Upgrader {
         orElse: () => throw Exception("Selected security protocol $chosenSecurityId not found in config"),
       );
       final SecuredConnection securedConn = await securityModule.secureOutbound(connection);
+      // The handshake proves who answered; it must be the peer we dialed.
+      if (securedConn.remotePeer != remotePeerId) {
+        await securedConn.close();
+        throw PeerIdMismatchException(
+            expected: remotePeerId.toBase58(), actual: securedConn.remotePeer.toBase58());
+      }
 
       final mssForMuxers = MultistreamMuxer();
       final muxerProtoIDs = config.muxers.map((m) => m.id).toList();
