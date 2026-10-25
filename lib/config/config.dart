@@ -13,6 +13,7 @@ import 'package:dart_libp2p/p2p/security/security_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/transport.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart'; // Added
+import 'package:dart_libp2p/core/connmgr/conn_gater.dart';
 import 'package:dart_libp2p/core/event/bus.dart'; // Added
 import 'package:dart_libp2p/p2p/host/basic/natmgr.dart'; // Added
 import 'package:dart_libp2p/p2p/nat/stun/stun_client_pool.dart' show StunClientPool;
@@ -78,6 +79,10 @@ class Config {
   Duration? negotiationTimeout;
   AddrsFactory? addrsFactory;
   ConnManager? connManager;
+
+  /// The connection gater, asked whether to allow each dial and connection.
+  /// Null allows all. See [Libp2p.connectionGater].
+  ConnGater? connGater;
   EventBus? eventBus;
   NATManager Function(Network)? natManagerFactory;
 
@@ -375,6 +380,11 @@ extension ConfigOptions on Config {
     connManager = manager;
   }
 
+  /// Configures the connection gater. See [Config.connGater].
+  Future<void> withConnGater(ConnGater gater) async {
+    connGater = gater;
+  }
+
   Future<void> withEventBus(EventBus bus) async {
     eventBus = bus;
   }
@@ -559,6 +569,17 @@ class Libp2p {
 
   static Option connManager(ConnManager manager) {
     return (config) => config.withConnManager(manager);
+  }
+
+  /// Gives the host a connection gater, for example a `BasicConnGater` with
+  /// blocked peers, addresses or subnets. As in go-libp2p, the swarm asks it
+  /// before a dial ([ConnGater.interceptPeerDial],
+  /// [ConnGater.interceptAddrDial]) and the upgrader and swarm ask it as a
+  /// connection is accepted, secured and upgraded
+  /// ([ConnGater.interceptAccept], [ConnGater.interceptSecured],
+  /// [ConnGater.interceptUpgraded]). A rejected connection is closed.
+  static Option connectionGater(ConnGater gater) {
+    return (config) => config.withConnGater(gater);
   }
 
   static Option eventBus(EventBus bus) {

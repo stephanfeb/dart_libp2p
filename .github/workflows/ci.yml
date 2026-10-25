@@ -25,8 +25,8 @@ jobs:
         with:
           sdk: ${{ matrix.sdk }}
       - run: dart pub get
-      # Errors fail the build. The existing warnings are not cleaned up yet.
-      - run: dart analyze --no-fatal-warnings
+      # Errors and warnings fail the build.
+      - run: dart analyze
       # The `ci` preset in dart_test.yaml leaves out the Docker and Go interop
       # suites and retries timing-sensitive tests.
       - run: dart test -P ci
@@ -44,4 +44,4 @@ jobs:
           sdk: '3.5'
       - run: sed -i '/^dev_dependencies:/,$d' pubspec.yaml
       - run: dart pub get
-      - run: dart analyze --no-fatal-warnings lib
+      - run: dart analyze lib

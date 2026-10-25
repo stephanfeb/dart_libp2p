@@ -54,3 +54,37 @@ final config = [
 ```
 
 Because it's the default, you often don't need to specify it at all. The library will create and configure it for you as long as an identity is provided.
+
+## Connection Gating
+
+A connection gater decides which peers and addresses the host connects to. It works as in go-libp2p. Give one to the host with `Libp2p.connectionGater`:
+
+```dart
+import 'package:dart_libp2p/p2p/network/conn_gater.dart';
+
+final gater = BasicConnGater()
+  ..blockPeer(badPeerId)                       // a peer
+  ..blockAddr(MultiAddr('/ip4/203.0.113.7'))   // all ports of an IP
+  ..blockSubnet('198.51.100.0/24');            // a subnet
+
+final host = await Libp2p.new_([
+  // ... other options
+  Libp2p.connectionGater(gater),
+]);
+```
+
+You can change the blocks while the host runs. A block applies to the next dial or connection; it does not close existing connections.
+
+The host asks the gater at five points. If the gater says no, the host does not make the connection or closes it:
+
+| Method | When | Known at that point |
+|---|---|---|
+| `interceptPeerDial` | Before a dial to a peer | Peer ID |
+| `interceptAddrDial` | For each address of the dial | Peer ID, address |
+| `interceptAccept` | When an inbound connection arrives | Addresses only (the peer is not known yet) |
+| `interceptSecured` | After the security handshake, both directions | Authenticated peer ID |
+| `interceptUpgraded` | Before the swarm adds the connection | Full connection |
+
+A dial that the gater rejects throws `GaterDisallowedConnectionException`. An address that `interceptAddrDial` rejects is left out of the dial; when no address is left, the dial fails. `host.connect` to a peer that is already connected returns at once, as in go-libp2p; it does not ask the gater again.
+
+To write a different policy, implement `ConnGater` (`package:dart_libp2p/core/connmgr/conn_gater.dart`). For connection limits, use the resource manager (see [resource-manager.md](resource-manager.md)), not a gater.

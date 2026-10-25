@@ -9,7 +9,7 @@ import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart'; // Added import
 import 'package:dart_libp2p/core/network/context.dart';
-import 'package:dart_libp2p/core/network/errors.dart' show PeerIdMismatchException;
+import 'package:dart_libp2p/core/network/errors.dart' show GaterDisallowedConnectionException, PeerIdMismatchException;
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -349,6 +349,14 @@ class Swarm implements Network {
     _logger.fine('Swarm._handleIncomingConnections called for listener: ${listener.runtimeType} on addr ${listener.addr}');
     // Explicitly type the stream's data event
     listener.connectionStream.listen((TransportConn transportConn) async { 
+      // The remote peer is not known yet: the gater decides on the addresses.
+      final gater = _config.connGater;
+      if (gater != null && !gater.interceptAccept(transportConn)) {
+        _logger.fine('Swarm: gater rejected inbound connection from ${transportConn.remoteMultiaddr}');
+        await transportConn.close().catchError((_) {});
+        return;
+      }
+
       // FIX: For relay connections, extract peer ID and mark as upgrading
       // This prevents race condition where dialPeer() doesn't see the connection during upgrade
       String? remotePeerIdStr;
@@ -394,12 +402,16 @@ class Swarm implements Network {
         // Upgrade the raw transport connection
         final Conn upgradedConn;
         try {
-          upgradedConn = transportConn is UpgradedTransportConn
-              ? transportConn
-              : await _upgrader.upgradeInbound(
-                  connection: transportConn,
-                  config: _config,
-                );
+          if (transportConn is UpgradedTransportConn) {
+            await _interceptSecuredSelfUpgraded(transportConn, false);
+            upgradedConn = transportConn;
+          } else {
+            upgradedConn = await _upgrader.upgradeInbound(
+              connection: transportConn,
+              config: _config,
+            );
+          }
+          await _interceptUpgraded(upgradedConn);
         } catch (e, s) {
           _logger.warning('Inbound connection upgrade failed for ${transportConn.remoteMultiaddr}: $e\n$s');
           await transportConn.close();
@@ -524,6 +536,29 @@ class Swarm implements Network {
         await listener.close();
         removeListenAddress(listener.addr); // Also remove from _listenAddrs and notify
     });
+  }
+
+  /// Asks the connection gater, if any, whether to keep [conn], which a
+  /// transport secured itself (the upgrader asks for the others). On no,
+  /// closes it and throws.
+  Future<void> _interceptSecuredSelfUpgraded(UpgradedTransportConn conn, bool isInitiator) async {
+    final gater = _config.connGater;
+    if (gater == null || gater.interceptSecured(isInitiator, conn.remotePeer, conn)) return;
+    await conn.close().catchError((_) {});
+    throw GaterDisallowedConnectionException(peer: conn.remotePeer.toBase58(), check: 'interceptSecured');
+  }
+
+  /// Asks the connection gater, if any, whether to add the upgraded [conn]
+  /// to the swarm, as go-libp2p's swarm does in addConn. On no, closes it
+  /// and throws.
+  Future<void> _interceptUpgraded(Conn conn) async {
+    final gater = _config.connGater;
+    if (gater == null) return;
+    final (allow, reason) = gater.interceptUpgraded(conn);
+    if (allow) return;
+    _logger.fine('Swarm: gater rejected upgraded connection to ${conn.remotePeer}${reason != null ? ': ${reason.message}' : ''}');
+    await conn.close().catchError((_) {});
+    throw GaterDisallowedConnectionException(peer: conn.remotePeer.toBase58(), check: 'interceptUpgraded');
   }
 
   /// Returns the resource scope of the upgraded connection [conn], attached
@@ -828,6 +863,14 @@ class Swarm implements Network {
       throw Exception('Cannot dial self: $peerId');
     }
 
+    // As in go-libp2p, a blocked peer gets no connection, not even one that
+    // exists.
+    final gater = _config.connGater;
+    if (gater != null && !gater.interceptPeerDial(peerId)) {
+      _logger.fine('Swarm.dialPeer: gater disallowed dial to $peerId');
+      throw GaterDisallowedConnectionException(peer: peerId.toBase58(), check: 'interceptPeerDial');
+    }
+
     // Check if we already have a connection to this peer
     final peerIDStr = peerId.toString();
     _logger.fine('Looking up connections for peer ID string: "$peerIDStr"');
@@ -1003,7 +1046,7 @@ class Swarm implements Network {
           }
         }
       }
-      return true;
+      return gater == null || gater.interceptAddrDial(peerId, addr);
     }).toList();
 
     // A forceDirectDial (e.g. a DCUtR punch) must never be satisfied by a new
@@ -1069,6 +1112,7 @@ class Swarm implements Network {
       final dialStartTime = DateTime.now();
       final conn = await dialer.dial();
       _logger.fine('Swarm.dialPeer: Successfully connected to $peerId');
+      await _interceptUpgraded(conn);
       
       // Obtain a ConnManagementScope for the new connection
       final ConnManagementScope connManagementScope;
@@ -1199,6 +1243,7 @@ class Swarm implements Network {
         await transportConn.close();
         throw PeerIdMismatchException(expected: peerId.toBase58(), actual: transportConn.remotePeer.toBase58());
       }
+      await _interceptSecuredSelfUpgraded(transportConn, true);
       _logger.fine('Swarm._dialSingleAddr: Dialed already-upgraded connection to $peerId at $addr');
       return transportConn;
     }

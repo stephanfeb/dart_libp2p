@@ -10,12 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`NetworkInterfaceMonitor` takes an `addressesProvider`** that gives the addresses of each interface as strings, keyed by interface name. It does not depend on `NetworkInterface`, whose `addresses` became `List<InterfaceAddress>` in Dart 3.13, so code and tests that use it compile on every supported SDK. `NetworkInterfaceMonitor.addressesOf` converts a `NetworkInterface` list. `interfaceProvider` works as before. Thanks to @jxoesneon (#30).
+- **`Libp2p.connectionGater(ConnGater)` gives the host a connection gater.** Before, no option took a gater and nothing called one. Now, as in go-libp2p, the swarm calls `interceptPeerDial` and `interceptAddrDial` when it dials, calls `interceptAccept` when an inbound connection arrives, and calls `interceptUpgraded` before it adds a connection. The upgrader calls `interceptSecured` after the security handshake (the swarm calls it for transports that upgrade themselves). When the gater says no, the host closes the connection; a dial throws `GaterDisallowedConnectionException` (new, in `core/network/errors.dart`). With no gater, nothing changes. See "Connection Gating" in doc/security.md.
+
+### Changed
+
+- **`BasicConnGater` blocks peers, addresses and subnets only, like go-libp2p's `BasicConnectionGater`.** `blockAddr` blocks every address that starts with the given one: `/ip4/1.2.3.4` blocks all ports of that IP, and a full address blocks only itself, as before. `interceptAccept` now checks the remote address against the blocked addresses and subnets. Before, it applied connection limits by remote peer, which is not known at that point.
+
+### Deprecated
+
+- **The `BasicConnGater` connection limits, timeout and metrics.** The `maxConnections`, `maxConnectionsPerPeer` and `connectionTimeout` parameters, `updateConnectionMetrics`, `getConnectionMetrics`, `close` and `ConnectionMetrics` have no effect now. Nothing told the gater when a connection closed, so the limits counted connections that were gone. Use the resource manager limits (`Libp2p.resourceLimiter`). They will be removed in 5.0.
 
 ### Fixed
 
 - **The AutoNAT v2 server rejects a first message that is not a DialRequest.** The check compared a protobuf getter with null, which is never true. Thus the server answered such a message as an empty request with `E_DIAL_REFUSED`. Now it resets the stream, as go-libp2p does.
 - **A UDX session closes its UDP socket even when closing one of its streams fails.** The error handler of `Future.catchError` only logged and returned nothing, so `catchError` threw an `ArgumentError`. The session then skipped the rest of its cleanup: a dialer kept its UDP socket open.
 - **`TCPConnection.setWriteTimeout` limits the time of a write.** Before, the connection kept the value but did not use it. If the peer stopped reading, `write()` waited for all time. Now, when the timeout ends, the write throws `TimeoutException` and the connection closes. This also applies to the write deadlines that the upgrader sets during negotiation.
+- **`BasicConnGater.blockSubnet` matches IPv6 addresses that use `::`.** The parser split the address at each colon and lost the zero groups, so for example `2001:db8::/32` did not match `2001:db8::1`.
 
 ### Security
 

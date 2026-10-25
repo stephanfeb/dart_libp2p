@@ -48,6 +48,9 @@ abstract class ConnGater {
   ///
   /// This is called by the upgrader, or by the transport directly,
   /// straight after it has accepted a Conn from its socket.
+  ///
+  /// The remote peer is not known yet: decide on [Conn.remoteMultiaddr] and
+  /// [Conn.localMultiaddr] only, as go-libp2p passes only the addresses.
   bool interceptAccept(Conn conn);
 
   /// Tests whether a given Conn, now authenticated,
