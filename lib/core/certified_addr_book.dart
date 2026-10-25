@@ -15,14 +15,6 @@ import 'dart:async';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/record/envelope.dart';
 
-/// Envelope contains a signed payload produced by a peer.
-/// This is a placeholder for the actual Envelope class that would be defined in the record module.
-/// When the record module is implemented, this should be replaced with the actual Envelope class.
-/// 
-import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:synchronized/synchronized.dart';
-
-
 /// CertifiedAddrBook manages signed peer records and "self-certified" addresses
 /// contained within them.
 abstract class CertifiedAddrBook {

@@ -5,7 +5,6 @@ import 'package:dart_libp2p/core/network/context.dart';
 /// A mock implementation of Context for testing
 class MockContext implements Context {
   /// Whether the context is done
-  bool _isDone = false;
 
   /// The completer for the done future
   final Completer<void> _doneCompleter = Completer<void>();

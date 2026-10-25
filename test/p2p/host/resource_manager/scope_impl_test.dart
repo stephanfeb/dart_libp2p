@@ -1,5 +1,4 @@
 import 'package:dart_libp2p/core/network/common.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limit.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/scope_impl.dart';
 import 'package:test/test.dart';
@@ -278,7 +277,6 @@ void main() {
       expect(mockParent.stat.numStreamsOutbound, 1);
       expect(mockParent.decRefCalls, 0);
       
-      final childStatBeforeDone = childScope.stat;
 
       childScope.done();
 

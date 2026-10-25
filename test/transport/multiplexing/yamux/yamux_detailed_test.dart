@@ -61,7 +61,7 @@ void main() {
       final stream2 = await stream2Future.timeout(
         Duration(seconds: 5),
         onTimeout: () => throw TimeoutException('Timeout waiting for server stream acceptance')
-      ) as YamuxStream;
+      );
       print('Server accepted stream with ID: ${stream2.id()}');
 
       print('\n=== Data Transfer ===');

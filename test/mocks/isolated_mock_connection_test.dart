@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'package:test/test.dart';
-import 'package:cryptography/cryptography.dart';
 import 'isolated_mock_connection.dart';
 
 void main() {

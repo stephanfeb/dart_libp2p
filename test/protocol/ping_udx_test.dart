@@ -28,7 +28,6 @@ void main() {
     late Host host1;
     late Host host2;
     late PeerId peerId1;
-    late PeerId peerId2;
     late UDX udx;
 
     setUp(() async {
@@ -55,7 +54,6 @@ void main() {
         enablePing: true, // createLibp2pNode leaves ping off by default
       );
       host2 = node2.host;
-      peerId2 = node2.peerId;
     });
 
     tearDown(() async {

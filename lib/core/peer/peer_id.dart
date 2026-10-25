@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:bs58/bs58.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:dcid/dcid.dart' as cid_lib; // Added alias
-import 'package:dart_libp2p/core/routing/routing.dart';
 import 'package:dart_multihash/dart_multihash.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as key_generator;
 import 'package:dart_libp2p/core/crypto/keys.dart';
@@ -160,7 +159,6 @@ class PeerId {
     return PeerId.fromPublicKey(ourPublicKey);
   }
 
-  @override
   Uint8List toBytes() {
     return Uint8List.fromList(_multihash ?? Uint8List.fromList([]));
   }
@@ -183,7 +181,6 @@ class PeerId {
     return toString();
   }
 
-  @override
   String shortString() {
     final pid = toString();
     if (pid.length <= 10) {
@@ -192,26 +189,22 @@ class PeerId {
     return '<peer.ID ${pid.substring(0, 2)}*${pid.substring(pid.length - 6)}>';
   }
 
-  @override
   Map<String, dynamic> loggable() {
     return {
       'peerID': toString(),
     };
   }
 
-  @override
   bool matchesPublicKey(PublicKey publicKey) {
     final derivedId = PeerId.fromPublicKey(publicKey);
     return this == derivedId;
   }
 
-  @override
   bool matchesPrivateKey(PrivateKey privateKey) {
     final publicKey = privateKey.publicKey;
     return matchesPublicKey(publicKey);
   }
 
-  @override
   Future<PublicKey?> extractPublicKey() async {
     try {
       final decoded = Multihash.decode(_multihash ?? Uint8List.fromList([]));
@@ -231,7 +224,6 @@ class PeerId {
     }
   }
 
-  @override
   bool isValid() {
     try {
       Multihash.decode(_multihash ?? Uint8List.fromList([00]));
@@ -241,7 +233,6 @@ class PeerId {
     }
   }
 
-  @override
   Map<String, dynamic> toJson() {
     // Prioritize CID string representation for JSON.
     // toCIDString will throw if the PeerId is invalid, which is good.

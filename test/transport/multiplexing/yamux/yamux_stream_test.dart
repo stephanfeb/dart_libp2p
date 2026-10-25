@@ -9,10 +9,9 @@ import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/multiaddr.dart' hide Protocol; // Hide core Protocol if it exists to avoid conflict
+import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart'; // Import the Protocol class for Multiaddr
 import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart' as core_protocol; // Alias to avoid conflict with multiaddr.Protocol
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/yamux_exceptions.dart';
@@ -30,9 +29,6 @@ class MockPeerId extends PeerId {
 
   @override
   Uint8List toBytes() => Uint8List.fromList(_idString.codeUnits); // Simple mock
-
-  @override
-  bool equals(other) => other is MockPeerId && other._idString == _idString;
 
   @override
   int get hashCode => _idString.hashCode;
@@ -223,7 +219,6 @@ class MockConnScope implements ConnScope {
   // Methods for P2PStream interaction, if ConnScope is used in that context by YamuxStream.
   // These are not part of the defined ConnScope interface.
   Future<void> addStream(P2PStream stream) async {} // Not in ConnScope interface
-  @override
   void removeStream(P2PStream stream) {} // Not in ConnScope interface
 }
 

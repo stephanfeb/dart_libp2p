@@ -6,7 +6,6 @@ import '../../../core/peer/addr_info.dart';
 import '../../../core/host/host.dart';
 import '../../../core/network/context.dart';
 import 'backoff.dart';
-import 'lru_cache.dart';
 
 /// A utility to connect to peers, but only if we have not recently tried connecting to them already
 class BackoffConnector {

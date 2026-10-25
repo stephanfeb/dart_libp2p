@@ -15,10 +15,10 @@ import '../../core/connmgr/conn_manager.dart'; // For ConnManager class
 import '../../p2p/transport/connection_state.dart'; // Correct import for ConnectionState enum
 
 import '../../core/multiaddr.dart';
-import '../../core/network/conn.dart' show Conn, ConnStats, ConnState, Stats; // Added Stats
+import '../../core/network/conn.dart' show ConnStats, ConnState, Stats; // Added Stats
 import '../../core/network/transport_conn.dart';
-import '../../core/network/stream.dart' show P2PStream, StreamStats;
-import '../../core/network/rcmgr.dart' show ConnScope, StreamScope;
+import '../../core/network/stream.dart' show P2PStream;
+import '../../core/network/rcmgr.dart' show ConnScope;
 import '../../core/network/context.dart' show Context;
 import '../../core/network/mux.dart' show MuxedConn, MuxedStream;
 import '../../core/peer/peer_id.dart' show PeerId;
@@ -204,7 +204,7 @@ class UDXTransport implements Transport {
           ),
           'RawDatagramSocket.bind($host)',
         );
-        _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket!.port}');
+        _logger.fine('[UDXTransport._performDial] RawDatagramSocket bound to: ${rawSocket!.address.address}:${rawSocket.port}');
 
         // Create multiplexer with exception handling
         multiplexer = await UDXExceptionHandler.handleUDXOperation(
@@ -290,7 +290,7 @@ class UDXTransport implements Transport {
         if (metricsObserver != null && udpSocket != null) {
           try {
             metricsObserver!.onHandshakeComplete(
-              udpSocket!.cids.localCid,
+              udpSocket.cids.localCid,
               handshakeDuration,
               false,
               handshakeError,
@@ -309,7 +309,7 @@ class UDXTransport implements Transport {
         try {
           final peerId = PeerId.fromString(peerIdStr);
           onConnectionEstablished!(udpSocket!.cids.localCid, peerId);
-          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket!.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
+          _logger.fine('[UDXTransport._performDial] Registered connection ${udpSocket.cids.localCid} to peer ${peerIdStr.substring(0, 12)}...');
         } catch (e) {
           _logger.warning('[UDXTransport._performDial] Failed to register connection-peer mapping: $e');
         }
@@ -323,7 +323,7 @@ class UDXTransport implements Transport {
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
       final sessionConn = UDXSessionConn(
         udpSocket: udpSocket!,
-        initialStream: initialStream!,
+        initialStream: initialStream,
         localMultiaddr: localMa,
         remoteMultiaddr: remoteMa,
         transport: this,
@@ -975,9 +975,13 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     
     try {
       final streamCloseStart = DateTime.now();
-      await Future.wait(closeFutures).catchError((e) {
+      // Not catchError: its handler must return the future's type, so a
+      // handler that only logs throws, and the cleanup below is skipped.
+      try {
+        await Future.wait(closeFutures);
+      } catch (e) {
         _logger.warning('[UDXSessionConn $id] Error closing one or more UDX streams: $e');
-      });
+      }
       final streamCloseDuration = DateTime.now().difference(streamCloseStart);
       _logger.fine('[UDXSessionConn $id] CLEANUP_ORDER: All active streams closed in ${streamCloseDuration.inMilliseconds}ms');
       _activeStreams.clear(); 
@@ -1036,7 +1040,6 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     return _isClosed;
   }
 
-  @override
   Future<void> get onClose => _closedCompleter.future;
 
   @override
@@ -1082,7 +1085,6 @@ class UDXSessionConn implements MuxedConn, TransportConn {
     return initialP2PStream.write(data);
   }
 
-  @override
   Transport get transport => _transport;
 
   void notifyActivity() {

@@ -190,10 +190,6 @@ class RsaPrivateKey implements p2pkeys.PrivateKey {
       final parser = pc.ASN1Parser(bytes);
       final asn1Object = parser.nextObject();
 
-      if (asn1Object == null) {
-        throw FormatException('Failed to parse ASN.1 object from bytes');
-      }
-
       if (asn1Object is! pc.ASN1Sequence) {
         throw FormatException('Expected ASN.1 SEQUENCE but got: ${asn1Object.runtimeType}');
       }
@@ -357,7 +353,7 @@ class RsaPrivateKey implements p2pkeys.PrivateKey {
     final qInv = _key.q!.modInverse(_key.p!);
     asn1Sequence.add(pc.ASN1Integer(qInv));
     
-    return Uint8List.fromList(asn1Sequence.encode() ?? []);
+    return Uint8List.fromList(asn1Sequence.encode());
   }
 
   @override

@@ -1,7 +1,5 @@
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
-import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/config/config.dart' as p2p_config;
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';

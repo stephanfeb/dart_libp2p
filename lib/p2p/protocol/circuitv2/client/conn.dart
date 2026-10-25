@@ -3,16 +3,13 @@ import 'dart:io'; // For Socket (though unimplemented)
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:dart_libp2p/core/host/host.dart'; // Needed for CircuitV2Client.host
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/common.dart'; // For ScopeStat, ResourceScopeSpan if needed by ConnScope
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/connection_context.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart'; // For ProtocolID in ConnState
 
 // Forward declaration for CircuitV2Client, will be defined in client.dart
 // This import will be resolved once client.dart is implemented.
@@ -25,15 +22,14 @@ final _log = Logger('RelayedConn');
 
 /// _RelayedConnStats implements ConnStats for a RelayedConn.
 class _RelayedConnStats implements ConnStats {
-  final StreamStats _streamStats; // Stats from the underlying P2PStream to the relay
   final Stats _stats;
 
-  _RelayedConnStats(this._streamStats, {required bool limited})
+  _RelayedConnStats(StreamStats streamStats, {required bool limited})
       : _stats = Stats(
-          direction: _streamStats.direction,
-          opened: _streamStats.opened,
-          limited: limited || _streamStats.limited,
-          extra: _streamStats.extra,
+          direction: streamStats.direction,
+          opened: streamStats.opened,
+          limited: limited || streamStats.limited,
+          extra: streamStats.extra,
         );
 
   @override
@@ -49,7 +45,6 @@ class _RelayedConnStats implements ConnStats {
 /// It implements the [TransportConn] interface.
 class RelayedConn implements TransportConn {
   final P2PStream<Uint8List> _stream; // Stream to the relay
-  final CircuitV2Client _transport; // The transport that created this connection
   final PeerId _localPeer;
   final PeerId _remotePeer; // The actual remote peer, not the relay
   final MultiAddr _localMultiaddr;
@@ -79,7 +74,6 @@ class RelayedConn implements TransportConn {
     int? hopStreamId,
     // required bool isInitiator, // isInitiator can be derived from stream.stat().direction
   })  : _stream = stream,
-        _transport = transport,
         _localPeer = localPeer,
         _remotePeer = remotePeer,
         _localMultiaddr = localMultiaddr,

@@ -3,6 +3,7 @@ import 'package:dart_libp2p/config/stream_muxer.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
+import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/network.dart' show Network, Reachability;
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -12,12 +13,14 @@ import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
+import 'package:dart_libp2p/p2p/protocol/autonatv2/pb/autonatv2.pb.dart';
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/tcp_transport.dart';
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
+import 'package:dart_libp2p/utils/protobuf_utils.dart';
 import 'package:test/test.dart';
 
 class _YamuxProvider extends StreamMuxer {
@@ -169,6 +172,41 @@ void main() {
     for (final addr in dialBacks) {
       expect(addr.valueForProtocol('udp'), isNot(serverPort));
     }
+  });
+
+  // go-libp2p resets the stream when the first message is not a DialRequest.
+  // The port compared the protobuf getter with null, which is never true, so
+  // it answered such a message as an empty request.
+  group('a first message that is not a DialRequest', () {
+    late BasicHost server;
+    late BasicHost client;
+
+    setUp(() async {
+      server = await _newHost(autoNATServer: true);
+      client = await _newHost(autoNATServer: false);
+      await client.connect(AddrInfo(server.id, server.network.listenAddresses));
+    });
+
+    tearDown(() async {
+      await client.close();
+      await server.close();
+    });
+
+    test('gets no DialResponse', () async {
+      final stream =
+          await client.newStream(server.id, [AutoNATv2Protocols.dialProtocol], Context());
+      await writeDelimited(stream, Message(dialDataResponse: DialDataResponse()));
+
+      Message? reply;
+      try {
+        reply = await readDelimited(stream, Message.fromBuffer)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // The server reset the stream.
+      }
+
+      expect(reply?.hasDialResponse() ?? false, isFalse);
+    });
   });
 }
 

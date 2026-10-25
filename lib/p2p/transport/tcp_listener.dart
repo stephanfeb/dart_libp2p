@@ -4,9 +4,7 @@ import 'package:logging/logging.dart'; // Added for logging
 
 import '../../core/connmgr/conn_manager.dart';
 import '../../core/multiaddr.dart';
-import '../../core/network/conn.dart';
 import '../../core/network/transport_conn.dart';
-import '../../core/network/mux.dart' show Multiplexer;
 import '../../core/network/rcmgr.dart' show ResourceManager;
 import 'listener.dart';
 import 'transport_config.dart';
@@ -17,10 +15,7 @@ class TCPListener implements Listener {
   final Logger _logger = Logger('TCPListener'); // Added logger
   final ServerSocket _server;
   final MultiAddr _addr;
-  final TransportConfig _config;
-  final ConnManager _connManager;
   // final Multiplexer _multiplexer; // Removed
-  final ResourceManager _resourceManager; // Kept, as _onConnection might need it for raw TCPConnection
   final Future<TransportConn> Function(Socket socket, MultiAddr localAddr, MultiAddr remoteAddr) _onConnection;
   final _connectionController = StreamController<TransportConn>();
   bool _closed = false;
@@ -35,10 +30,7 @@ class TCPListener implements Listener {
     required ResourceManager resourceManager, // Kept
     required Future<TransportConn> Function(Socket socket, MultiAddr localAddr, MultiAddr remoteAddr) onConnection,
   })  : _addr = addr,
-        _config = config,
-        _connManager = connManager,
         // _multiplexer = multiplexer, // Removed
-        _resourceManager = resourceManager, // Kept
         _onConnection = onConnection {
     _server.listen(_handleConnection);
   }

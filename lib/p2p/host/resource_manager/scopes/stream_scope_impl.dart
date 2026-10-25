@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
-import 'package:dart_libp2p/core/peer/peer_id.dart' as concrete_peer_id; // For concrete PeerId type
 import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limit.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/resource_manager_impl.dart';
@@ -11,7 +10,6 @@ import 'package:dart_libp2p/p2p/host/resource_manager/scopes/peer_scope_impl.dar
 import 'package:dart_libp2p/p2p/host/resource_manager/scopes/protocol_scope_impl.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/scopes/service_scope_impl.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/scopes/transient_scope_impl.dart'; // Added
-import 'package:dart_libp2p/p2p/host/resource_manager/scopes/system_scope_impl.dart';   // Added
 import 'package:dart_libp2p/core/network/errors.dart' as network_errors;
 import 'package:logging/logging.dart'; // Added
 
@@ -31,7 +29,6 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
   // which are sub-scopes under protocol/service for that specific peer.
   // This adds another layer of granularity.
   ResourceScopeImpl? _peerProtoScope;
-  ResourceScopeImpl? _peerSvcScope;
 
   final ResourceManagerImpl _rcmgr; // Added ResourceManagerImpl reference
 
@@ -68,7 +65,7 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
     
     // Explicitly cast to the concrete PeerId type
     final newPeerProtoScope = newProtocolScope.getPeerSubScope(
-      _peerScopeImpl.peer as concrete_peer_id.PeerId, 
+      _peerScopeImpl.peer, 
       limiter, 
       systemScope
     );
@@ -134,7 +131,6 @@ class StreamScopeImpl extends ResourceScopeImpl implements StreamManagementScope
       rethrow;
     }
     _serviceScopeImpl = newServiceScope;
-    _peerSvcScope = newPeerSvcScope;
     _logger.fine('$name: Successfully set service to $serviceName. Edges updated.');
   }
 

@@ -8,15 +8,11 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/multiaddr/codec.dart';
 import 'package:dart_libp2p/core/interfaces.dart';
-import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/config/multistream_config.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:logging/logging.dart'; // Added import for Logger
 
-import '../../../core/network/conn.dart'; // Added import for Conn
 import '../../transport/multiplexing/yamux/yamux_exceptions.dart'; // Import Yamux exception handling
-import '../../../core/network/mux.dart' show PushbackStream;
 import '../../network/swarm/swarm_stream.dart'; // For SwarmStream.incoming
 
 final _log = Logger('multistream'); // Added logger instance
@@ -288,7 +284,6 @@ class MultistreamMuxer implements ProtocolSwitch {
   ///
   /// Returns the selected [ProtocolID] or `null` if no protocol could be agreed upon.
   Future<ProtocolID?> selectOneOf(P2PStream<dynamic> stream, List<ProtocolID> protocolsToSelect) async {
-    final startTime = DateTime.now();
     final streamId = stream.id();
     
     // Safely get peer ID - during negotiation, conn might not be available
@@ -319,14 +314,12 @@ class MultistreamMuxer implements ProtocolSwitch {
       // 3. Iterate through the protocols we want to select
       for (int i = 0; i < protocolsToSelect.length; i++) {
         final p = protocolsToSelect[i];
-        final protocolStart = DateTime.now();
 
         await _writeDelimited(stream, utf8.encode(p));
         final response = await _readNextToken(stream);
 
         if (response == p) {
           // Protocol selected
-          final totalDuration = DateTime.now().difference(startTime);
 
           return p;
         } else if (response == 'na') {
@@ -341,12 +334,10 @@ class MultistreamMuxer implements ProtocolSwitch {
       }
 
       // No protocol was selected
-      final totalDuration = DateTime.now().difference(startTime);
 
       await stream.reset(); // Ensure stream is reset if no protocol is selected
       return null;
-    } catch (e, st) {
-      final totalDuration = DateTime.now().difference(startTime);
+    } catch (e) {
 
       await stream.reset();
       rethrow;

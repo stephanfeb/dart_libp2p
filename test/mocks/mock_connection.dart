@@ -11,18 +11,15 @@ import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnStats, Stats;
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // For P2PStream
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope;
-import 'package:dart_libp2p/core/protocol/protocol.dart';
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 
 /// A mock implementation of Connection for testing
 class MockConnection implements Conn {
   @override
   final String id;
   
-  @override
   final MultiAddr localAddr;
   
-  @override
   final MultiAddr remoteAddr;
   
   @override
@@ -95,30 +92,24 @@ class MockConnection implements Conn {
   @override
   ConnScope get scope => _scope;
 
-  @override
   Future<void> reset() async {
     await close();
   }
 
-  @override
   Future<Uint8List> read([int? length]) async {
     // In a real implementation, we would read from the socket
     // For testing, we'll just return an empty buffer
     return Uint8List(0);
   }
 
-  @override
   void setReadTimeout(Duration timeout) {}
 
-  @override
   void setWriteTimeout(Duration timeout) {}
 
-  @override
   Socket get socket {
     throw UnimplementedError('Socket is not implemented in MockConnection');
   }
 
-  @override
   Future<void> write(Uint8List data) async {
     // In a real implementation, we would write to the socket
     // For testing, we'll just do nothing
@@ -161,24 +152,4 @@ class MockConnScope implements ConnScope {
   Future<ResourceScopeSpan> beginSpan() async { // ResourceScopeSpan from rcmgr.dart
     throw UnimplementedError('beginSpan not implemented in MockConnScope');
   }
-}
-
-/// Mock implementation of ResourceScopeSpan
-class _MockResourceScopeSpan implements ResourceScopeSpan { // ResourceScopeSpan from rcmgr.dart
-  @override
-  Future<ResourceScopeSpan> beginSpan() async { // ResourceScopeSpan from rcmgr.dart
-    return this;
-  }
-
-  @override
-  void done() {}
-
-  @override
-  void releaseMemory(int size) {}
-
-  @override
-  Future<void> reserveMemory(int size, int priority) async {}
-
-  @override
-  ScopeStat get stat => const ScopeStat(); // Renamed scopeStat to stat. ScopeStat from rcmgr.dart
 }

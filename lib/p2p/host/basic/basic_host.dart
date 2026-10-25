@@ -26,7 +26,6 @@ import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
-import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Import AddrsFactory
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
 import 'package:dart_libp2p/p2p/protocol/identify/id_service.dart'; // Added import
 import 'package:dart_libp2p/p2p/protocol/identify/identify.dart';   // Added import
@@ -36,8 +35,6 @@ import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'internal/backoff/backoff.dart';
-import 'package:dart_libp2p/p2p/network/connmgr/null_conn_mgr.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart'; // For real ConnectionManager
 import 'package:dart_libp2p/p2p/host/eventbus/basic.dart';
 import 'package:dart_libp2p/config/config.dart'; // Added import for Config
@@ -188,8 +185,6 @@ class BasicHost implements Host {
   late final StreamController<void> _addrChangeChan;
 
   final _addrMu = Lock();
-  final ExpBackoff _updateLocalIPv4Backoff = ExpBackoff();
-  final ExpBackoff _updateLocalIPv6Backoff = ExpBackoff();
   List<MultiAddr> _filteredInterfaceAddrs = [];
   List<MultiAddr> _allInterfaceAddrs = [];
   Timer? _addressMonitorTimer; // Added to store the timer
@@ -351,12 +346,8 @@ class BasicHost implements Host {
 
             final envelope = await Envelope.seal(recordPayload, privKey);
 
-            if (envelope != null) {
-              await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
-              _log.fine('Successfully created and persisted self signed peer record to peerstore.');
-            } else {
-              _log.fine('Failed to create or seal self signed peer record envelope (seal returned null).');
-            }
+            await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
+            _log.fine('Successfully created and persisted self signed peer record to peerstore.');
           } catch (e, s) {
             _log.severe('Error creating or persisting self signed peer record: $e\n$s');
           }
@@ -1128,7 +1119,6 @@ class BasicHost implements Host {
 
     // Phase 1: Address Filtering and Peerstore Update
 
-    final filterStartTime = DateTime.now();
     
     // _addrsFactory transforms how THIS host presents its OWN addresses to
     // others (see `get addrs => _addrsFactory(allAddrs)` above) — it must
@@ -1144,7 +1134,6 @@ class BasicHost implements Host {
     
     await peerStore.addrBook.addAddrs(pi.id, filteredAddrs, Duration(minutes: 5));
     
-    final filterTime = DateTime.now().difference(filterStartTime);
 
 
     // Phase 2: Connection Check
@@ -1160,7 +1149,6 @@ class BasicHost implements Host {
     // it was already checked.
     final skipEarlyReturn = context?.getForceDirectDial().$1 ?? false;
     if (connectedness == Connectedness.connected && !skipEarlyReturn) {
-      final totalTime = DateTime.now().difference(startTime);
 
       return;
     }
@@ -1177,11 +1165,9 @@ class BasicHost implements Host {
     try {
       await _dialPeer(pi.id, ctx);
       
-      final dialTime = DateTime.now().difference(dialStartTime);
-      final totalTime = DateTime.now().difference(startTime);
 
 
-    } on IdentifyTimeoutException catch (e, stackTrace) {
+    } on IdentifyTimeoutException catch (e) {
       // Handle identify timeout gracefully - log warning instead of error
       final dialTime = DateTime.now().difference(dialStartTime);
       final totalTime = DateTime.now().difference(startTime);
@@ -1216,13 +1202,11 @@ class BasicHost implements Host {
       final conn = await _network.dialPeer(context, p);
 
       // Phase 2: Identify Wait
-      final identifyStartTime = DateTime.now();
 
       await _idService.identifyWait(conn);
 
-      final identifyTime = DateTime.now().difference(identifyStartTime);
 
-    } on IdentifyTimeoutException catch (e, stackTrace) {
+    } on IdentifyTimeoutException catch (e) {
       // Handle identify timeout gracefully - this is not a critical error,
       // the peer may have gone offline or be unreachable.
       final totalTime = DateTime.now().difference(startTime);
@@ -1321,12 +1305,11 @@ class BasicHost implements Host {
 
     // Phase 1: Connection
 
-    final connectStartTime = DateTime.now();
     _log.fine('🎯 [newStream Phase 1] Connecting to peer ${p.toBase58()}...');
     
     try {
       await connect(AddrInfo(p, []), context: context);
-    } on IdentifyTimeoutException catch (e) {
+    } on IdentifyTimeoutException {
       final totalTime = DateTime.now().difference(startTime);
       _log.fine('⏱️ [newStream Phase 1] Connection to ${p.toBase58()} timed out during identify after ${totalTime.inMilliseconds}ms');
       rethrow;
@@ -1337,18 +1320,15 @@ class BasicHost implements Host {
     }
     _log.fine('✅ [newStream Phase 1] Connected to peer ${p.toBase58()}');
     
-    final connectTime = DateTime.now().difference(connectStartTime);
 
 
     // Phase 2: Stream Creation
 
-    final streamCreateStartTime = DateTime.now();
     _log.fine('🎯 [newStream Phase 2] Creating stream to peer ${p.toBase58()}...');
     
     final stream = await _network.newStream(context, p);
     _log.fine('✅ [newStream Phase 2] Stream ${stream.id()} created to peer ${p.toBase58()}');
     
-    final streamCreateTime = DateTime.now().difference(streamCreateStartTime);
 
 
     // DEBUG: Add protocol assignment tracking
@@ -1359,13 +1339,12 @@ class BasicHost implements Host {
     // Identify has its own internal timeout handling (30s)
     // Setting deadline here causes it to expire during identify, breaking protocol negotiation
 
-    final identifyStartTime = DateTime.now();
 
     _log.fine('🎯 [newStream Phase 3] Waiting for identify on stream ${stream.id()}...');
 
     try {
       await _idService.identifyWait(stream.conn);
-    } on IdentifyTimeoutException catch (e) {
+    } on IdentifyTimeoutException {
       final totalTime = DateTime.now().difference(startTime);
       _log.fine('⏱️ [newStream Phase 3] Identify for ${p.toBase58()} timed out after ${totalTime.inMilliseconds}ms');
       await stream.reset();
@@ -1389,7 +1368,6 @@ class BasicHost implements Host {
     }
     _log.fine('✅ [newStream Phase 3] Identify complete for stream ${stream.id()}');
 
-    final identifyTime = DateTime.now().difference(identifyStartTime);
 
 
     // Phase 4: Protocol Negotiation
@@ -1408,7 +1386,6 @@ class BasicHost implements Host {
 
       // DEBUG: Add detailed protocol negotiation tracking
 
-      final selectStartTime = DateTime.now();
       _log.fine('🎯 [newStream Phase 4] Negotiating protocols $pids on stream ${stream.id()}...');
       
       // The stream deadline bounds reads only; a write that waits behind a
@@ -1421,7 +1398,6 @@ class BasicHost implements Host {
           : await select;
       _log.fine('✅ [newStream Phase 4] Protocol negotiated: $selectedProtocol on stream ${stream.id()}');
       
-      final selectTime = DateTime.now().difference(selectStartTime);
 
       
       // DEBUG: Add protocol selection result tracking
@@ -1440,7 +1416,6 @@ class BasicHost implements Host {
 
       // Phase 5: Protocol Setup
 
-      final setupStartTime = DateTime.now();
       _log.fine('🎯 [newStream Phase 5] Setting up protocol $selectedProtocol on stream ${stream.id()}...');
       
       // DEBUG: Add protocol assignment tracking
@@ -1458,9 +1433,6 @@ class BasicHost implements Host {
       // This ensures that even if the handler has issues, we've recorded the protocol.
       await peerStore.protoBook.addProtocols(p, [selectedProtocol]);
       
-      final setupTime = DateTime.now().difference(setupStartTime);
-      final negotiationTime = DateTime.now().difference(negotiationStartTime);
-      final totalTime = DateTime.now().difference(startTime);
       
       _log.fine('✅ [newStream Phase 5] Protocol setup complete for stream ${stream.id()}');
       _log.fine('✅ [newStream] COMPLETE - Returning stream ${stream.id()} with protocol $selectedProtocol');
@@ -1499,7 +1471,7 @@ class BasicHost implements Host {
   Future<Host> _newAutoNATDialerHost() async {
     // Copy the dial stack from the swarm, which may have been built from a
     // different Config than this host's.
-    final swarm = _network is Swarm ? _network as Swarm : null;
+    final swarm = _network is Swarm ? _network : null;
     final dialConfig = swarm?.config ?? _config;
     final dialerKey = await generateEd25519KeyPair();
     final dialerConfig = Config()
@@ -1565,7 +1537,6 @@ class BasicHost implements Host {
     _stunNatTypeTimer = Timer.periodic(const Duration(minutes: 10), (_) => run());
   }
 
-  @override
   /// Emits [EvtPeerConnectednessChanged] when [peer]'s connectedness, as the
   /// network now has it, differs from what was last emitted. The swarm
   /// removes a closed connection before it notifies, so the last one closing
@@ -1586,6 +1557,7 @@ class BasicHost implements Host {
         .catchError((Object e) => _log.warning('[BasicHost] Connectedness of $peer not emitted: $e')));
   }
 
+  @override
   Future<void> close() async {
     if (_closed) return;
 
@@ -1724,12 +1696,8 @@ class BasicHost implements Host {
 
       final envelope = await Envelope.seal(recordPayload, privKey);
 
-      if (envelope != null) {
-        await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
-        _log.fine('[BasicHost] Successfully regenerated signed peer record with addresses: $currentAddrs');
-      } else {
-        _log.warning('[BasicHost] Failed to seal signed peer record envelope');
-      }
+      await cab.consumePeerRecord(envelope, AddressTTL.permanentAddrTTL);
+      _log.fine('[BasicHost] Successfully regenerated signed peer record with addresses: $currentAddrs');
     } catch (e, s) {
       _log.severe('[BasicHost] Error regenerating signed peer record: $e\n$s');
     }

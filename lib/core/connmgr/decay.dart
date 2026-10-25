@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 
-import 'conn_manager.dart';
 
 /// A decaying tag is one whose value automatically decays over time.
 ///

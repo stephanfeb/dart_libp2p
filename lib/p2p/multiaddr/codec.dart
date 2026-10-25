@@ -194,14 +194,6 @@ class MultiAddrCodec {
   }
 
 // Helper function to convert bytes back to IPv6 string for testing
-  static String _bytesToIPv6String(Uint8List bytes) {
-    final segments = <String>[];
-    for (var i = 0; i < 16; i += 2) {
-      final value = (bytes[i] << 8) | bytes[i + 1];
-      segments.add(value.toRadixString(16));
-    }
-    return segments.join(':');
-  }
 
   static Uint8List _encodePort(String value) {
     final port = int.parse(value);

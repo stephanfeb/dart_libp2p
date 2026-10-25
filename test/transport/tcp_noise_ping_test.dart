@@ -6,7 +6,6 @@ import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/crypto/keys.dart';
 // import 'package:dart_libp2p/core/host/host.dart'; // For Context (though we use core.Context) - Not directly used
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux_types; // Aliased import

@@ -50,7 +50,6 @@ class StompClient {
 
   // Heart-beat support
   Timer? _heartBeatTimer;
-  Duration? _heartBeatInterval;
 
   // Event streams
   final StreamController<StompClientState> _stateController = StreamController<StompClientState>.broadcast();

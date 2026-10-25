@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'stun_client.dart';
 import '../nat_type.dart';
@@ -31,9 +30,6 @@ class StunClientPool {
 
   /// Health check interval
   final Duration healthCheckInterval;
-
-  /// Random number generator for server selection
-  final Random _random = Random();
 
   /// Timer for periodic health checks
   Timer? _healthCheckTimer;

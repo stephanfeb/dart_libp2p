@@ -58,7 +58,6 @@ void main() {
     late MultiAddr serverListenAddr;
     
     late KeyPair clientKeyPair;
-    late PeerId clientPeerId;
     late KeyPair serverKeyPair;
     late PeerId serverPeerId;
 
@@ -80,7 +79,6 @@ void main() {
       serverTcpTransport = TCPTransport(resourceManager: resourceManager, connManager: connManager);
 
       clientKeyPair = await crypto_ed25519.generateEd25519KeyPair();
-      clientPeerId = await concrete_peer_id.PeerId.fromPublicKey(clientKeyPair.publicKey);
       serverKeyPair = await crypto_ed25519.generateEd25519KeyPair();
       serverPeerId = await concrete_peer_id.PeerId.fromPublicKey(serverKeyPair.publicKey);
 

@@ -10,7 +10,6 @@ import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux_types;
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/core/network/stream.dart' as core_network_stream;
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';

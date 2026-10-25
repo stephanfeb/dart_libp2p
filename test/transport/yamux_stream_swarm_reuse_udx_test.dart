@@ -4,17 +4,13 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
-import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
-import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
-import 'package:dart_libp2p/core/network/rcmgr.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
-import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/mux.dart' as core_mux_types;
@@ -730,83 +726,6 @@ void main() {
   });
 }
 
-/// Performs an echo test with bidirectional communication
-Future<void> _performEchoTest({
-  required Conn clientConn,
-  required Conn serverConn,
-  required int testId,
-  required String expectedConnectionId,
-  required Swarm swarmB,
-  required Swarm swarmA,
-}) async {
-  print('Starting echo test $testId...');
-  
-  // Setup server stream acceptance
-  late P2PStream serverStream;
-  final serverAcceptFuture = ((serverConn as dynamic).conn as core_mux_types.MuxedConn)
-      .acceptStream()
-      .then((stream) {
-    serverStream = stream as P2PStream;
-    print('Server accepted stream ${serverStream.id()} for test $testId');
-    return _handleEchoStream(serverStream);
-  });
-  
-  // Client opens stream and sends data
-  final clientStream = await ((clientConn as dynamic).conn as core_mux_types.MuxedConn)
-      .openStream(Context()) as P2PStream;
-  
-  final testData = 'echo-test-$testId-${DateTime.now().millisecondsSinceEpoch}';
-  final dataBytes = utf8.encode(testData);
-  
-  await clientStream.write(dataBytes);
-  print('Client sent data for test $testId: $testData');
-  
-  // Wait for server to handle the echo
-  await serverAcceptFuture.timeout(Duration(seconds: 5));
-  
-  // Read the echo response
-  final receivedData = await clientStream.read().timeout(Duration(seconds: 5));
-  final receivedText = utf8.decode(receivedData);
-  
-  print('Client received echo for test $testId: $receivedText');
-  
-  // Verify data integrity
-  expect(receivedText, equals(testData));
-  
-  // Verify connection reuse
-  final connections = swarmB.connsToPeer(swarmA.localPeer);
-  expect(connections.length, equals(1));
-  expect(connections.first.id, equals(expectedConnectionId));
-  
-  // Cleanup
-  await clientStream.close();
-  await serverStream.close();
-  
-  print('✓ Echo test $testId completed successfully');
-}
-
-/// Performs a concurrent echo test
-Future<void> _performConcurrentEchoTest({
-  required Conn clientConn,
-  required Conn serverConn,
-  required int testId,
-  required String expectedConnectionId,
-  required Swarm swarmB,
-  required Swarm swarmA,
-}) async {
-  // Add some randomness to test concurrent behavior
-  await Future.delayed(Duration(milliseconds: Random().nextInt(100)));
-  
-  await _performEchoTest(
-    clientConn: clientConn,
-    serverConn: serverConn,
-    testId: testId + 100, // Offset to distinguish from sequential tests
-    expectedConnectionId: expectedConnectionId,
-    swarmB: swarmB,
-    swarmA: swarmA,
-  );
-}
-
 /// Runs a background echo server that continuously accepts and handles streams
 Future<void> _runBackgroundEchoServer({
   required Conn serverConn,
@@ -908,18 +827,6 @@ Future<void> _performIndependentEchoTest({
     
   } catch (e) {
     print('Error in independent echo test $testId: $e');
-    rethrow;
-  }
-}
-
-/// Handles echo functionality for a stream (single read, for small payloads)
-Future<void> _handleEchoStream(P2PStream stream) async {
-  try {
-    final data = await stream.read().timeout(Duration(seconds: 5));
-    print('Server echoing ${data.length} bytes on stream ${stream.id()}');
-    await stream.write(data);
-  } catch (e) {
-    print('Error in echo handler for stream ${stream.id()}: $e');
     rethrow;
   }
 }

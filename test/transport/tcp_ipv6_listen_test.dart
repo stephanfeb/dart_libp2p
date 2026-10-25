@@ -1,4 +1,3 @@
-import 'dart:async';
 
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';

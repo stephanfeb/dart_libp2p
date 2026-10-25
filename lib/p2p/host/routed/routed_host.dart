@@ -9,7 +9,6 @@ import 'package:dart_libp2p/core/routing/routing.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/context.dart';
-import 'package:dart_libp2p/core/network/common.dart'; // For Connectedness
 import 'package:dart_libp2p/core/connmgr/conn_manager.dart';
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';

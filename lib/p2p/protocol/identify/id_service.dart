@@ -7,7 +7,6 @@
 /// to Dart, using native Dart idioms.
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';

@@ -75,7 +75,6 @@ class AttemptBackoff extends RandomizedBackoff {
   AttemptBackoff(Duration min, Duration max, this.jitter, Random rng)
       : super(min, max, rng);
 
-  @override
   void reset() {
     attempt = 0;
   }

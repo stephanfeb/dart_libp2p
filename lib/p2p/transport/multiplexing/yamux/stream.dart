@@ -4,12 +4,9 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:logging/logging.dart'; // Added for logging
 
-import 'package:dart_libp2p/core/network/conn.dart'; // Conn is directly available
 import 'package:dart_libp2p/core/peer/peer_id.dart'; // For PeerId
 
-import '../../../../core/network/stream.dart'; // For P2PStream, StreamStats
 import '../../../../core/network/common.dart' show Direction; // For Direction
-import '../../../../core/network/rcmgr.dart' show StreamScope; // For StreamScope
 import '../../../../core/network/mux.dart' as core_mux; // For MuxedStream
 import 'frame.dart'; // Defines YamuxFrame, YamuxFrameType, YamuxFlags
 import 'yamux_exceptions.dart'; // Import Yamux exception handling
@@ -705,9 +702,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
             
             try {
 
-              final completerAwaitStart = DateTime.now();
               final data = await _readCompleter!.future;
-              final completerAwaitDuration = DateTime.now().difference(completerAwaitStart);
               
               _readCompleter = null;
 
@@ -801,7 +796,6 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
   }
 
   Future<void> handleFrame(YamuxFrame frame) async {
-    final handleStartTime = DateTime.now();
 
     if (_state == YamuxStreamState.closed || _state == YamuxStreamState.reset) {
       _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-HANDLE-FRAME-SKIP] Stream closed/reset, ignoring frame type ${frame.type}');

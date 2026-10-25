@@ -79,7 +79,6 @@ class StreamlinedMockMultiplexer {
   int _nextStreamId = 1;
   bool _isClosed = false;
   final StreamController<P2PStream> _incomingStreamsController = StreamController.broadcast();
-  Future<void> Function(P2PStream stream)? _streamHandler;
 
   // Connection reuse tracking
   int _totalStreamsCreated = 0;
@@ -110,12 +109,10 @@ class StreamlinedMockMultiplexer {
   bool get canCreateStream => numStreams < maxStreams && !_isClosed;
 
   void setStreamHandler(Future<void> Function(P2PStream stream) handler) {
-    _streamHandler = handler;
     _logger.fine('StreamlinedMockMultiplexer: Set stream handler');
   }
 
   void removeStreamHandler() {
-    _streamHandler = null;
     _logger.fine('StreamlinedMockMultiplexer: Removed stream handler');
   }
 

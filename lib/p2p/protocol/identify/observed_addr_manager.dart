@@ -7,14 +7,11 @@
 /// to Dart, using native Dart idioms.
 
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
-import 'package:dart_libp2p/core/network/network.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/event/nattype.dart';
@@ -55,7 +52,6 @@ class ThinWaistWithCount {
 /// 
 /// A thin waist address is an address that contains an IP and a TCP/UDP port.
 ThinWaist? thinWaistForm(MultiAddr a) {
-  int i = 0;
   final components = a.components;
 
   if (components.length < 2) {
@@ -205,7 +201,6 @@ class ObservedAddrManager {
   final List<MultiAddr> Function() _listenAddrs;
 
   // Our listen addrs with interface addrs for unspecified addrs
-  final Future<List<MultiAddr>> Function() _interfaceListenAddrs;
 
   // All host addrs
   final List<MultiAddr> Function() _hostAddrs;
@@ -245,7 +240,6 @@ class ObservedAddrManager {
   }) : 
     _listenAddrs = listenAddrs,
     _hostAddrs = hostAddrs,
-    _interfaceListenAddrs = interfaceListenAddrs,
     _normalize = normalize ?? ((addr) => addr),
     _activationThreshold = activationThreshold {
 

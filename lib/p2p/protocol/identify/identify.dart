@@ -7,8 +7,6 @@
 /// to Dart, using native Dart idioms.
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io'; // Added for IOException
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/alias.dart';
@@ -16,14 +14,12 @@ import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/event/identify.dart';
 import 'package:dart_libp2p/core/host/host.dart';
-import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:dart_libp2p/core/network/notifiee.dart';
 import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/p2p/peerstore.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart';
 import 'package:dart_libp2p/p2p/host/autorelay/autorelay.dart'; // For EvtAutoRelayAddrsUpdated
 import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
@@ -612,7 +608,7 @@ class IdentifyService implements IDService {
 
       _log.fine('[IDENTIFY-DIAG] _newStreamAndNegotiate: BEFORE selectOneOf() peer=$peerId stream=${stream.id()} proto=$protoIDString');
       final protocolMuxer = host.mux as MultistreamMuxer;
-      final selectedProtocol = await protocolMuxer.selectOneOf(stream, [protoIDString as ProtocolID]);
+      final selectedProtocol = await protocolMuxer.selectOneOf(stream, [protoIDString]);
 
       if (selectedProtocol == null) {
         _log.warning('Protocol negotiation failed for peer=$peerId, protocol=$protoIDString. Resetting stream.');
@@ -881,7 +877,6 @@ class IdentifyService implements IDService {
     try {
 
       await stream.scope().setService(serviceName);
-      final serviceScopeTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
       _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-1-ERROR] ($side) Error attaching stream to identify service for peer=$peer: $e. Resetting stream.');
@@ -892,7 +887,6 @@ class IdentifyService implements IDService {
     try {
 
       await stream.scope().reserveMemory(signedIDSize, ReservationPriority.always);
-      final memoryReserveTime = DateTime.now().difference(handleStart);
 
     } catch (e) {
       _log.log(isPush ? Level.FINE : _quietLevel(stream.conn, Level.WARNING), ' [HANDLE-IDENTIFY-RESPONSE-PHASE-2-ERROR] ($side) Error reserving memory for identify stream for peer=$peer: $e. Resetting stream.');
@@ -915,7 +909,6 @@ class IdentifyService implements IDService {
       final mes = received ?? Identify();
 
       await _consumeMessage(mes, conn, isPush);
-      final consumeMessageTime = DateTime.now().difference(handleStart);
 
 
       if (metricsTracer != null) {
@@ -942,12 +935,10 @@ class IdentifyService implements IDService {
           metricsTracer!.connPushSupport(e.pushSupport);
         }
       });
-      final pushSupportTime = DateTime.now().difference(handleStart);
 
 
 
       await stream.closeWrite();
-      final totalTime = DateTime.now().difference(handleStart);
 
     } catch (e, st) {
       final errorTime = DateTime.now().difference(handleStart);
@@ -1026,28 +1017,6 @@ class IdentifyService implements IDService {
         rethrow;
       }
     }
-  }
-
-  void _mergeIdentify(Identify target, Identify source) {
-    _log.finer('IdentifyService._mergeIdentify: Merging source into target. Target (before): P:${target.protocols.length},LA:${target.listenAddrs.length},SR:${target.signedPeerRecord.isNotEmpty}. Source: P:${source.protocols.length},LA:${source.listenAddrs.length},SR:${source.signedPeerRecord.isNotEmpty}');
-    target.protocols.addAll(source.protocols);
-    target.listenAddrs.addAll(source.listenAddrs);
-    if (source.hasObservedAddr() && source.observedAddr.isNotEmpty) { // Check if not empty
-      target.observedAddr = source.observedAddr;
-    }
-    if (source.hasPublicKey() && source.publicKey.isNotEmpty) { // Check if not empty
-      target.publicKey = source.publicKey;
-    }
-    if (source.hasProtocolVersion()) {
-      target.protocolVersion = source.protocolVersion;
-    }
-    if (source.hasAgentVersion()) {
-      target.agentVersion = source.agentVersion;
-    }
-    if (source.hasSignedPeerRecord() && source.signedPeerRecord.isNotEmpty) { // Check if not empty
-      target.signedPeerRecord = source.signedPeerRecord;
-    }
-    _log.finer('IdentifyService._mergeIdentify: Target (after): P:${target.protocols.length},LA:${target.listenAddrs.length},SR:${target.signedPeerRecord.isNotEmpty}');
   }
 
   Future<void> _consumeMessage(Identify mes, Conn conn, bool isPush) async {
@@ -1221,7 +1190,7 @@ class IdentifyService implements IDService {
 
   Future<List<MultiAddr>> _consumeSignedPeerRecord(PeerId p, Envelope? signedPeerRecord) async {
     _log.finer('IdentifyService._consumeSignedPeerRecord: Consuming signed record for peer $p.');
-    if (signedPeerRecord == null || signedPeerRecord.publicKey == null) {
+    if (signedPeerRecord == null) {
       _log.warning('IdentifyService._consumeSignedPeerRecord: Missing signed peer record or public key for $p.');
       throw Exception("missing pubkey or record");
     }
@@ -1394,7 +1363,6 @@ class IdentifyService implements IDService {
     bool connClosed = false;
 
     await _connsMutex.synchronized( () async {
-      final mutexAcquiredTime = DateTime.now().difference(identifyWaitStart);
 
       var entry = _conns[conn];
 
@@ -1442,7 +1410,6 @@ class IdentifyService implements IDService {
 
     try {
       await completerToAwait!.future;
-      final totalDuration = DateTime.now().difference(identifyWaitStart);
 
     } catch (e, st) {
       final totalDuration = DateTime.now().difference(identifyWaitStart);
@@ -1549,9 +1516,8 @@ class IdentifyService implements IDService {
 
       await handleIdentifyResponse(stream, false);
       
-      final totalDuration = DateTime.now().difference(identifyStart);
 
-    } catch (e, st) {
+    } catch (e) {
       final duration = DateTime.now().difference(identifyStart);
       _log.log(_quietLevel(conn, Level.SEVERE), ' [IDENTIFY-CONN-ERROR] peer=$peerId, error=$e, duration=${duration.inMilliseconds}ms, stream_state=${stream?.isClosed ?? 'null'}, conn_age=${connAge.inMilliseconds}ms, conn_closed=${conn.isClosed}');
 

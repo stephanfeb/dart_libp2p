@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -143,7 +142,6 @@ class _Resources {
   }
 
   Exception? addConn(Direction dir, bool usefd) {
-    final fdIncrement = usefd ? 1 : 0;
     final currentConnLimit = limit.getConnLimit(dir);
     final totalConnLimit = limit.connTotalLimit;
     final fdLimit = limit.fdLimit;
@@ -350,10 +348,6 @@ class ResourceScopeImpl implements ResourceScope, ResourceScopeSpan {
       await _reserveMemoryForAncestors(size, priority);
     } catch (e) {
       _resources.releaseMemory(size); // Rollback local reservation
-      final memoryAfterRollback = _resources.memory; // Explicitly read after rollback
-      // Specific check for the failing test conditions - removing this as well
-      // if (name == 'childScope' && size == 70 && memoryAfterRollback != 0) {
-      // }
       // TODO: metrics.BlockMemory(size);
       throw _wrapError(e as Exception);
     }

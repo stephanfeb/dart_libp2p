@@ -59,7 +59,6 @@ class MockP2pMultiplexer implements p2p_mux.Multiplexer {
 
   @override
   String get protocolId => '/mock-muxer/1.0.0';
-  @override
   Future<P2PStream> openStream(Context context) async => throw UnimplementedError(); // Changed from newStream()
   @override
   Future<P2PStream> acceptStream() async => throw UnimplementedError();
@@ -103,7 +102,6 @@ class MockTransportConn implements TransportConn {
   final PeerId _remotePeer;
   final MultiAddr _localMultiaddr;
   final MultiAddr _remoteMultiaddr;
-  final KeyPair _localKeyPair;
   final KeyPair remoteKeyPair; // Added to access remote public key
 
   List<Uint8List> writtenData = [];
@@ -112,7 +110,7 @@ class MockTransportConn implements TransportConn {
   bool _isClosed = false;
   Completer<void>? _readCompleter;
 
-  MockTransportConn(this._localPeer, this._remotePeer, this._localMultiaddr, this._remoteMultiaddr, this._localKeyPair, this.remoteKeyPair);
+  MockTransportConn(this._localPeer, this._remotePeer, this._localMultiaddr, this._remoteMultiaddr, KeyPair localKeyPair, this.remoteKeyPair);
 
   void addDataToRead(Uint8List data) {
     dataToRead.add(data);
@@ -199,7 +197,6 @@ class DelegatingMockSecuredConnection implements SecuredConnection {
   final MockTransportConn _delegate;
   final PeerId _localPeer;
   final PeerId _remotePeer; // This is the peer ID established by the security handshake
-  final KeyPair _localKeyPair; // Local keypair for this secured identity
   final PublicKey _establishedRemotePublicKey; // Remote public key established by handshake
   final String _protocolId; // The ID of the security protocol used
 
@@ -207,7 +204,7 @@ class DelegatingMockSecuredConnection implements SecuredConnection {
     this._delegate,
     this._localPeer,
     this._remotePeer,
-    this._localKeyPair,
+    KeyPair localKeyPair,
     this._establishedRemotePublicKey,
     this._protocolId,
   );

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:test/test.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;

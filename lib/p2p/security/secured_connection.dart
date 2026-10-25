@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:collection';
 
-import 'package:cryptography/cryptography.dart' hide PublicKey;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import '../../core/multiaddr.dart';
 import '../../core/network/conn.dart';
@@ -588,10 +587,8 @@ class SecuredConnection implements TransportConn {
   MultiAddr get remoteMultiaddr => _connection.remoteMultiaddr;
 
   // Deprecated methods that should be replaced with localMultiaddr/remoteMultiaddr
-  @override
   MultiAddr get localAddr => localMultiaddr;
 
-  @override
   MultiAddr get remoteAddr => remoteMultiaddr;
 
   @override

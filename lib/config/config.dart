@@ -17,7 +17,6 @@ import 'package:dart_libp2p/core/event/bus.dart'; // Added
 import 'package:dart_libp2p/p2p/host/basic/natmgr.dart'; // Added
 import 'package:dart_libp2p/p2p/nat/stun/stun_client_pool.dart' show StunClientPool;
 import 'package:dart_libp2p/p2p/nat/stun/stun_nat_type.dart' show StunNatTypeProbe;
-import 'package:dart_libp2p/core/host/host.dart' show AddrsFactory; // Added for AddrsFactory
 import 'package:dart_libp2p/p2p/host/basic/basic_host.dart'; // Added for BasicHost
 
 // Added imports for _createNetwork
@@ -37,7 +36,6 @@ import '../core/peer/pb/peer_record.pb.dart' as pb;
 import '../core/peer/record.dart'; // Added for RecordRegistry
 
 // AutoNATv2 imports
-import 'package:dart_libp2p/core/protocol/autonatv2/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2.dart';
 import 'package:dart_libp2p/p2p/protocol/autonatv2/options.dart';
 import 'package:dart_libp2p/p2p/host/autonat/ambient_config.dart';
@@ -159,7 +157,6 @@ class Config {
   /// encountered (if any).
   Future<void> apply(List<Option> opts) async {
     for (final opt in opts) {
-      if (opt == null) continue;
       await opt(this);
     }
   }

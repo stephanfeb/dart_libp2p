@@ -7,7 +7,7 @@ import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../../../core/network/conn.dart';
-import '../../../core/network/rcmgr.dart' show StreamScope, ScopeStat, ResourceScopeSpan, ResourceScope, StreamManagementScope;
+import '../../../core/network/rcmgr.dart' show StreamManagementScope;
 import '../../transport/multiplexing/yamux/stream.dart' show YamuxStream;
 import 'swarm_conn.dart';
 
@@ -239,72 +239,5 @@ class SwarmStream implements P2PStream<Uint8List> {
       return true;
     }
     return false;
-  }
-}
-
-/// Implementation of StreamScope, wrapping a StreamManagementScope
-class _StreamScopeImpl implements StreamScope {
-  final StreamManagementScope _managementScope;
-
-  _StreamScopeImpl({required StreamManagementScope managementScope})
-      : _managementScope = managementScope;
-
-  @override
-  Future<ResourceScopeSpan> beginSpan() async {
-    final span = await _managementScope.beginSpan();
-    return _ResourceScopeSpanImpl(span: span);
-  }
-
-  @override
-  void releaseMemory(int size) {
-    _managementScope.releaseMemory(size);
-  }
-
-  @override
-  Future<void> reserveMemory(int size, int priority) async {
-    await _managementScope.reserveMemory(size, priority);
-  }
-
-  @override
-  ScopeStat get stat {
-    return _managementScope.stat;
-  }
-
-  @override
-  Future<void> setService(String service) async {
-    await _managementScope.setService(service);
-  }
-}
-
-/// Implementation of ResourceScopeSpan, wrapping an underlying ResourceScopeSpan
-class _ResourceScopeSpanImpl implements ResourceScopeSpan {
-  final ResourceScopeSpan _underlyingSpan;
-
-  _ResourceScopeSpanImpl({required ResourceScopeSpan span}) : _underlyingSpan = span;
-
-  @override
-  Future<ResourceScopeSpan> beginSpan() async {
-    final newSpan = await _underlyingSpan.beginSpan();
-    return _ResourceScopeSpanImpl(span: newSpan);
-  }
-
-  @override
-  void done() {
-    _underlyingSpan.done();
-  }
-
-  @override
-  void releaseMemory(int size) {
-    _underlyingSpan.releaseMemory(size);
-  }
-
-  @override
-  Future<void> reserveMemory(int size, int priority) async {
-    await _underlyingSpan.reserveMemory(size, priority);
-  }
-
-  @override
-  ScopeStat get stat {
-    return _underlyingSpan.stat;
   }
 }

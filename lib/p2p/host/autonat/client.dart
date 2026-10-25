@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import '../../../core/host/host.dart';
 import '../../../core/network/context.dart'; // Added import for Context
-import '../../../core/network/network.dart';
 import '../../../core/network/stream.dart';
 import '../../../core/peer/peer_id.dart';
 import '../../../core/protocol/autonatv1/autonatv1.dart';

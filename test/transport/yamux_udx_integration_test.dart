@@ -241,29 +241,29 @@ void main() {
           
           // Provide diagnostic information
           print('\n   🔍 Diagnostic Information:');
-          if (clientSession != null) print('   - Client session closed: ${clientSession.isClosed}');
-          if (serverSession != null) print('   - Server session closed: ${serverSession.isClosed}');
-          if (clientStream != null) print('   - Client stream closed: ${clientStream.isClosed}');
-          if (serverStream != null) print('   - Server stream closed: ${serverStream.isClosed}');
+          print('   - Client session closed: ${clientSession.isClosed}');
+          print('   - Server session closed: ${serverSession.isClosed}');
+          print('   - Client stream closed: ${clientStream.isClosed}');
+          print('   - Server stream closed: ${serverStream.isClosed}');
           
           rethrow;
         } finally {
           // Cleanup
           print('   🧹 Cleaning up Layer 1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -379,7 +379,6 @@ void main() {
           print('   ✅ Connections upgraded with Noise + Yamux');
 
           // Setup stream handling
-          final serverStreamCompleter = Completer<YamuxStream>();
           final serverAcceptStreamFuture = (serverUpgradedConn as core_mux_types.MuxedConn).acceptStream().then((stream) { 
             serverStream = stream as YamuxStream;
             print('   Server accepted Yamux stream: ${serverStream.id()}');
@@ -414,10 +413,10 @@ void main() {
           
           // Provide diagnostic information
           print('\n   🔍 Diagnostic Information:');
-          if (clientUpgradedConn != null) print('   - Client upgraded conn closed: ${clientUpgradedConn.isClosed}');
-          if (serverUpgradedConn != null) print('   - Server upgraded conn closed: ${serverUpgradedConn.isClosed}');
-          if (clientStream != null) print('   - Client stream closed: ${clientStream.isClosed}');
-          if (serverStream != null) print('   - Server stream closed: ${serverStream.isClosed}');
+          print('   - Client upgraded conn closed: ${clientUpgradedConn.isClosed}');
+          print('   - Server upgraded conn closed: ${serverUpgradedConn.isClosed}');
+          print('   - Client stream closed: ${clientStream.isClosed}');
+          print('   - Server stream closed: ${serverStream.isClosed}');
           
           print('   🔍 This suggests the issue is introduced by the Noise security layer');
           rethrow;
@@ -425,19 +424,19 @@ void main() {
           // Cleanup
           print('   🧹 Cleaning up Layer 2 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -808,19 +807,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -939,19 +938,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-2 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1072,19 +1071,19 @@ void main() {
         } finally {
           print('   🧹 Cleaning up FIN-3 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientSession != null && !clientSession.isClosed) {
+            if (!clientSession.isClosed) {
               await clientSession.close().timeout(Duration(seconds: 2));
             }
-            if (serverSession != null && !serverSession.isClosed) {
+            if (!serverSession.isClosed) {
               await serverSession.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1311,19 +1310,19 @@ void main() {
           // Cleanup
           print('   🧹 Cleaning up NOISE-1 test...');
           try {
-            if (clientStream != null && !clientStream.isClosed) {
+            if (!clientStream.isClosed) {
               await clientStream.close().timeout(Duration(seconds: 2));
             }
-            if (serverStream != null && !serverStream.isClosed) {
+            if (!serverStream.isClosed) {
               await serverStream.close().timeout(Duration(seconds: 2));
             }
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -1545,13 +1544,13 @@ void main() {
         } finally {
           print('   🧹 Cleaning up NOISE-2 test...');
           try {
-            if (clientUpgradedConn != null && !clientUpgradedConn.isClosed) {
+            if (!clientUpgradedConn.isClosed) {
               await clientUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (serverUpgradedConn != null && !serverUpgradedConn.isClosed) {
+            if (!serverUpgradedConn.isClosed) {
               await serverUpgradedConn.close().timeout(Duration(seconds: 2));
             }
-            if (listener != null && !listener.isClosed) {
+            if (!listener.isClosed) {
               await listener.close();
             }
             await clientTransport.dispose();
@@ -2424,7 +2423,6 @@ void main() {
         YamuxSession? serverSession;
         
         try {
-          final resourceManager = NullResourceManager();
           final connManager = NullConnMgr();
 
           clientTransport = UDXTransport(connManager: connManager, udxInstance: udxInstance);
@@ -2480,7 +2478,7 @@ void main() {
             final serverAcceptFuture = serverSession.acceptStream().timeout(Duration(seconds: 5));
             await Future.delayed(Duration(milliseconds: 50));
             final clientStream = await clientSession.openStream(core_context.Context()).timeout(Duration(seconds: 5)) as YamuxStream;
-            final serverStream = await serverAcceptFuture as YamuxStream;
+            final serverStream = await serverAcceptFuture;
             print('   ✅ Iteration 1: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
 
             // Quick data transfer
@@ -2533,7 +2531,7 @@ void main() {
             print('   ✅ Client stream opened: ${clientStream.id()}');
             print('   Waiting for server acceptStream...');
             
-            final serverStream = await serverAcceptFuture as YamuxStream;
+            final serverStream = await serverAcceptFuture;
             print('   ✅ Iteration 2: Streams opened (client=${clientStream.id()}, server=${serverStream.id()})');
 
             // Quick data transfer
@@ -2721,269 +2719,4 @@ Future<void> _testLargePayloadTransfer(
   print('   ✅ [$testContext] Large payload transfer completed successfully');
 }
 
-// Helper function to test large payload transfer with echo protocol over P2P streams
-Future<void> _testLargePayloadEcho(
-  core_network_stream.P2PStream clientStream,
-  core_network_stream.P2PStream serverStream,
-  String testContext,
-) async {
-  print('   📊 [$testContext] Creating 100KB test data...');
-  
-  // Create 100KB test data - same size that causes OBP test to fail
-  final largeData = Uint8List(100 * 1024);
-  for (var i = 0; i < largeData.length; i++) {
-    largeData[i] = i % 256;
-  }
-  print('   📊 [$testContext] Test data created: ${largeData.length} bytes');
-
-  // Simulate the rapid chunk delivery pattern from UDX (1384-byte chunks)
-  const chunkSize = 1384; // Exact size from the OBP failure logs
-  final chunks = <Uint8List>[];
-  for (var i = 0; i < largeData.length; i += chunkSize) {
-    final end = (i + chunkSize > largeData.length) ? largeData.length : i + chunkSize;
-    chunks.add(largeData.sublist(i, end));
-  }
-  print('   📊 [$testContext] Created ${chunks.length} chunks of ${chunkSize} bytes each');
-
-  // Track stream health throughout the test
-  var healthChecks = 0;
-  void checkStreamHealth(String phase) {
-    healthChecks++;
-    print('   🏥 [$testContext][$phase] Health check #$healthChecks:');
-    print('      - Client stream closed: ${clientStream.isClosed}');
-    print('      - Server stream closed: ${serverStream.isClosed}');
-    
-    if (clientStream.isClosed || serverStream.isClosed) {
-      throw StateError('Stream closed during $phase - this indicates the integration issue');
-    }
-  }
-
-  checkStreamHealth('Initial');
-
-  print('   🚀 [$testContext] Starting echo test with large payload...');
-  
-  // Send data and receive echo back (simulating echo protocol)
-  final writeCompleter = Completer<void>();
-  final receivedData = <int>[];
-  var chunksWritten = 0;
-  var chunksReceived = 0;
-  
-  // Start reading echoed data
-  Future.microtask(() async {
-    try {
-      while (receivedData.length < largeData.length) {
-        final chunk = await clientStream.read().timeout(Duration(seconds: 10));
-        if (chunk.isEmpty) {
-          print('   ⚠️ [$testContext] Received empty chunk, stream might be closed');
-          break;
-        }
-        
-        receivedData.addAll(chunk);
-        chunksReceived++;
-        
-        // Check stream health every 10 chunks
-        if (chunksReceived % 10 == 0) {
-          checkStreamHealth('Read echo chunk $chunksReceived');
-          final progress = (receivedData.length * 100 ~/ largeData.length);
-          print('   📈 [$testContext] Echo progress: ${receivedData.length}/${largeData.length} bytes (${progress}%)');
-        }
-      }
-    } catch (e) {
-      print('   ❌ [$testContext] Echo read operation failed: $e');
-      checkStreamHealth('Echo read failure');
-      rethrow;
-    }
-  });
-
-  // Send chunks with flow control - don't get too far ahead of the echo reads
-  Future.microtask(() async {
-    try {
-      var bytesWritten = 0;
-      for (final chunk in chunks) {
-        // Gentle flow control: Allow plenty of outstanding data
-        // Server uses async writes, so we don't need tight flow control
-        const maxOutstanding = 80 * 1024; // Allow 80KB outstanding (most of the 100KB payload)
-        var flowControlWaits = 0;
-        var lastReceivedCount = receivedData.length;
-        
-        while (bytesWritten - receivedData.length > maxOutstanding) {
-          await Future.delayed(Duration(milliseconds: 5));
-          flowControlWaits++;
-          
-          // Check if we're making progress
-          if (receivedData.length > lastReceivedCount) {
-            lastReceivedCount = receivedData.length;
-            flowControlWaits = 0; // Reset counter if making progress
-          }
-          
-          // Safety: If no progress for 10 seconds, something is wrong
-          if (flowControlWaits > 2000) {
-            print('   ⚠️ [$testContext] Flow control timeout - no echo progress. Sent: $bytesWritten, Received: ${receivedData.length}');
-            throw TimeoutException('Flow control deadlock - echoes stopped arriving');
-          }
-          
-          if (receivedData.length == 0 && bytesWritten > maxOutstanding && flowControlWaits > 100) {
-            // Give initial writes time to echo back (500ms)
-            print('   ⚠️ [$testContext] No echoes received yet after 500ms, continuing anyway...');
-            break;
-          }
-        }
-        
-        await clientStream.write(chunk);
-        bytesWritten += chunk.length;
-        chunksWritten++;
-        
-        // Check stream health every 10 chunks
-        if (chunksWritten % 10 == 0) {
-          checkStreamHealth('Write chunk $chunksWritten/${chunks.length}');
-          print('   📤 [$testContext] Write progress: $bytesWritten bytes sent, ${receivedData.length} bytes echoed back');
-        }
-      }
-      print('   ✅ [$testContext] All chunks written successfully');
-      writeCompleter.complete();
-    } catch (e) {
-      print('   ❌ [$testContext] Write operation failed: $e');
-      writeCompleter.completeError(e);
-    }
-  });
-
-  print('   ⏳ [$testContext] Waiting for write operations to complete...');
-  await writeCompleter.future.timeout(Duration(seconds: 30));
-  
-  // Wait for all echo data to be received
-  var waitCount = 0;
-  while (receivedData.length < largeData.length && waitCount < 100) {
-    await Future.delayed(Duration(milliseconds: 100));
-    waitCount++;
-    if (waitCount % 10 == 0) {
-      print('   ⏳ [$testContext] Waiting for echo completion: ${receivedData.length}/${largeData.length} bytes');
-    }
-  }
-  
-  checkStreamHealth('After echo completion');
-
-  print('   🔍 [$testContext] Verifying echo data integrity...');
-  expect(
-    Uint8List.fromList(receivedData),
-    equals(largeData),
-    reason: 'Echoed data should match sent data',
-  );
-  print('   ✅ [$testContext] Echo data integrity verified');
-
-  // Final stream health check
-  checkStreamHealth('Final');
-  
-  print('   ✅ [$testContext] Large payload echo test completed successfully');
-}
-
 // Helper function to test large payload transfer over P2P streams
-Future<void> _testLargePayloadTransferP2P(
-  core_network_stream.P2PStream clientStream,
-  core_network_stream.P2PStream serverStream,
-  String testContext,
-  {bool? expectSuccess}
-) async {
-  print('   📊 [$testContext] Creating 100KB test data...');
-  
-  // Create 100KB test data - same size that causes OBP test to fail
-  final largeData = Uint8List(100 * 1024);
-  for (var i = 0; i < largeData.length; i++) {
-    largeData[i] = i % 256;
-  }
-  print('   📊 [$testContext] Test data created: ${largeData.length} bytes');
-
-  // Simulate the rapid chunk delivery pattern from UDX (1384-byte chunks)
-  const chunkSize = 1384; // Exact size from the OBP failure logs
-  final chunks = <Uint8List>[];
-  for (var i = 0; i < largeData.length; i += chunkSize) {
-    final end = (i + chunkSize > largeData.length) ? largeData.length : i + chunkSize;
-    chunks.add(largeData.sublist(i, end));
-  }
-  print('   📊 [$testContext] Created ${chunks.length} chunks of ${chunkSize} bytes each');
-
-  // Track stream health throughout the test
-  var healthChecks = 0;
-  void checkStreamHealth(String phase) {
-    healthChecks++;
-    print('   🏥 [$testContext][$phase] Health check #$healthChecks:');
-    print('      - Client stream closed: ${clientStream.isClosed}');
-    print('      - Server stream closed: ${serverStream.isClosed}');
-    
-    if (clientStream.isClosed || serverStream.isClosed) {
-      throw StateError('Stream closed during $phase - this indicates the integration issue');
-    }
-  }
-
-  checkStreamHealth('Initial');
-
-  print('   🚀 [$testContext] Starting rapid write operations (no delays between chunks)...');
-  final writeCompleter = Completer<void>();
-  var chunksWritten = 0;
-  
-  // Send all chunks rapidly without delays (simulating UDX behavior)
-  Future.microtask(() async {
-    try {
-      for (final chunk in chunks) {
-        await clientStream.write(chunk);
-        chunksWritten++;
-        
-        // Check stream health every 10 chunks
-        if (chunksWritten % 10 == 0) {
-          checkStreamHealth('Write chunk $chunksWritten/${chunks.length}');
-        }
-      }
-      print('   ✅ [$testContext] All chunks written successfully');
-      writeCompleter.complete();
-    } catch (e) {
-      print('   ❌ [$testContext] Write operation failed: $e');
-      writeCompleter.completeError(e);
-    }
-  });
-
-  print('   📥 [$testContext] Reading data and monitoring stream health...');
-  final receivedData = <int>[];
-  var readOperations = 0;
-  
-  while (receivedData.length < largeData.length) {
-    try {
-      final chunk = await serverStream.read().timeout(Duration(seconds: 10));
-      if (chunk.isEmpty) {
-        print('   ⚠️ [$testContext] Received empty chunk, stream might be closed');
-        break;
-      }
-      
-      receivedData.addAll(chunk);
-      readOperations++;
-      
-      // Check stream health every 10 read operations
-      if (readOperations % 10 == 0) {
-        checkStreamHealth('Read operation $readOperations');
-        final progress = (receivedData.length * 100 ~/ largeData.length);
-        print('   📈 [$testContext] Progress: ${receivedData.length}/${largeData.length} bytes (${progress}%)');
-      }
-      
-    } catch (e) {
-      print('   ❌ [$testContext] Read operation failed: $e');
-      checkStreamHealth('Read failure');
-      rethrow;
-    }
-  }
-
-  print('   ⏳ [$testContext] Waiting for write operations to complete...');
-  await writeCompleter.future.timeout(Duration(seconds: 30));
-  
-  checkStreamHealth('After write completion');
-
-  print('   🔍 [$testContext] Verifying data integrity...');
-  expect(
-    Uint8List.fromList(receivedData),
-    equals(largeData),
-    reason: 'Received data should match sent data',
-  );
-  print('   ✅ [$testContext] Data integrity verified');
-
-  // Final stream health check
-  checkStreamHealth('Final');
-  
-  print('   ✅ [$testContext] Large payload transfer completed successfully');
-}

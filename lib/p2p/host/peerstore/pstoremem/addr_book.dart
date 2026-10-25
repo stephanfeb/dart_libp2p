@@ -9,14 +9,9 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:dart_libp2p/core/record/envelope.dart';
-import 'package:logging/logging.dart';
 import 'package:synchronized/synchronized.dart';
 
-import '../../../../core/peer/pb/peer_record.pb.dart';
 
-
-/// Logger for the address book.
-final _log = Logger('peerstore');
 
 
 class PeerRecordState {
@@ -688,7 +683,7 @@ class MemoryAddrBook implements AddrBook, CertifiedAddrBook {
     return await _lock.synchronized(() async {
       try {
         final r = await recordEnvelope.record();
-        final rec = r as PeerRecord;
+        final rec = r;
         final pId = PeerId.fromBytes(Uint8List.fromList(rec.peerId));
 
         final pubKey = await pId.extractPublicKey();

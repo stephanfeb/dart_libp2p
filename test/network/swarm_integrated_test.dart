@@ -1,12 +1,10 @@
 import 'dart:async';
 
-import 'package:dart_libp2p/core/certified_addr_book.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/p2p/host/host.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/network.dart'; // For Connectedness, Network
 import 'package:dart_libp2p/core/network/rcmgr.dart'; // For ResourceManager
 import 'package:dart_libp2p/core/peerstore.dart';
 import 'package:dart_libp2p/p2p/transport/basic_upgrader.dart';
@@ -19,7 +17,6 @@ import 'package:dart_libp2p/core/crypto/ed25519.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart'; // For PrivKey
 
 // New imports for real components and mocked interfaces
-import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/core/peer/peer_id.dart' as p2p_peer; // For PeerId.createFromPublicKey
 import 'package:dart_libp2p/p2p/transport/upgrader.dart'; // Corrected path
 import 'package:dart_libp2p/core/event/bus.dart';

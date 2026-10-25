@@ -8,7 +8,7 @@ import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart' show Conn, ConnState, ConnStats, Stats;
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/network/stream.dart'; // For P2PStream
-import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan, ResourceScope;
+import 'package:dart_libp2p/core/network/rcmgr.dart' show ConnScope, ScopeStat, ResourceScopeSpan;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:meta/meta.dart';
 
@@ -35,13 +35,10 @@ abstract class BaseMockConnection implements Conn {
   @override
   MultiAddr get remoteMultiaddr => MultiAddr('/ip4/127.0.0.1/tcp/5678');
 
-  @override
   Socket get socket => throw UnimplementedError();
 
-  @override
   void setReadTimeout(Duration timeout) {}
 
-  @override
   void setWriteTimeout(Duration timeout) {}
 
   @override

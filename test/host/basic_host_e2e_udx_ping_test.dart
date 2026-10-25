@@ -49,7 +49,6 @@ void main() {
     late BasicHost clientHost;
     late BasicHost serverHost;
     late UDX udxInstance;
-    late PeerId clientPeerId;
     late PeerId serverPeerId;
     late KeyPair clientKeyPair;
     late KeyPair serverKeyPair;
@@ -60,7 +59,6 @@ void main() {
 
       clientKeyPair = await crypto_ed25519.generateEd25519KeyPair();
       serverKeyPair = await crypto_ed25519.generateEd25519KeyPair();
-      clientPeerId = await PeerId.fromPublicKey(clientKeyPair.publicKey);
       serverPeerId = await PeerId.fromPublicKey(serverKeyPair.publicKey);
 
       final yamuxMultiplexerConfig = MultiplexerConfig(

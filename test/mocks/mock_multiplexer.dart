@@ -129,12 +129,11 @@ class MockMultiplexer implements p2p_mux.Multiplexer {
 class MockMuxedConn implements core_mux.MuxedConn {
   final Logger _logger = Logger('MockMuxedConn');
   
-  final SecuredConnection _transport;
   final bool _isServer;
   final MockMultiplexer _multiplexer;
   final StreamController<MockMuxedStream> _incomingStreams = StreamController();
 
-  MockMuxedConn(this._transport, this._isServer, this._multiplexer) {
+  MockMuxedConn(SecuredConnection transport, this._isServer, this._multiplexer) {
     _logger.fine('Created MockMuxedConn: server=$_isServer');
   }
 

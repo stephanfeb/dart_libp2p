@@ -1,4 +1,3 @@
-import '../core/network/conn.dart'; // For Conn type
 import '../core/network/transport_conn.dart'; // For TransportConn type
 import '../p2p/transport/multiplexing/yamux/session.dart';
 import '../p2p/transport/multiplexing/multiplexer.dart'; // For MultiplexerConfig and Multiplexer interface
@@ -6,9 +5,7 @@ import 'config.dart'; // For Config, Option, Libp2p
 import '../p2p/host/autonat/ambient_config.dart'; // For AmbientAutoNATv2Config
 
 // Imports for new defaults
-import '../core/crypto/keys.dart'; // For KeyPair, KeyType
 import '../core/crypto/ed25519.dart' as crypto_ed25519; // For generateEd25519KeyPair
-import '../p2p/transport/tcp_transport.dart';
 import '../p2p/security/noise/noise_protocol.dart';
 import '../p2p/host/eventbus/basic.dart'; // For BasicBus
 import '../p2p/transport/connection_manager.dart' as p2p_conn_mgr; // For ConnectionManager

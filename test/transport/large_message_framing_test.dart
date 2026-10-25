@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
-import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/conn.dart' show Conn;
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
@@ -59,7 +58,6 @@ void main() {
       // Create client and server peers
       final clientKeyPair = await crypto_ed25519.generateEd25519KeyPair();
       final serverKeyPair = await crypto_ed25519.generateEd25519KeyPair();
-      final clientPeerId = await PeerId.fromPublicKey(clientKeyPair.publicKey);
       final serverPeerId = await PeerId.fromPublicKey(serverKeyPair.publicKey);
 
       // Configure Yamux with standard settings (no frame size limits!)

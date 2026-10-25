@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:logging/logging.dart';
 
 import '../../../core/interfaces.dart';
-import '../../../core/network/stream.dart';
 import '../../../core/peer/peer_id.dart';
 
 final _logger = Logger('ping');

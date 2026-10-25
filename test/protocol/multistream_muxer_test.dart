@@ -6,16 +6,10 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/interfaces.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/p2p/protocol/multistream/multistream.dart';
-import 'package:dart_libp2p/core/network/stream.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart'; // ProtocolID, HandlerFunc
 import 'package:dart_libp2p/p2p/multiaddr/codec.dart'; // For varint encoding in tests if needed
-import 'package:dart_libp2p/core/network/conn.dart'; // Conn, ConnStats, Stats, ConnState
 import 'package:dart_libp2p/core/network/common.dart'; // Direction
-import 'package:dart_libp2p/core/network/rcmgr.dart' show StreamScope, ConnScope, NullScope; // Using NullScope for mocks
 import 'package:dart_libp2p/core/peer/peer_id.dart'; // PeerId, PeerId
-import 'package:dart_libp2p/core/multiaddr.dart'; // Multiaddr
 import 'package:dart_libp2p/core/crypto/keys.dart'; // PublicKey
-import 'package:dart_libp2p/core/network/context.dart'; // Context
 
 // --- Mock Dependencies ---
 
@@ -106,7 +100,6 @@ class MockStreamStats implements StreamStats {
 
 class MockP2PStream implements P2PStream<Uint8List> {
   final String _id_internal = 'mock-stream-${Random().nextInt(1<<32)}';
-  final StreamController<Uint8List> _incomingDataController = StreamController<Uint8List>.broadcast();
   final StreamController<Uint8List> _outgoingDataController;
 
   final BytesBuilder _readBuffer = BytesBuilder();
@@ -301,7 +294,6 @@ class MockP2PStream implements P2PStream<Uint8List> {
   // For P2PStream, direct `write` is used.
   // Sink<Uint8List> get sink => _StreamSinkWrapper(_outgoingDataController, _localCloseCompleter);
   
-  @override
   Future<void> get done async {
     await Future.wait([
       _localCloseCompleter.future.catchError((_){ /* ignore errors for done check */ }), 
@@ -324,35 +316,6 @@ class MockP2PStream implements P2PStream<Uint8List> {
 
   @override
   Conn get conn => _mockConn;
-}
-
-// _StreamSinkWrapper might not be needed if tests adapt to use P2PStream.write directly
-// Keeping it for now to minimize test changes initially.
-class _StreamSinkWrapper<S> implements Sink<S> {
-  final StreamController<S> _controller;
-  final Completer<void> _closeCompleter; 
-
-  _StreamSinkWrapper(this._controller, this._closeCompleter);
-
-  @override
-  void add(S data) {
-    if (_closeCompleter.isCompleted) { // Check if the stream itself is locally closed
-        throw StateError('Cannot add to sink of a closed stream');
-    }
-    if (_controller.isClosed) {
-      throw StateError('Cannot add to closed sink controller');
-    }
-    _controller.add(data);
-  }
-
-  @override
-  void close() {
-    // Closing the sink means we are done writing from this end.
-    // This is effectively like P2PStream.closeWrite()
-    if (!_controller.isClosed) {
-      _controller.close();
-    }
-  }
 }
 
 (MockP2PStream, MockP2PStream) newPipe() {

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:collection'; // For HashSet
 
-import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/event/addrs.dart'; // For EvtLocalAddressesUpdated
 import 'package:dart_libp2p/core/event/identify.dart'; // For EvtPeerIdentificationCompleted
 import 'package:dart_libp2p/core/host/host.dart';
@@ -15,14 +14,12 @@ import '../../../core/network/common.dart' show Direction; // Import Direction f
 import 'package:dart_libp2p/core/peer/addr_info.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/protocol/autonatv1/autonatv1.dart'; // For AutoNATProto and AutoNATV1Client
-import 'package:dart_libp2p/core/peerstore.dart';
 
 
 import './options.dart';
 import './client.dart';
 import './service.dart';
 import './dial_policy.dart';
-import './metrics.dart';
 
 // Logging function for this file
 void _log(String message) {
@@ -210,9 +207,9 @@ class AmbientAutoNAT implements AutoNAT, Notifiee {
     _log('Background task stopping.');
     _probeTimer?.cancel();
     _addrChangeTicker?.cancel();
-    await inboundConnSub?.cancel();
-    await dialResponsesSub?.cancel();
-    await observationsSub?.cancel();
+    await inboundConnSub.cancel();
+    await dialResponsesSub.cancel();
+    await observationsSub.cancel();
     // await _emitReachabilityChanged.close(); // Placeholder
     await _eventBusSubscription?.cancel(); 
   }
@@ -530,11 +527,10 @@ class AmbientAutoNAT implements AutoNAT, Notifiee {
 
 // StaticAutoNAT implementation
 class StaticAutoNAT implements AutoNAT {
-  final Host _host;
   final Reachability _reachability;
   final AutoNATService? _service; // Can have an associated service
 
-  StaticAutoNAT(this._host, this._reachability, this._service);
+  StaticAutoNAT(Host host, this._reachability, this._service);
 
   static Future<StaticAutoNAT> create(Host h, Reachability reachability, List<AutoNATOption> options) async {
     // Similar to AmbientAutoNAT.create, setup config and optional service

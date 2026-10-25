@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:logging/logging.dart';
@@ -9,7 +7,6 @@ import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/context.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart';
-import 'package:dart_libp2p/p2p/security/secured_connection.dart';
 
 // Import streamlined mocks for testing
 import '../mocks/streamlined_mock_transport_conn.dart';

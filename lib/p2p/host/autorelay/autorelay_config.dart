@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:dart_libp2p/core/peer/addr_info.dart'; // For AddrInfo
-import 'package:dart_libp2p/core/host/host.dart'; // For Host interface
 import './autorelay_metrics.dart'; // For MetricsTracer
 
 

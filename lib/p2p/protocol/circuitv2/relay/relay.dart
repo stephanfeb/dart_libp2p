@@ -105,7 +105,7 @@ class Relay {
           } catch (closeError) {
           }
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       try {
         await _writeResponse(stream, Status.MALFORMED_MESSAGE);
         await stream.close();
@@ -401,7 +401,6 @@ class Relay {
     // Relay data from source to destination
     Future<void> relaySourceToDest() async {
       try {
-        int bytesRelayed = 0;
         while (!relayTerminated) {
           // Check resource limits before reading more data
           if (totalBytesRelayed >= maxBytes) {
@@ -427,7 +426,6 @@ class Relay {
             });
             break;
           }
-          bytesRelayed += data.length;
           totalBytesRelayed += data.length;
           metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await dstStream.write(data);
@@ -450,7 +448,6 @@ class Relay {
     // Relay data from destination to source
     Future<void> relayDestToSource() async {
       try {
-        int bytesRelayed = 0;
         while (!relayTerminated) {
           // Check resource limits before reading more data
           if (totalBytesRelayed >= maxBytes) {
@@ -476,7 +473,6 @@ class Relay {
             });
             break;
           }
-          bytesRelayed += data.length;
           totalBytesRelayed += data.length;
           metricsObserver?.onBytesRelayed(srcPeer, dstPeer, data.length, sessionId: sessionId);
           await srcStream.write(data);
@@ -519,34 +515,6 @@ class Relay {
     // Start relay (fire and forget - errors are handled within each direction)
     startRelay().catchError((e) {
     });
-  }
-
-  /// Gracefully terminates a relay connection
-  /// Signals EOF to both ends before closing streams
-  Future<void> _terminateRelay(P2PStream srcStream, P2PStream dstStream, String reason) async {
-    
-    try {
-      // Signal EOF to both ends gracefully via closeWrite
-      await Future.wait([
-        srcStream.closeWrite().catchError((e) {
-        }),
-        dstStream.closeWrite().catchError((e) {
-        }),
-      ]);
-      
-      // Give a brief moment for EOF to propagate
-      await Future.delayed(Duration(milliseconds: 100));
-      
-      // Now fully close both streams
-      await Future.wait([
-        srcStream.close().catchError((e) {
-        }),
-        dstStream.close().catchError((e) {
-        }),
-      ]);
-      
-    } catch (e) {
-    }
   }
 
   /// Writes a response with the given status.

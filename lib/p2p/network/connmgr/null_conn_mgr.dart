@@ -80,6 +80,8 @@ class NullConnMgr implements ConnManager {
 
   @override
   ConnectionState? getState(TransportConn conn) {
+    return null;
+  
   }
 
   @override

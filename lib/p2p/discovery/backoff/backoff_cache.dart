@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import '../../../core/peer/addr_info.dart';
 import '../../../core/discovery.dart';
@@ -11,10 +10,6 @@ class BackoffDiscovery implements Discovery {
   final Discovery _disc;
   final BackoffFactory _stratFactory;
   final Map<String, BackoffCache> _peerCache = {};
-  
-  final int _parallelBufSz;
-  final int _returnedBufSz;
-  
   final Clock _clock;
   
   /// Creates a new BackoffDiscovery
@@ -24,9 +19,7 @@ class BackoffDiscovery implements Discovery {
     int parallelBufferSize = 32,
     int returnedBufferSize = 32,
     Clock? clock,
-  })  : _parallelBufSz = parallelBufferSize,
-        _returnedBufSz = returnedBufferSize,
-        _clock = clock ?? RealClock();
+  })  : _clock = clock ?? RealClock();
   
   @override
   Future<Duration> advertise(String ns, [List<DiscoveryOption> options = const []]) {
@@ -71,7 +64,7 @@ class BackoffDiscovery implements Discovery {
       final controller = StreamController<AddrInfo>(sync: true);
       
       for (final ai in c.prevPeers.values) {
-        if (controller.isClosed || (opts.limit != null && controller.hasListener && controller.sink is StreamSink<AddrInfo> && (controller.sink as dynamic).count >= opts.limit!)) {
+        if (controller.isClosed || (opts.limit != null && controller.hasListener && (controller.sink as dynamic).count >= opts.limit!)) {
           break;
         }
         controller.add(ai);

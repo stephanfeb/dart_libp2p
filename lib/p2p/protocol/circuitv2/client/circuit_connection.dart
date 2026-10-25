@@ -24,12 +24,9 @@ class CircuitConnection implements TransportConn {
   final ConnManager _manager;
   final String _id;
   bool _closed = false;
-  transport_state.ConnectionState _transportState = transport_state.ConnectionState.connecting;
   final List<P2PStream> _streams = [];
   Timer? _readTimeout;
   Timer? _writeTimeout;
-  Duration? _currentReadTimeout;
-  Duration? _currentWriteTimeout;
 
   CircuitConnection({
     required P2PStream<Uint8List> stream,
@@ -49,7 +46,7 @@ class CircuitConnection implements TransportConn {
     _manager.registerConnection(this);
 
     // Monitor stream for closure
-    _stream.incoming.read().then((data) {
+    _stream.incoming.read().then<void>((data) {
       // Handle incoming data
       _manager.recordActivity(this);
     }).catchError(_handleError);
@@ -59,16 +56,6 @@ class CircuitConnection implements TransportConn {
     if (!_closed) {
       _closed = true;
       _manager.updateState(this, transport_state.ConnectionState.error, error: error);
-    }
-  }
-
-  void _handleDone() {
-    if (!_closed) {
-      _closed = true;
-      final currentState = _manager.getState(this);
-      if (currentState != null && currentState != transport_state.ConnectionState.error) {
-        _manager.updateState(this, transport_state.ConnectionState.closed, error: null);
-      }
     }
   }
 
@@ -166,9 +153,6 @@ class CircuitConnection implements TransportConn {
 
     try {
       final data = await _stream.read();
-      if (data == null) {
-        throw Exception('unexpected EOF');
-      }
 
       if (length != null && data.length < length) {
         throw Exception('not enough data');
@@ -199,7 +183,6 @@ class CircuitConnection implements TransportConn {
 
   @override
   void setReadTimeout(Duration timeout) {
-    _currentReadTimeout = timeout;
     _readTimeout?.cancel();
     if (timeout != Duration.zero) {
       _readTimeout = Timer(timeout, () {
@@ -210,7 +193,6 @@ class CircuitConnection implements TransportConn {
 
   @override
   void setWriteTimeout(Duration timeout) {
-    _currentWriteTimeout = timeout;
     _writeTimeout?.cancel();
     if (timeout != Duration.zero) {
       _writeTimeout = Timer(timeout, () {

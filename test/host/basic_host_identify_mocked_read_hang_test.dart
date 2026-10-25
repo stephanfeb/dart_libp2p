@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/core/network/network.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart';
-import 'package:dart_libp2p/core/host/host.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
 import 'package:dart_libp2p/core/network/common.dart';
 import 'package:dart_libp2p/core/network/conn.dart';
@@ -13,7 +12,6 @@ import 'package:dart_libp2p/core/network/stream.dart';
 import 'package:dart_libp2p/core/network/transport_conn.dart' as core_transport_conn;
 import 'package:dart_libp2p/core/peer/peer_id.dart';
 import 'package:dart_libp2p/core/peer/addr_info.dart';
-import 'package:dart_libp2p/core/protocol/protocol.dart' as core_protocol;
 import 'package:dart_libp2p/core/crypto/pb/crypto.pb.dart' as pb;
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/rcmgr.dart';
@@ -41,19 +39,12 @@ class MockResourceScope implements ResourceScope {
   Future<void> reserveMemory(int size, int prio) async {}
   @override
   void releaseMemory(int size) {}
-  @override
   Future<void> addConnection(Direction dir, bool usefd) async {}
-  @override
   void removeConnection(Direction dir, bool usefd) {}
-  @override
   Future<void> addStream(Direction dir) async {}
-  @override
   void removeStream(Direction dir) {}
-  @override
   ResourceScope newStreamScope() => this;
-  @override
   ResourceScope newConnScope() => this;
-  @override
   Future<void> close() async {}
   @override
   Future<ResourceScopeSpan> beginSpan() async => throw UnimplementedError('MockResourceScope.beginSpan not implemented');
@@ -69,7 +60,6 @@ class MockPublicKey extends PublicKey {
   Uint8List marshal() => _bytes;
   @override
   Future<bool> verify(Uint8List data, Uint8List signature) async => true;
-  @override
   pb.KeyType get keyType => pb.KeyType.Ed25519;
   @override
   pb.KeyType get type => pb.KeyType.Ed25519;
@@ -86,7 +76,6 @@ class MockPrivateKey extends PrivateKey {
   MockPrivateKey([List<int>? bytes, PublicKey? publicKey])
     : _bytes = Uint8List.fromList(bytes ?? List.generate(32, (i) => i + 200 + _defaultKeyCounterP++)),
       _publicKey = publicKey ?? MockPublicKey();
-  @override
   pb.KeyType get keyType => pb.KeyType.Ed25519;
   @override
   pb.KeyType get type => pb.KeyType.Ed25519;
@@ -122,18 +111,13 @@ class MockStats implements Stats {
   bool limited = false;
   @override
   DateTime opened = DateTime.now();
-  @override
   Map<String, num> toMap() => {};
 }
 
 class MockConnStats implements ConnStats {
-  @override
   DateTime opened = DateTime.now();
-  @override
   Direction dir = Direction.unknown;
-  @override
   Map<String, DateTime> get timeline => {}; // Corrected: returns Map
-  @override
   Map<dynamic, dynamic> get extra => const {}; // Corrected: returns Map
   @override
   int numStreams = 0;
@@ -291,7 +275,6 @@ class MockConnBase implements Conn {
 class MockConnScope extends MockResourceScope implements ConnScope {}
 
 class MockTransportConn extends MockConnBase implements core_transport_conn.TransportConn {
-  @override
   final p2p_transport.Transport transport;
   MockTransportConn({required this.transport, MultiAddr? localAddr, MultiAddr? remoteAddr})
     : super(localAddr: localAddr, remoteAddr: remoteAddr);
@@ -323,11 +306,9 @@ class MockSecuredConn extends MockConnBase implements p2p_secured_conn.SecuredCo
 
   @override
   Future<PublicKey?> get remotePublicKey async => _remotePublicKeyVal;
-  @override
   Conn get conn => this;
   @override
   String get securityProtocolId => '/mock-sec/1.0.0';
-  @override
   p2p_transport.Transport get transport => throw UnimplementedError('MockSecuredConn.transport not implemented');
   
   @override
@@ -363,13 +344,11 @@ class MockSecuredConn extends MockConnBase implements p2p_secured_conn.SecuredCo
 }
 
 class MockMuxerInstance implements p2p_muxer.Multiplexer {
-  final Conn _connection; 
   final bool _isClient;
   final Map<String, Future<P2PStream> Function()> _specificStreamProviders;
 
-  MockMuxerInstance(this._connection, this._isClient, this._specificStreamProviders);
+  MockMuxerInstance(Conn connection, this._isClient, this._specificStreamProviders);
 
-  @override
   String get id => protocolId;
   @override
   String get protocolId => 'mock-muxer/1.0.0';
@@ -379,7 +358,6 @@ class MockMuxerInstance implements p2p_muxer.Multiplexer {
   @override
   bool get isClosed => _muxerClosed;
 
-  @override
   Future<P2PStream> openStream(core_context.Context context) async { 
     // Mock implementation can ignore context if not needed for its logic
     if (!_isClient) throw StateError('Listener side should not call openStream directly in this mock setup');
@@ -449,7 +427,6 @@ class MockStreamMuxerDef extends config_stream_muxer.StreamMuxer {
 class MockSecurityProtocol implements p2p_security.SecurityProtocol {
   final KeyPair localKeyPair;
   MockSecurityProtocol(this.localKeyPair);
-  @override
   String get id => protocolId;
   @override
   String get protocolId => '/mock-sec/1.0.0';
@@ -469,14 +446,12 @@ class MockSecurityProtocol implements p2p_security.SecurityProtocol {
 }
 
 class MockListener implements p2p_listener.Listener {
-  @override
   final MultiAddr laddr;
   final StreamController<core_transport_conn.TransportConn> _connController;
   MockListener(this._connController, this.laddr) {
     print('[MockListener] constructor called with laddr: ${laddr.toString()}');
   }
 
-  @override
   Stream<core_transport_conn.TransportConn> get newConnections => _connController.stream;
   @override
   Future<void> close() async {
@@ -484,7 +459,6 @@ class MockListener implements p2p_listener.Listener {
       await _connController.close();
     }
   }
-  @override
   List<MultiAddr> get listenAddrs {
     print('[MockListener] listenAddrs getter called, returning: [${laddr.toString()}]');
     return [laddr];
@@ -511,7 +485,6 @@ class MockListener implements p2p_listener.Listener {
 class MockTransport implements p2p_transport.Transport {
   Completer<core_transport_conn.TransportConn>? _pendingDialCompleter;
   StreamController<core_transport_conn.TransportConn>? _activeListenerController;
-  @override
   MultiAddr? _listenAddrVal;
 
   @override
@@ -552,7 +525,6 @@ class MockTransport implements p2p_transport.Transport {
   bool canDial(MultiAddr addr) => true;
   @override
   List<String> get protocols => [];
-  @override
   Future<void> close() async {}
   @override
   bool canListen(MultiAddr addr) => true;
@@ -567,7 +539,6 @@ void main() {
   group('BasicHost Identify Mocked Read Hang Test', () {
     late BasicHost hostA;
     late BasicHost hostB;
-    late PeerId peerIdA;
     late PeerId peerIdB;
     late KeyPair keyPairA;
     late KeyPair keyPairB;
@@ -579,7 +550,6 @@ void main() {
     setUp(() async {
       keyPairA = MockKeyPair();
       keyPairB = MockKeyPair();
-      peerIdA = await PeerId.fromPublicKey(keyPairA.publicKey);
       peerIdB = await PeerId.fromPublicKey(keyPairB.publicKey);
 
       readOnHangingStreamWasCalled = false;

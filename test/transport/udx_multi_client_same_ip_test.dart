@@ -7,7 +7,6 @@ import 'package:logging/logging.dart';
 import 'package:dart_libp2p/core/crypto/ed25519.dart' as crypto_ed25519;
 import 'package:dart_libp2p/core/crypto/keys.dart';
 import 'package:dart_libp2p/core/multiaddr.dart';
-import 'package:dart_libp2p/core/network/common.dart'; // For Connectedness
 import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/core/network/context.dart' as core_context;
 import 'package:dart_libp2p/core/network/transport_conn.dart';
@@ -23,7 +22,6 @@ import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
 import 'package:dart_udx/dart_udx.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/p2p/transport/connection_manager.dart' as p2p_transport;
-import 'package:dart_libp2p/core/connmgr/conn_manager.dart' as core_connmgr;
 import 'package:dart_libp2p/p2p/host/resource_manager/resource_manager_impl.dart';
 import 'package:dart_libp2p/p2p/host/resource_manager/limiter.dart';
 import 'package:dart_libp2p/p2p/network/swarm/swarm.dart';
@@ -31,11 +29,8 @@ import 'package:dart_libp2p/p2p/host/basic/basic_host.dart';
 import 'package:dart_libp2p/p2p/host/peerstore/pstoremem.dart';
 import 'package:dart_libp2p/core/event/bus.dart';
 import 'package:dart_libp2p/core/peer/addr_info.dart';
-import 'package:dart_libp2p/core/network/stream.dart' as core_network_stream;
 import 'package:dart_libp2p/p2p/multiaddr/protocol.dart' as multiaddr_protocol;
 import 'package:dart_libp2p/core/peerstore.dart';
-import 'package:dart_libp2p/core/host/host.dart';
-import 'package:dart_libp2p/core/network/network.dart';
 
 // Custom AddrsFactory for testing that doesn't filter loopback
 List<MultiAddr> passThroughAddrsFactory(List<MultiAddr> addrs) {
