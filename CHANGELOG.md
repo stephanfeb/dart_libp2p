@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **NAT behaviour discovery returns a result from its filtering tests and its basic tests.** `discoverFilteringBehavior`, `discoverMappingBehaviorBasic` and `discoverFilteringBehaviorBasic` bind each new socket to the port of the first socket. They read that port after the first request had closed the socket, which throws, so the methods always returned `unknown`. `discoverBehavior` uses the basic tests, so the NAT manager never learned the NAT behaviour. Now each method reads the port right after it binds the first socket.
+- **STUN address attributes use the RFC 5389 layout.** `StunMessage.createBindingResponse` wrote the address family of XOR-MAPPED-ADDRESS into the first byte, which is reserved, and wrote 0 into the second byte, which is the family. The decoders did not read the family. Now the encoder writes the family into the second byte. The new `StunMessage.decodeXorAddress` replaces two private copies of the decoder, reads the family, and decodes IPv6 addresses too (XORed with the magic cookie and the transaction ID). `StunMessage.decodeAddress` returns null for an unknown family or a short attribute. Before, for a family other than IPv4 it read 16 bytes without a length check, so a short attribute threw `RangeError`.
 
 ## [4.11.0] - 2026-10-25
 

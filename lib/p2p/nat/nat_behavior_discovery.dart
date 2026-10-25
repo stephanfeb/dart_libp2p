@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:async';
-import 'dart:typed_data';
 import 'stun/stun_message.dart';
 import 'stun/stun_client.dart';
 import 'nat_behavior.dart';
@@ -370,7 +369,7 @@ class NatBehaviorDiscovery {
     // First try XOR-MAPPED-ADDRESS (RFC 5389)
     final xorMapped = message.attributes[StunAttribute.xorMappedAddress];
     if (xorMapped != null) {
-      return _decodeXorMappedAddress(xorMapped, message.transactionId);
+      return StunMessage.decodeXorAddress(xorMapped, message.transactionId);
     }
 
     // Fallback to MAPPED-ADDRESS (RFC 3489)
@@ -380,28 +379,5 @@ class NatBehaviorDiscovery {
     }
 
     return null;
-  }
-
-  /// Decodes an XOR-MAPPED-ADDRESS attribute
-  ({InternetAddress address, int port})? _decodeXorMappedAddress(Uint8List data, List<int> transactionId) {
-    if (data.length < 8) return null;
-
-    final buffer = ByteData.view(data.buffer, data.offsetInBytes);
-
-    // The address family is not checked: only IPv4 is decoded (the STUN
-    // sockets bind to anyIPv4).
-    // Get port (XOR with most significant 16 bits of magic cookie)
-    final port = buffer.getUint16(2) ^ (StunMessage.magicCookie >> 16);
-
-    // Get IP address (XOR with magic cookie)
-    final addressBytes = Uint8List(4); // Always 4 bytes for IPv4
-    for (var i = 0; i < 4; i++) {
-      addressBytes[i] = data[i + 4] ^ ((StunMessage.magicCookie >> (8 * (3 - i))) & 0xFF);
-    }
-
-    return (
-      address: InternetAddress.fromRawAddress(addressBytes),
-      port: port,
-    );
   }
 }

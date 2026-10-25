@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:async';
-import 'dart:typed_data';
 import 'stun_message.dart';
 import '../nat_type.dart';
 
@@ -127,58 +126,18 @@ class StunClient {
     // First try XOR-MAPPED-ADDRESS (RFC 5389)
     final xorMapped = message.attributes[StunAttribute.xorMappedAddress];
     if (xorMapped != null) {
-      return _decodeXorMappedAddress(xorMapped, message.transactionId);
+      return StunMessage.decodeXorAddress(xorMapped, message.transactionId);
     }
 
     // Fallback to MAPPED-ADDRESS (RFC 3489)
     final mapped = message.attributes[StunAttribute.mappedAddress];
     if (mapped != null) {
-      return _decodeMappedAddress(mapped);
+      return StunMessage.decodeAddress(mapped);
     }
 
     return null;
   }
 
-  static ({InternetAddress address, int port})? _decodeXorMappedAddress(Uint8List data, List<int> transactionId) {
-    if (data.length < 8) return null;
-    
-    final buffer = ByteData.view(data.buffer, data.offsetInBytes);
-    
-    // The address family is not checked: only IPv4 is decoded (the STUN
-    // sockets bind to anyIPv4).
-    // Get port (XOR with most significant 16 bits of magic cookie)
-    final port = buffer.getUint16(2) ^ (StunMessage.magicCookie >> 16);
-    
-    // Get IP address (XOR with magic cookie)
-    final addressBytes = Uint8List(4); // Always 4 bytes for IPv4
-    for (var i = 0; i < 4; i++) {
-      addressBytes[i] = data[i + 4] ^ ((StunMessage.magicCookie >> (8 * (3 - i))) & 0xFF);
-    }
-    
-    return (
-      address: InternetAddress.fromRawAddress(addressBytes),
-      port: port,
-    );
-  }
-
-  static ({InternetAddress address, int port})? _decodeMappedAddress(Uint8List data) {
-    if (data.length < 8) return null;
-    
-    final buffer = ByteData.view(data.buffer, data.offsetInBytes);
-    
-    // Skip first byte (reserved) and get address family
-    final family = buffer.getUint8(1);
-    final port = buffer.getUint16(2);
-    
-    // Get IP address
-    final addressBytes = data.sublist(4, 4 + (family == 1 ? 4 : 16));
-    
-    return (
-      address: InternetAddress.fromRawAddress(addressBytes),
-      port: port,
-    );
-  }
-  
   NatType _determineNatType(StunMessage response) {
     // If we got a response and could extract the mapped address,
     // we need to determine the NAT type

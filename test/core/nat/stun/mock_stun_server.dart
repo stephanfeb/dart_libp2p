@@ -134,10 +134,10 @@ class MockStunServer {
     final xorAddressBytes = Uint8List(8);
     final xorBuffer = ByteData.view(xorAddressBytes.buffer);
 
-    // First byte is address family (0x01 for IPv4)
-    xorBuffer.setUint8(0, 0x01);
-    // Second byte is reserved (0x00)
-    xorBuffer.setUint8(1, 0x00);
+    // First byte is reserved (0x00)
+    xorBuffer.setUint8(0, 0x00);
+    // Second byte is address family (0x01 for IPv4)
+    xorBuffer.setUint8(1, 0x01);
     // Port number XORed with most significant 16 bits of magic cookie
     xorBuffer.setUint16(2, mappedPort ^ (StunMessage.magicCookie >> 16));
     // IPv4 address XORed with magic cookie
