@@ -321,6 +321,11 @@ class UDXTransport implements Transport {
       final remoteMa = addr;
 
       _logger.fine('[UDXTransport._performDial] Creating UDXSessionConn for $addr. Local: $localMa, Remote: $remoteMa');
+      // A socket this dial bound is the connection's alone. Nothing else
+      // holds it, so close it with the connection: left open, it stays bound
+      // for the life of the process and keeps the process from exiting.
+      // UDXMultiplexer.close() also closes the RawDatagramSocket.
+      final ownedMultiplexer = ownsMultiplexer ? multiplexer : null;
       final sessionConn = UDXSessionConn(
         udpSocket: udpSocket!,
         initialStream: initialStream,
@@ -332,6 +337,13 @@ class UDXTransport implements Transport {
         onClosed: (conn) {
           _activeDialerConns.remove(conn);
           _logger.fine('[UDXTransport._performDial] Dialer connection ${conn.id} closed and removed from active set.');
+          if (ownedMultiplexer != null) {
+            try {
+              ownedMultiplexer.close();
+            } catch (e) {
+              _logger.warning('[UDXTransport._performDial] Error closing the dial socket of ${conn.id}: $e');
+            }
+          }
         },
       );
       _connManager.registerConnection(sessionConn); 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A UDX dial that binds its own UDP socket closes it when the connection closes.** A dial uses the listener's socket when the host listens on the target's address family. Otherwise, and for an ephemeral dial (`dialFromEphemeralSocket`, which the swarm uses for the direct attempt before a DCUtR hole punch), it binds a new socket on `0.0.0.0:0`. The dial closed that socket only when it failed. After a successful dial, closing the connection removed the connection from the socket, but nothing closed the socket. Each such dial leaked one UDP socket and its file descriptor for the life of the process, and the open socket stopped a Dart program from exiting after it closed its hosts. Now the connection closes the socket that its dial bound. A listener's socket stays open.
+
 ## [4.12.0] - 2026-10-25
 
 ### Added
