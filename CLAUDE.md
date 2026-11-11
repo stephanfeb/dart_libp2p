@@ -1,6 +1,6 @@
 # CLAUDE.md - Dart LibP2P Project Guide
 ## Project Overview
-**dart-libp2p** is a comprehensive Dart implementation of the libp2p networking stack for building peer-to-peer applications. Dart SDK 3.5.0+, version 4.12.0 (see `pubspec.yaml`), MIT licensed.
+**dart-libp2p** is a comprehensive Dart implementation of the libp2p networking stack for building peer-to-peer applications. Dart SDK 3.5.0+, version 4.12.1 (see `pubspec.yaml`), MIT licensed.
 ## Key Commands
 
 ```bash

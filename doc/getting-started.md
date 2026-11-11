@@ -8,7 +8,7 @@ First, ensure you have a Dart project set up (Dart SDK 3.5 or later). Add `dart_
 
 ```yaml
 dependencies:
-  dart_libp2p: ^4.12.0
+  dart_libp2p: ^4.12.1
 ```
 
 ## 2. Creating a Libp2p Host
