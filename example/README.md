@@ -103,7 +103,7 @@ Custom protocols are implemented using stream handlers that process incoming con
 
 ### Message Exchange
 ```dart
-final stream = await host.newStream(targetPeer, ['/chat/1.0.0']);
+final stream = await host.newStream(targetPeer, ['/chat/1.0.0'], Context());
 await stream.write(utf8.encode(message));
 ```
 

@@ -20,7 +20,7 @@ class Config {
   List<Transport> transports = [];
   List<SecurityProtocol> securityProtocols = [];
   bool insecure = false;
-  List<Multiaddr> listenAddrs = [];
+  List<MultiAddr> listenAddrs = [];
   List<StreamMuxer> muxers = [];
 
   // ...
@@ -41,7 +41,7 @@ The `ConfigOptions` extension provides methods for applying different options to
 
 ```dart
 extension ConfigOptions on Config {
-  Future<void> withListenAddrs(List<Multiaddr> addrs) async {
+  Future<void> withListenAddrs(List<MultiAddr> addrs) async {
     listenAddrs.addAll(addrs);
   }
 
@@ -62,7 +62,7 @@ The `Libp2p` class provides factory functions for creating options:
 
 ```dart
 class Libp2p {
-  static Option listenAddrs(List<Multiaddr> addrs) {
+  static Option listenAddrs(List<MultiAddr> addrs) {
     return (config) => config.withListenAddrs(addrs);
   }
 
@@ -81,67 +81,62 @@ There are two ways to use the configuration system:
 ### Method 1: Using the convenience method
 
 ```dart
+import 'package:dart_libp2p/dart_libp2p.dart' hide Option;
+import 'package:dart_libp2p/config/config.dart';
+import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
+import 'package:dart_libp2p/p2p/transport/tcp_transport.dart';
+
+final keyPair = await generateEd25519KeyPair();
+final connManager = ConnectionManager();
+
 final host = await Libp2p.new_([
   // Set the identity (private key)
-  Libp2p.identity(await generateKeyPair()),
+  Libp2p.identity(keyPair),
+
+  // Share one connection manager between the host and its transports
+  Libp2p.connManager(connManager),
+
+  // Set the transport (the only option without a default)
+  Libp2p.transport(TCPTransport(connManager: connManager)),
 
   // Set the listen addresses
-  Libp2p.listenAddrs([
-    await Multiaddr.fromString('/ip4/127.0.0.1/tcp/9000'),
-  ]),
-
-  // Set the transport
-  Libp2p.transport(TcpTransport()),
-
-  // Set the security protocol
-  Libp2p.security(NoiseSecurityProtocol()),
-
-  // Set the stream multiplexer
-  Libp2p.muxer('/yamux/1.0.0', () => YamuxMultiplexer()),
+  Libp2p.listenAddrs([MultiAddr('/ip4/0.0.0.0/tcp/9000')]),
 
   // Set the user agent
   Libp2p.userAgent('my-libp2p-node/1.0.0'),
+
+  // Noise security and the Yamux multiplexer are added by default.
 ]);
 
-// Start the host
+// Start the host: Libp2p.new_ does not listen
 await host.start();
 ```
 
-### Method 2: Creating a Config and applying options (recommended)
+The barrel `dart_libp2p.dart` also exports a routing `Option` type; hide it, or import `config.dart` with a prefix.
+
+### Method 2: Creating a Config and applying options
 
 This method follows the pattern used in the Go implementation:
 
 ```dart
+import 'package:dart_libp2p/config/defaults.dart'; // applyDefaults
+
 // Step 1: Create a new Config
 final config = Libp2p.newConfig();
 
 // Step 2: Apply configuration options to the Config
 await config.apply([
-  // Set the identity (private key)
-  Libp2p.identity(await generateKeyPair()),
-
-  // Set the listen addresses
-  Libp2p.listenAddrs([
-    await Multiaddr.fromString('/ip4/127.0.0.1/tcp/9000'),
-  ]),
-
-  // Set the transport
-  Libp2p.transport(TcpTransport()),
-
-  // Set the security protocol
-  Libp2p.security(NoiseSecurityProtocol()),
-
-  // Set the stream multiplexer
-  Libp2p.muxer('/yamux/1.0.0', () => YamuxMultiplexer()),
-
-  // Set the user agent
+  Libp2p.identity(keyPair),
+  Libp2p.connManager(connManager),
+  Libp2p.transport(TCPTransport(connManager: connManager)),
+  Libp2p.listenAddrs([MultiAddr('/ip4/0.0.0.0/tcp/9000')]),
   Libp2p.userAgent('my-libp2p-node/1.0.0'),
 ]);
 
 // Apply defaults for any options that weren't specified
 await applyDefaults(config);
 
-// Step 3: Create a new Host from the Config
+// Step 3: Create a new Host from the Config (this consumes the Config)
 final host = await config.newNode();
 
 // Start the host

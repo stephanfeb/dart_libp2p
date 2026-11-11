@@ -1,6 +1,6 @@
 # CLAUDE.md - Dart LibP2P Project Guide
 ## Project Overview
-**dart-libp2p** is a comprehensive Dart implementation of the libp2p networking stack for building peer-to-peer applications. Dart SDK 3.5.0+, version 0.5.4, MIT licensed.
+**dart-libp2p** is a comprehensive Dart implementation of the libp2p networking stack for building peer-to-peer applications. Dart SDK 3.5.0+, version 4.12.0 (see `pubspec.yaml`), MIT licensed.
 ## Key Commands
 
 ```bash
@@ -87,18 +87,23 @@ doc/                 # Comprehensive documentation
 
 ### Configuration Pattern
 ```dart
+// import 'package:dart_libp2p/dart_libp2p.dart' hide Option; // barrel has a routing Option
+// import 'package:dart_libp2p/config/config.dart';
+final connManager = ConnectionManager();
 final host = await Libp2p.new_([
   Libp2p.identity(keyPair),
+  Libp2p.connManager(connManager),
   Libp2p.listenAddrs([MultiAddr('/ip4/0.0.0.0/tcp/0')]),
-  Libp2p.transport(TcpTransport()),
-  Libp2p.security(await NoiseSecurity.create(keyPair)),
-  Libp2p.muxer(YamuxMultiplexer()),
+  Libp2p.transport(TCPTransport(connManager: connManager)), // UDXTransport(connManager: ...) for UDX
+  Libp2p.security(await NoiseSecurity.create(keyPair)),      // default; may be omitted
+  // Yamux (/yamux/1.0.0) is the default muxer; Libp2p.muxer(id, (conn, isClient) => ...) overrides it
 ]);
+await host.start(); // Libp2p.new_ does not listen
 ```
 
 ### Protocol Handler Pattern
 ```dart
-host.setStreamHandler('/myprotocol/1.0.0', (stream) async {
+host.setStreamHandler('/myprotocol/1.0.0', (stream, remotePeer) async {
   final data = await stream.read(1024);
   await stream.write(processData(data));
   await stream.close();

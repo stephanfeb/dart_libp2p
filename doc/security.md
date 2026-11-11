@@ -40,10 +40,11 @@ The `NoiseSecurity` protocol is enabled by default when you use the `Libp2p.new_
 
 ```dart
 import 'package:dart_libp2p/p2p/security/noise/noise_protocol.dart';
+import 'package:dart_libp2p/core/crypto/ed25519.dart';
 import 'package:dart_libp2p/core/crypto/keys.dart';
 
 // You need an identity key pair for your host
-KeyPair myKeyPair = await generateKeyPair();
+KeyPair myKeyPair = await generateEd25519KeyPair();
 
 // Add the Noise protocol to your configuration
 final config = [

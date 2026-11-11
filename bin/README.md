@@ -1,129 +1,36 @@
-# libp2p Dart Sample Applications
+# Command-line tools
 
-This directory contains sample applications that demonstrate how to use the libp2p Dart library for various peer-to-peer networking scenarios. These applications are designed to showcase the expected usage patterns of the library once it's fully implemented.
+This directory contains small programs built on dart-libp2p: a ping application and the Dart side of the Go↔Dart interop tests. All of them use the UDX transport with Noise and Yamux. Run them from the repository root with `dart run`.
 
-**Note:** These are pseudo-code examples that sketch out the future classes and interfaces we expect to use to set up libp2p connections using Dart. Many of the imported classes and methods are placeholders that need to be implemented.
+For examples to learn from, see [`example/`](../example/) (`echo_basic`, `chat_mdns`) and the [documentation](../doc/).
 
-## Sample Applications
+## Ping Application (`ping_app.dart`)
 
-### 1. Echo Application (`libp2p_echo.dart`)
+Two instances ping each other over UDX with their own protocol, `/dart-libp2p/example-ping/udx/1.0.0`.
 
-A basic example demonstrating how to set up a libp2p node and establish an end-to-end connection between two peers. One peer acts as a listener that echoes back any messages it receives, while the other peer acts as a sender that connects to the listener and sends a message.
+Options:
+- `-l, --listen <multiaddr>`: address to listen on, for example `/ip4/0.0.0.0/udp/0/udx`
+- `-t, --target <multiaddr>`: peer to ping, a full address with `/p2p/<peer ID>`
+- `-i, --interval <seconds>`: seconds between pings (default 1)
+- `-h, --help`: show the options
 
-**Usage:**
-
-Start a listener node:
+Start a listener; it prints its full addresses (`host.addrs`, which leaves out loopback addresses, so listen on `0.0.0.0` rather than `127.0.0.1`):
 ```bash
-dart bin/libp2p_echo.dart -l 8080
+dart run bin/ping_app.dart -l /ip4/0.0.0.0/udp/0/udx
 ```
 
-Start a sender node (in a different terminal):
+Ping it from another terminal, with one of the printed addresses:
 ```bash
-dart bin/libp2p_echo.dart -l 8081 -d <listener_address>
+dart run bin/ping_app.dart -l /ip4/0.0.0.0/udp/0/udx -t /ip4/<IP>/udp/<port>/udx/p2p/<peer ID>
 ```
 
-### 2. Chat Application (`libp2p_chat.dart`)
+## Interop Tools
 
-A more complex example demonstrating how to use libp2p with pubsub for distributed chat. This application uses mDNS for peer discovery and pubsub for message distribution.
+These programs talk to a go-libp2p peer over UDX (see [`interop/`](../interop/README.md) for the Go side). Each exits 0 on success.
 
-**Usage:**
-
-Start a chat node:
-```bash
-dart bin/libp2p_chat.dart -l 8080 -n YourNickname -r RoomName
-```
-
-Start another chat node (in a different terminal):
-```bash
-dart bin/libp2p_chat.dart -l 8081 -n AnotherNickname -r RoomName
-```
-
-### 3. DHT Application (`libp2p_dht.dart`)
-
-An advanced example demonstrating how to use libp2p with a Distributed Hash Table (DHT) for content routing and peer discovery. This application allows storing and retrieving values from the DHT, announcing provider records, and finding peers.
-
-**Usage:**
-
-Start a DHT node:
-```bash
-dart bin/libp2p_dht.dart -l 8080
-```
-
-Connect to a bootstrap peer:
-```bash
-dart bin/libp2p_dht.dart -l 8081 -b <bootstrap_peer_address>
-```
-
-Store a value in the DHT:
-```bash
-dart bin/libp2p_dht.dart -l 8082 -b <bootstrap_peer_address> --put mykey=myvalue
-```
-
-Retrieve a value from the DHT:
-```bash
-dart bin/libp2p_dht.dart -l 8083 -b <bootstrap_peer_address> --get mykey
-```
-
-Announce that you can provide a value:
-```bash
-dart bin/libp2p_dht.dart -l 8084 -b <bootstrap_peer_address> --provide mykey
-```
-
-Find providers for a key:
-```bash
-dart bin/libp2p_dht.dart -l 8085 -b <bootstrap_peer_address> --find-providers mykey
-```
-
-Find a peer by its ID:
-```bash
-dart bin/libp2p_dht.dart -l 8086 -b <bootstrap_peer_address> --find-peer <peer_id>
-```
-
-## Components to be Implemented
-
-These sample applications highlight several components that need to be implemented in the Dart libp2p library:
-
-1. **Host Implementation**
-   - `BasicHost` class that implements the `Host` interface
-
-2. **Transport Protocols**
-   - TCP transport
-   - WebSocket transport
-   - QUIC transport
-
-3. **Security Protocols**
-   - Noise protocol
-   - TLS protocol
-
-4. **Stream Multiplexers**
-   - Yamux multiplexer
-   - MPLEX multiplexer
-
-5. **Peer Discovery**
-   - mDNS discovery
-   - Rendezvous discovery
-   - Bootstrap list
-
-6. **Pubsub**
-   - Gossipsub implementation
-   - Topic management
-   - Message handling
-
-7. **DHT and Content Routing**
-   - Kademlia DHT implementation
-   - Content routing
-   - Peer routing
-   - Provider records
-   - CID (Content Identifier) handling
-
-8. **Key Management**
-   - Key pair generation
-   - PeerId creation and handling
-   - Multiaddress parsing and manipulation
-
-9. **Peerstore**
-   - Address book
-   - Protocol negotiation
-   - Connection management
-
-These sample applications serve as a roadmap for the development of the Dart libp2p library, highlighting the key components that need to be implemented to achieve feature parity with the Go implementation.
+| Program | Usage | What it does |
+|---|---|---|
+| `interop_echo_server.dart` | `dart run bin/interop_echo_server.dart [listen multiaddr]` | Listens (default `/ip4/127.0.0.1/udp/0/udx`) and echoes the bytes of each `/echo/1.0.0` stream. Prints `READY <port> <peer ID>` to stderr when ready. |
+| `interop_echo_client.dart` | `dart run bin/interop_echo_client.dart <multiaddr/p2p/peer ID>` | Connects, sends `hello interop` on `/echo/1.0.0` and checks the echo. |
+| `interop_reqresp_client.dart` | `dart run bin/interop_reqresp_client.dart <multiaddr/p2p/peer ID> [count]` | Sends length-prefixed requests on `/interop/reqresp/1.0.0`, the first ones at the same time before a connection exists, and checks each response. |
+| `interop_netem_test.dart` | `dart run bin/interop_netem_test.dart <multiaddr/p2p/peer ID> [keep_alive_secs]` | Runs five phases against an echo server, for use under network emulation: connect and Identify, a 32-byte echo, a 64 KB echo, an echo after an idle keep-alive period, and five echo streams in a row. |

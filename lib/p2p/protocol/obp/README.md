@@ -100,7 +100,7 @@ import 'package:dart_libp2p/p2p/protocol/obp/obp_protocol_handler.dart';
 import 'package:dart_libp2p/p2p/protocol/obp/obp_frame.dart';
 
 // Open a libp2p stream to the peer
-final stream = await host.newStream(peerId, ['/overnode/obp/1.0.0']);
+final stream = await host.newStream(peerId, ['/overnode/obp/1.0.0'], Context());
 
 // Perform protocol handshake (client-side)
 final handshakeSuccess = await OBPProtocolHandler.performHandshake(

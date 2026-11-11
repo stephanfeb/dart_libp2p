@@ -39,7 +39,7 @@ graph TD
 
 -   **Upgrader**: Responsible for upgrading raw, insecure connections into fully featured, secure, and multiplexed connections. It orchestrates the negotiation of security protocols and stream multiplexers.
 
--   **Transport**: The foundation of the stack. Transports like `TcpTransport` or `UdxTransport` are responsible for establishing the initial raw connections over the physical network.
+-   **Transport**: The foundation of the stack. Transports like `TCPTransport` or `UDXTransport` are responsible for establishing the initial raw connections over the physical network.
 
 -   **Security**: The security layer, with `NoiseSecurity` as the default, secures the raw connection by encrypting all communication and authenticating the remote peer's identity.
 

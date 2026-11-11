@@ -8,14 +8,14 @@ All transport implementations in dart-libp2p adhere to the `Transport` interface
 
 ### Key Methods
 
-- **`Future<Conn> dial(MultiAddr addr, {Duration? timeout})`**
+- **`Future<Conn> dial(MultiAddr addr, {Duration? timeout, bool simultaneousConnect = false})`**
   - Attempts to establish an outgoing connection to a peer at the given `MultiAddr`. If successful, it returns a `Conn` object representing the raw, un-upgraded connection.
 
 - **`Future<Listener> listen(MultiAddr addr)`**
   - Binds to the given `MultiAddr` and starts listening for incoming connections. It returns a `Listener` object that can be used to accept these connections.
 
-- **`bool canDial(MultiAddr addr)`**
-  - Returns `true` if the transport can handle the protocol specified in the given `MultiAddr` for dialing.
+- **`bool canDial(MultiAddr addr)`** and **`bool canListen(MultiAddr addr)`**
+  - Return `true` if the transport can handle the protocols specified in the given `MultiAddr` for dialing or for listening.
 
 - **`List<String> get protocols`**
   - Returns a list of protocol strings that this transport supports (e.g., `/ip4/tcp`).
@@ -43,39 +43,53 @@ This library provides two transport implementations. Two more are separate packa
 
 ### TCP Transport
 
--   **Class**: `TcpTransport`
+-   **Class**: `TCPTransport`
 -   **Protocols**: `/ip4/tcp`, `/ip6/tcp`
 -   **Description**: The standard TCP transport. It's reliable, widely available, and a good default choice for most applications, especially in data centers or between servers with public IP addresses.
 
 **Usage:**
 
 ```dart
+import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
 import 'package:dart_libp2p/p2p/transport/tcp_transport.dart';
+
+final connManager = ConnectionManager();
 
 // Add TCP transport to your configuration
 final config = [
-  Libp2p.transport(TcpTransport()),
+  Libp2p.connManager(connManager),
+  Libp2p.transport(TCPTransport(connManager: connManager)),
+  Libp2p.listenAddrs([MultiAddr('/ip4/0.0.0.0/tcp/4001')]),
   // ... other options
 ];
 ```
 
+Make the `TCPTransport` without a `resourceManager`: the host then gives it its own (see [Resource Manager](resource-manager.md#transports)).
+
 ### UDX Transport
 
--   **Class**: `UdxTransport`
+-   **Class**: `UDXTransport`
 -   **Protocols**: `/ip4/udp/udx`, `/ip6/udp/udx`
--   **Description**: A custom transport protocol built on top of UDP. UDX provides reliability and multiplexing out-of-the-box and is particularly effective for hole punching, making it excellent for peer-to-peer connections where nodes are behind NATs or firewalls.
+-   **Description**: A custom transport protocol built on top of UDP ([dart_udx](https://pub.dev/packages/dart_udx)). UDX provides reliable, ordered, congestion-controlled streams over UDP. Like a TCP connection, a UDX connection is secured with Noise and multiplexed with Yamux. UDX is particularly effective for hole punching, making it excellent for peer-to-peer connections where nodes are behind NATs or firewalls.
 
 **Usage:**
 
 ```dart
+import 'package:dart_libp2p/p2p/transport/connection_manager.dart';
 import 'package:dart_libp2p/p2p/transport/udx_transport.dart';
+
+final connManager = ConnectionManager();
 
 // Add UDX transport to your configuration
 final config = [
-  Libp2p.transport(UdxTransport()),
+  Libp2p.connManager(connManager),
+  Libp2p.transport(UDXTransport(connManager: connManager)), // connManager is required
+  Libp2p.listenAddrs([MultiAddr('/ip4/0.0.0.0/udp/4001/udx')]),
   // ... other options
 ];
 ```
+
+Pass the same `ConnectionManager` to `Libp2p.connManager` and to every transport.
 
 ### Bluetooth LE Transport (separate package)
 
@@ -99,3 +113,7 @@ final config = [
 The transport uses the `/ble` multiaddr protocol (code `0x300b1e`, private-use range), which this library registers since 4.10.0. Another package can register its own protocol with `Protocols.register`.
 
 You can configure your host to use multiple transports simultaneously. Libp2p will automatically choose the best available transport when connecting to a peer based on the addresses stored in the `Peerstore`.
+
+### Addresses the transports dial
+
+The TCP and UDX transports dial `/ip4` and `/ip6` addresses only; they do not resolve `/dns4`, `/dns6` or `/dnsaddr` names, so a peer listed only by a DNS address is not dialled. Resolve the name yourself (for example with `InternetAddress.lookup` from `dart:io`) and build an `/ip4` or `/ip6` address. There is no WebSocket, QUIC or WebTransport transport in this library.

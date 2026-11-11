@@ -40,7 +40,8 @@ The `ProtoBook` tracks the protocols supported by peers. This information is typ
 
 -   **`addProtocols(PeerId id, List<ProtocolID> protocols)`**: Adds a list of supported protocols for a peer.
 -   **`getProtocols(PeerId id)`**: Returns all known protocols for a peer.
--   **`supportsProtocols(PeerId id, List<ProtocolID> protocols)`**: Checks which of the given protocols are supported by the peer.
+-   **`supportsProtocols(PeerId id, List<ProtocolID> protocols)`**: Returns those of the given protocols that the peer supports.
+-   **`firstSupportedProtocol(PeerId id, List<ProtocolID> protocols)`**: Returns the first of the given protocols that the peer supports, or null.
 
 ### `Metrics`
 
@@ -59,19 +60,25 @@ The `Peerstore` is populated both manually and automatically:
 ### Example: Manual Population for Bootstrapping
 
 ```dart
-// Assume 'myHost' is your local host and you know the AddrInfo of a bootstrap peer.
+// Assume 'myHost' is your local host and you know the AddrInfo of a bootstrap peer,
+// for example AddrInfo.fromMultiaddr(MultiAddr('/ip4/203.0.113.7/tcp/4001/p2p/12D3KooW...')).
 AddrInfo bootstrapPeerInfo = ...;
 
-// Add the bootstrap peer's addresses and public key to your peerstore
+// Add the bootstrap peer's addresses to your peerstore
 await myHost.peerStore.addrBook.addAddrs(
-  bootstrapPeerInfo.peerId,
+  bootstrapPeerInfo.id,
   bootstrapPeerInfo.addrs,
   AddressTTL.permanentAddrTTL // Give bootstrap addresses a long TTL
 );
-myHost.peerStore.keyBook.addPubKey(
-  bootstrapPeerInfo.peerId,
-  bootstrapPeerInfo.peerId.publicKey // Extract public key from PeerId
-);
+
+// An Ed25519 peer ID contains its public key
+final pubKey = await bootstrapPeerInfo.id.extractPublicKey();
+if (pubKey != null) {
+  myHost.peerStore.keyBook.addPubKey(bootstrapPeerInfo.id, pubKey);
+}
 
 // Now you can connect to the bootstrap peer
 await myHost.connect(bootstrapPeerInfo);
+```
+
+`connect` itself also stores the addresses it is given, with a TTL of 5 minutes. Use `addAddrs` with a long TTL for peers you want to keep.

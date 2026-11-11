@@ -4,8 +4,9 @@ End-to-end interoperability tests between **dart-libp2p** and **go-libp2p**.
 
 ## Prerequisites
 
-- **Go** 1.24+ (`go version`)
+- **Go** 1.25.7+ (`go version`; `interop/go-peer/go.mod` requires it)
 - **Dart** 3.5+ (`dart --version`)
+- Checkouts of [go-udx](https://github.com/stephanfeb/go-udx) and [go-libp2p-udx-transport](https://github.com/stephanfeb/go-libp2p-udx-transport) next to this repository (`../go-udx`, `../go-libp2p-udx-transport`): `go.mod` replaces both modules with these local paths. They give the Go peer its UDX transport.
 
 The Go peer binary is built automatically on first test run. To build it manually:
 
@@ -28,8 +29,15 @@ dart test test/interop/go_interop_host_test.dart
 # Circuit Relay v2 tests
 dart test test/interop/go_interop_relay_test.dart
 
-# Kademlia DHT tests (currently skipped — see note below)
-dart test test/interop/go_dht_interop_test.dart
+# Host-level tests over UDX, and UDX keep-alive stability
+dart test test/interop/go_interop_udx_host_test.dart
+dart test test/interop/go_interop_udx_stability_test.dart
+
+# Relayed Identify and DCUtR through a Go relay
+dart test test/interop/go_interop_relayed_identify_dcutr_test.dart
+
+# AutoNAT v2 client and server
+dart test test/interop/go_interop_autonatv2_test.dart
 
 # Low-level transport tests (Noise, Yamux, multistream)
 dart test test/interop/go_interop_test.dart
@@ -61,20 +69,21 @@ Circuit Relay v2 tests using a 3-node topology (Go relay + two peers).
 | Dart dials through relay | Go relay <- Go echo-server; Dart client dials via circuit | Relay reservation, HOP CONNECT, Noise+Yamux over relay, echo round-trip |
 | Go dials through relay | Go relay <- Dart echo-handler; Go client dials via circuit | Dart `CircuitV2Client.reserve()`, inbound STOP handling, echo round-trip |
 
-### `go_dht_interop_test.dart` (4 tests — currently skipped)
+### `go_interop_udx_host_test.dart` (4 tests) and `go_interop_udx_stability_test.dart` (6 tests)
 
-Kademlia DHT (`/ipfs/kad/1.0.0`) interop tests using `dart-libp2p-kad-dht`.
+The host-level tests over UDX instead of TCP (connect and identify, echo both ways, ping), and Yamux keep-alive over idle and busy UDX connections in both directions.
 
-| Test | Direction | What it verifies |
-|------|-----------|-----------------|
-| FIND_NODE | Dart -> Go | Dart connects to Go DHT server, queries for peer via routing table |
-| GET_VALUE | Go -> Dart | Go stores value, Dart retrieves it via DHT |
-| PROVIDE/FIND_PROVIDERS | Dart -> Go | Dart announces provider, Go finds it |
-| PUT_VALUE/GET_VALUE | Dart -> Go | Dart stores value, Go retrieves it |
+### `go_interop_relayed_identify_dcutr_test.dart` (2 tests)
 
-> **Note:** These tests are currently skipped because `dart-libp2p-kad-dht` uses JSON encoding
-> for DHT messages, while the spec requires protobuf. The tests are ready to enable once the
-> encoding is fixed.
+A Dart host connects to a Go gateway through a Go relay. Identify completes over the relayed connection and the gateway starts DCUtR (`/libp2p/dcutr`); the second test repeats this 50 times.
+
+### `go_interop_autonatv2_test.dart` (3 tests)
+
+AutoNAT v2 in both directions: a Go server checks a Dart address (with and without dial data), and a Dart server checks a Go address.
+
+### Kademlia DHT and GossipSub
+
+The Kademlia DHT interop tests (`test/interop/go_dht_interop_test.dart`) live in [dart_libp2p_kad_dht](https://github.com/stephanfeb/dart_libp2p_kad_dht), and the GossipSub ones in [dart_libp2p_pubsub](https://github.com/stephanfeb/dart_libp2p_pubsub). They use the `dht-*` and `pubsub-*` modes of the Go peer below.
 
 ### `go_interop_test.dart`
 
@@ -96,12 +105,17 @@ The Go peer binary (`interop/go-peer/go-peer`) supports multiple modes:
 | `relay-echo-server` | Reserve slot on relay, handle echo streams |
 | `relay-echo-client` | Dial peer through relay, send echo message |
 | `dht-server` | Run a Kademlia DHT server (long-running) |
+| `dht-relay-server` | Run a Kademlia DHT server that is also a Circuit Relay v2 relay |
 | `dht-put-value` | Connect to DHT peer and store a key-value pair |
 | `dht-get-value` | Connect to DHT peer and retrieve a value by key |
 | `dht-provide` | Connect to DHT peer and announce as content provider |
 | `dht-find-providers` | Connect to DHT peer and find providers for a CID |
+| `pubsub-server` | Join a GossipSub topic and wait for messages |
+| `pubsub-client` | Connect, join the topic and publish a message |
+| `autonat-server` | Run an AutoNAT v2 server |
+| `autonat-client` | Connect and ask the target for an AutoNAT v2 check |
 
-Usage: `./go-peer --mode=<mode> [--port=N] [--target=<multiaddr>] [--relay=<multiaddr>] [--message=<text>] [--key=<key>] [--value=<value>] [--cid=<cid>]`
+Usage: `./go-peer --mode=<mode> [--port=N] [--transport=tcp|udx] [--target=<multiaddr>] [--relay=<multiaddr>] [--message=<text>] [--key=<key>] [--value=<value>] [--cid=<cid>] [--pk-self] [--pk-peer=<peer ID>] [--topic=<topic>] [--config=<file.yaml>]`
 
 ## Architecture
 

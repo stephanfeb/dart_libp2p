@@ -17,22 +17,22 @@ The Ping protocol is one of the simplest and most fundamental protocols. It is u
 4.  **Receiver**: The receiver immediately writes the exact same 32 bytes back to the stream (this is the "pong").
 5.  **Pinger**: The pinger reads the 32-byte response and verifies that it matches the data originally sent. The time elapsed between sending the ping and receiving the pong is the RTT.
 
-This process can be repeated over the same stream to get multiple latency measurements.
+This process is repeated over the same stream, one round trip after another, for as long as you read results. The receiver ends the stream after 30 seconds.
 
 ### Usage
 
-The `PingService` is enabled by default on the `BasicHost`. You can access it to ping other peers.
+The `PingService` is enabled by default on the `BasicHost` (turn it off with `Libp2p.ping(false)`). To ping other peers, make a `PingService` for the host, or use the host's own as `(host as BasicHost).pingService`.
 
 ```dart
 import 'package:dart_libp2p/p2p/protocol/ping/ping.dart';
 
-// Assuming 'host' is your initialized Host and you are connected to 'remotePeerId'
-final pingService = host.services[PingConstants.protocolId] as PingService;
+// Assuming 'host' is your started Host and you are connected to 'remotePeerId'
+final pingService = PingService(host); // or (host as BasicHost).pingService!
 
-// The ping method returns a stream of results
+// The ping method returns a stream of results, one per round trip
 final pingStream = pingService.ping(remotePeerId);
 
-await for (final result in pingStream) {
+await for (final result in pingStream.take(3)) {
   if (result.hasError) {
     print('Ping failed: ${result.error}');
     break;
@@ -42,7 +42,7 @@ await for (final result in pingStream) {
 }
 ```
 
-The `PingService` also automatically handles incoming ping requests by setting a stream handler on the host.
+The `PingService` also automatically handles incoming ping requests by setting a stream handler on the host. Each round-trip time is also recorded in the peerstore (`peerStore.metrics`).
 
 ## Identify
 
@@ -69,11 +69,14 @@ You can inspect the `Peerstore` to see the results:
 
 ```dart
 // After connecting to a peer...
-final supportedProtocols = await host.peerStore.getProtocols(remotePeerId);
+final supportedProtocols = await host.peerStore.protoBook.getProtocols(remotePeerId);
 print('Remote peer supports: $supportedProtocols');
 
-final listenAddrs = await host.peerStore.getAddrs(remotePeerId);
+final listenAddrs = await host.peerStore.addrBook.addrs(remotePeerId);
 print('Remote peer is listening on: $listenAddrs');
+```
+
+`host.connect` returns after the `Identify` exchange, so the peerstore already holds these when it returns. To be told when an exchange completes, subscribe to `EvtPeerIdentificationCompleted` (see [Event Bus](event-bus.md)).
 
 ## HTTP
 

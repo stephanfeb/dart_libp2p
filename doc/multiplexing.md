@@ -34,6 +34,7 @@ When you write data to a `YamuxStream`, the `YamuxSession` packages it into `Dat
 Yamux is enabled by default when you use the `Libp2p.new_` constructor. You can also configure it manually.
 
 ```dart
+import 'package:dart_libp2p/core/network/transport_conn.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/session.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 
@@ -41,10 +42,20 @@ import 'package:dart_libp2p/p2p/transport/multiplexing/multiplexer.dart';
 final config = [
   Libp2p.muxer(
     '/yamux/1.0.0',
-    (conn, isClient) => YamuxSession(conn, MultiplexerConfig(), isClient)
+    (conn, isClient) => YamuxSession(
+      conn as TransportConn,
+      const MultiplexerConfig(maxStreams: 256, keepAliveInterval: Duration(seconds: 15)),
+      isClient,
+    ),
   ),
   // ... other options
 ];
 ```
 
+The factory gets the secured connection and whether this side dialled it. `MultiplexerConfig` holds the Yamux settings; the defaults are 256 KiB frames, a 16 MiB maximum stream window, a keep-alive ping every 10 seconds and a 10-second stream open timeout. A session whose keep-alive ping gets no answer within 30 seconds closes.
+
 Because it's the default, you often don't need to specify it at all. The library will create and configure it for you. Once a connection is established and upgraded, all `newStream` calls on the `Host` will transparently use the underlying Yamux session to create new streams.
+
+### Deadlines and timeouts
+
+A read on a Yamux stream past the deadline set with `setDeadline` or `setReadDeadline` throws `YamuxStreamTimeoutException`. Without a deadline, a read that gets no data gives up after 5 minutes with the same exception, so on a long-lived, idle stream send a heartbeat or catch the exception and read again. A deadline is not a timer on writes: a write that waits for the remote peer to open its flow-control window keeps waiting. Wrap such writes in `Future.timeout` and `reset()` the stream when the time is up.

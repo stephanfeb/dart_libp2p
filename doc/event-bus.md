@@ -16,29 +16,34 @@ You can subscribe to events to react to things happening within the libp2p stack
 
 ### Example: Subscribing to Connection Events
 
-The library defines several core event types. For example, `EvtPeerConnected` is emitted when a new connection to a peer is established, and `EvtPeerDisconnected` is emitted when a connection is lost.
+The library defines several core event types. For example, `EvtPeerConnectednessChanged` is emitted when the host gets its first connection to a peer (`Connectedness.connected`) and when the last connection to that peer closes (`Connectedness.notConnected`).
 
 ```dart
-import 'package:dart_libp2p/core/event/bus.dart';
-import 'package:dart_libp2p/core/event/network.dart'; // Contains network event types
+import 'package:dart_libp2p/dart_libp2p.dart'; // EventBus and the core event types
 
-// Assuming 'host' is your initialized Host
+// Assuming 'host' is your started Host
 final EventBus bus = host.eventBus;
 
-// Subscribe to both connected and disconnected events
-final sub = bus.subscribe([EvtPeerConnected, EvtPeerDisconnected]);
+// Subscribe to connectedness changes and completed Identify exchanges
+final sub = bus.subscribe([EvtPeerConnectednessChanged, EvtPeerIdentificationCompleted]);
 
 sub.stream.listen((event) {
-  if (event is EvtPeerConnected) {
-    print('Peer connected: ${event.peer}');
-  } else if (event is EvtPeerDisconnected) {
-    print('Peer disconnected: ${event.peer}');
+  if (event is EvtPeerConnectednessChanged) {
+    if (event.connectedness == Connectedness.connected) {
+      print('Peer connected: ${event.peer}');
+    } else if (event.connectedness == Connectedness.notConnected) {
+      print('Peer disconnected: ${event.peer}');
+    }
+  } else if (event is EvtPeerIdentificationCompleted) {
+    print('Peer ${event.peer} speaks ${event.protocols}');
   }
 });
 
 // When you're done, close the subscription to release resources
 // await sub.close();
 ```
+
+`subscribe` returns at once. A new subscriber also receives the last event already emitted of each type it subscribes to. For a callback on every connection rather than every peer, use `host.network.notify(...)` with a `NotifyBundle`.
 
 ### Subscribing to All Events
 
@@ -91,11 +96,16 @@ While the libp2p stack emits many useful events, you can also use the event bus 
 
 ## Core Event Types
 
-Here are some of the core event types you can subscribe to:
+Here are the core event types you can subscribe to. They are exported by `package:dart_libp2p/dart_libp2p.dart`.
 
--   **`EvtPeerConnected`**: A new connection to a peer has been established.
--   **`EvtPeerDisconnected`**: A connection to a peer has been terminated.
--   **`EvtListen`**: The host has started listening on a new address.
--   **`EvtListenClose`**: The host has stopped listening on an address.
--   **`EvtPeerIdentificationCompleted`**: The `Identify` protocol has completed with a peer.
--   **`EvtPeerProtocolsUpdated`**: A peer's supported protocols have been updated.
+| Event | Defined in | Emitted when |
+|---|---|---|
+| `EvtPeerConnectednessChanged` | `core/network/network.dart` | The host gets its first connection to a peer, or loses its last one (`peer`, `connectedness`). |
+| `EvtPeerIdentificationCompleted` | `core/event/identify.dart` | The `Identify` protocol has completed with a peer (`peer`, `conn`, `listenAddrs`, `protocols`, `agentVersion`, `observedAddr`, ...). |
+| `EvtPeerIdentificationFailed` | `core/event/identify.dart` | `Identify` with a peer failed (`peer`, `reason`). |
+| `EvtPeerProtocolsUpdated` | `core/event/protocol.dart` | A peer's supported protocols have changed (`peer`, `added`, `removed`). |
+| `EvtLocalProtocolsUpdated` | `core/event/protocol.dart` | A stream handler was added to or removed from this host (`added`, `removed`). |
+| `EvtLocalAddressesUpdated` | `core/event/addrs.dart` | This host's advertised addresses have changed (`current`, `removed`). |
+| `EvtLocalReachabilityChanged` | `core/event/reachability.dart` | AutoNAT (or `Libp2p.forceReachability`) has set this host's reachability (`reachability`). |
+| `EvtNATDeviceTypeChanged` | `core/event/nattype.dart` | The NAT type behind this host has been detected. |
+| `EvtAutoRelayAddrsUpdated` | `p2p/host/autorelay/autorelay.dart` (not in the barrel) | AutoRelay has new relay (`/p2p-circuit`) addresses to advertise (`advertisableAddrs`). |
