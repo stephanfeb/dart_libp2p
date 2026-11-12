@@ -3,6 +3,7 @@ import 'dart:io'; // Added for InternetAddress
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/core/peer/peer_id.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:test/test.dart';
 import 'package:dart_libp2p/core/network/common.dart' show Direction;
 import 'package:dart_libp2p/core/network/conn.dart';
@@ -1036,6 +1037,73 @@ void main() {
         // close() should send another FIN if not already in closing state
         // or just do cleanup if already sent FIN
         expect(stream.streamState, equals(YamuxStreamState.closed));
+      });
+    });
+
+    // A read with no deadline gave up after 5 quiet minutes, so idle
+    // long-lived streams (PubSub, an application's own) were dropped.
+    group('read waits', () {
+      YamuxStream quietStream() => YamuxStream(
+            id: 7,
+            protocol: '/test/1.0.0',
+            metadata: const {},
+            initialWindowSize: 256 * 1024,
+            sendFrame: (_) async {},
+            parentConn: MockConn(),
+            remotePeer: MockPeerId('12D3KooWF22ud67s2HPZrmD8PdGKEc6A8xaK9qvLmfbLTdqNLSXx'),
+            maxFrameSize: 64 * 1024,
+          );
+
+      test('with no deadline, a read waits as long as the stream is quiet', () {
+        fakeAsync((clock) {
+          final s = quietStream();
+          s.open();
+          clock.flushMicrotasks();
+          Uint8List? got;
+          Object? error;
+          s.read().then((d) => got = d, onError: (Object e) => error = e);
+          clock.elapse(const Duration(hours: 1));
+          expect(got, isNull);
+          expect(error, isNull);
+
+          final data = Uint8List.fromList([1, 2, 3]);
+          s.handleFrame(YamuxFrame.createData(7, data));
+          clock.flushMicrotasks();
+          expect(error, isNull);
+          expect(got, equals(data));
+        });
+      });
+
+      test('with no deadline, a waiting read ends when the stream is reset', () {
+        fakeAsync((clock) {
+          final s = quietStream();
+          s.open();
+          clock.flushMicrotasks();
+          var done = false;
+          s.read().then((_) => done = true, onError: (Object _) => done = true);
+          clock.elapse(const Duration(minutes: 10));
+          expect(done, isFalse);
+          s.forceReset();
+          clock.flushMicrotasks();
+          expect(done, isTrue);
+        });
+      });
+
+      test('a read deadline still ends a quiet read', () {
+        fakeAsync((clock) {
+          final s = quietStream();
+          s.open();
+          clock.flushMicrotasks();
+          s.setReadDeadline(DateTime.now().add(const Duration(seconds: 30)));
+          Object? error;
+          s.read().then((_) {}, onError: (Object e) {
+            error = e;
+          });
+          clock.elapse(const Duration(seconds: 29));
+          expect(error, isNull);
+          clock.elapse(const Duration(seconds: 2));
+          expect(error, isA<YamuxStreamTimeoutException>());
+        });
       });
     });
   });

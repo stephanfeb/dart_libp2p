@@ -668,26 +668,20 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
     final waitStartTime = DateTime.now();
 
     
-    // Use deadline-aware timeout if deadline is set, otherwise use progressive timeout
     final remainingDeadlineTime = _getRemainingDeadlineTime();
-    Duration currentTimeout;
-    int attempts = 0;
-    int maxAttempts;
-    
-    if (remainingDeadlineTime != null) {
-      // Use deadline-based timeout
-      currentTimeout = remainingDeadlineTime;
-      maxAttempts = 1; // Don't retry if we have a deadline
-    } else if (_deadline == null && _readDeadline == null) {
-      // No deadline set - use very long timeout for long-lived connections like relay streams
-      // This prevents the progressive 10s→20s→40s timeouts that cause delays on idle relay streams
-      currentTimeout = const Duration(minutes: 5);
-      maxAttempts = 1; // Single long wait
-    } else {
-      // Deadline expired but still waiting - use progressive timeout strategy
-      currentTimeout = const Duration(seconds: 10);
-      maxAttempts = 3;
+    if (remainingDeadlineTime == null) {
+      // No deadline: wait until data comes or the stream ends, as a
+      // go-libp2p stream does. Long-lived streams (PubSub, relays, an
+      // application's own) may be quiet for any length of time. A stream
+      // ends when it is closed or reset, and when its session closes, which
+      // resets every stream, so the wait cannot outlive the connection.
+      return _awaitIncomingData(maxLength);
     }
+
+    // A deadline: wait until it passes (no time left times out at once).
+    Duration currentTimeout = remainingDeadlineTime;
+    int attempts = 0;
+    const maxAttempts = 1;
     
     while (attempts < maxAttempts) {
       final attemptStartTime = DateTime.now();
@@ -696,56 +690,7 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
       
       try {
         return await YamuxExceptionUtils.withTimeout<Uint8List>(
-          () async {
-
-            _readCompleter = Completer<Uint8List>();
-            
-            try {
-
-              final data = await _readCompleter!.future;
-              
-              _readCompleter = null;
-
-
-              // Handle EOF signaled by handleFrame
-              if (data.isEmpty && (_state == YamuxStreamState.closing || 
-                                   _state == YamuxStreamState.closed || 
-                                   _state == YamuxStreamState.reset)) {
-
-                return Uint8List(0); // Signal EOF
-              }
-
-              // Handle partial reads
-              if (maxLength != null && data.length > maxLength) {
-                final chunk = data.sublist(0, maxLength);
-                _bytesRead += chunk.length; // Track bytes read
-                _incomingQueue.add(data.sublist(maxLength));
-                return chunk;
-              }
-              
-              _bytesRead += data.length; // Track bytes read
-              return data;
-            } catch (e) {
-              final completerErrorDuration = DateTime.now().difference(attemptStartTime);
-              _readCompleter = null;
-
-              // Handle all terminal state transitions during read gracefully.
-              // When connection closes abruptly, forceReset() sets state to 'reset',
-              // or cleanup may set it to 'closed'. Return EOF instead of throwing
-              // to allow graceful handling by upper layers.
-              if (_state == YamuxStreamState.closing ||
-                  _state == YamuxStreamState.closed ||
-                  _state == YamuxStreamState.reset) {
-                _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state after ${completerErrorDuration.inMilliseconds}ms, returning EOF');
-                return Uint8List(0); // Return EOF instead of throwing
-              }
-
-              _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
-
-              // For other errors, rethrow with context
-              rethrow;
-            }
-          },
+          () => _awaitIncomingData(maxLength, attemptStartTime),
           timeout: currentTimeout,
           streamId: streamId,
           operationName: 'read',
@@ -793,6 +738,60 @@ class YamuxStream implements P2PStream<Uint8List>, core_mux.MuxedStream, core_mu
       operation: 'read_wait',
       streamId: streamId,
     );
+  }
+
+  /// Waits once, without a time limit, for the next incoming data. Returns
+  /// EOF (empty) when the stream ends while waiting.
+  Future<Uint8List> _awaitIncomingData(int? maxLength, [DateTime? attemptStartTime]) async {
+    attemptStartTime ??= DateTime.now();
+
+    _readCompleter = Completer<Uint8List>();
+    
+    try {
+
+      final data = await _readCompleter!.future;
+      
+      _readCompleter = null;
+
+
+      // Handle EOF signaled by handleFrame
+      if (data.isEmpty && (_state == YamuxStreamState.closing || 
+                           _state == YamuxStreamState.closed || 
+                           _state == YamuxStreamState.reset)) {
+
+        return Uint8List(0); // Signal EOF
+      }
+
+      // Handle partial reads
+      if (maxLength != null && data.length > maxLength) {
+        final chunk = data.sublist(0, maxLength);
+        _bytesRead += chunk.length; // Track bytes read
+        _incomingQueue.add(data.sublist(maxLength));
+        return chunk;
+      }
+      
+      _bytesRead += data.length; // Track bytes read
+      return data;
+    } catch (e) {
+      final completerErrorDuration = DateTime.now().difference(attemptStartTime);
+      _readCompleter = null;
+
+      // Handle all terminal state transitions during read gracefully.
+      // When connection closes abruptly, forceReset() sets state to 'reset',
+      // or cleanup may set it to 'closed'. Return EOF instead of throwing
+      // to allow graceful handling by upper layers.
+      if (_state == YamuxStreamState.closing ||
+          _state == YamuxStreamState.closed ||
+          _state == YamuxStreamState.reset) {
+        _log.fine('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-GRACEFUL-EOF] Stream in terminal state $_state after ${completerErrorDuration.inMilliseconds}ms, returning EOF');
+        return Uint8List(0); // Return EOF instead of throwing
+      }
+
+      _log.severe('$_logPrefix 🔧 [YAMUX-STREAM-READ-WAIT-COMPLETER-ERROR] Error while waiting for data after ${completerErrorDuration.inMilliseconds}ms: $e. Current state: $_state');
+
+      // For other errors, rethrow with context
+      rethrow;
+    }
   }
 
   Future<void> handleFrame(YamuxFrame frame) async {
