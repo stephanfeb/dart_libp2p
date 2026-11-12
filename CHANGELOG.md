@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.12.2] - 2026-11-12
+
+### Fixed
+
+- **A Yamux stream with no deadline no longer drops after 5 quiet minutes.** A read on a stream with no deadline gave up after 5 minutes without data and threw `YamuxStreamTimeoutException`. Both the host and the swarm clear the deadline once a protocol is agreed, so every stream an application uses had this limit. Long-lived streams that may be quiet for a while broke: a PubSub peer's streams were torn down and opened again every 5 quiet minutes, and messages sent while they were being opened again were lost. Now a read with no deadline waits until data comes or the stream ends, as in go-libp2p. A read still ends when the stream is closed or reset, and when its connection closes, because the session resets every stream. A read with a deadline (`setDeadline` or `setReadDeadline`) times out as before. Applications that set a far-off deadline before each read to work around this can keep doing so.
+
 ## [4.12.1] - 2026-11-11
 
 ### Fixed
